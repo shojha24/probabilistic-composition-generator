@@ -1,5 +1,5 @@
-# chord-annotation-hmm
-Using large and small vocabulary MIR datasets to create an HMM for chord progressions applicable to various genres
+# probabilistic-composition-generator
+Using large and small vocabulary MIR datasets to create an HMM for chord progressions applicable to various genres, then using JFugue to build compositions to be used in automatic chord recognition tasks 
 
 How to use:
 python composer.py
