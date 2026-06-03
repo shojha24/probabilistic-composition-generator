@@ -1,11 +1,11 @@
 from pathlib import Path
 from collections import Counter, defaultdict
-import jams
+import json
 import csv
 
 def main():
     ROOT_DIR = Path(__file__).resolve().parent.parent
-    DATA_DIR = ROOT_DIR / "data"
+    DATA_DIR = ROOT_DIR / "data_normalized"
 
     jams_files = list(DATA_DIR.rglob('*.jams'))
     
@@ -24,20 +24,21 @@ def main():
             
         all_datasets.add(dataset_name)
 
-        # Use jams to load the file, bypassing strict schema validation
+        # FAST I/O: Load as a raw Python dictionary using the native C-optimized JSON parser
         try:
-            jam = jams.load(str(jf), validate=False)
+            with open(jf, 'r', encoding='utf-8') as f:
+                jam_data = json.load(f)
         except Exception as e:
-            print(f"Skipping {jf.name} due to load error: {e}")
+            print(f"Skipping {jf.name} due to read error: {e}")
             continue
 
-        # Iterate through annotations and filter for chord namespaces
-        for annotation in jam.annotations:
-            if annotation.namespace in ('chord', 'chord_harte'):
-                # Extract the chord string directly from the observation object
-                for observation in annotation.data:
-                    if observation.value:
-                        counts[observation.value][dataset_name] += 1
+        # Traverse the raw dictionary
+        for annotation in jam_data.get('annotations', []):
+            if annotation.get('namespace') in ('chord', 'chord_harte'):
+                for obs in annotation.get('data', []):
+                    val = obs.get('value')
+                    if val:
+                        counts[val][dataset_name] += 1
                         
         # Progress tracker
         if (i + 1) % 100 == 0:
@@ -49,7 +50,7 @@ def main():
     # Alphabetize the dataset columns for consistent formatting
     sorted_datasets = sorted(list(all_datasets))
 
-    out_path = ROOT_DIR / 'chord_dataset_counts.csv'
+    out_path = ROOT_DIR / 'chord_dataset_normalized_counts.csv'
     
     # Write results to CSV
     with open(out_path, mode='w', newline='', encoding='utf-8') as f:
