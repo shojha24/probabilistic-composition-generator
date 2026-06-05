@@ -1,0 +1,16 @@
+0.0000	2.0000	C	major	C	b7	9	11	13	C:7(9,11,13)
+2.0000	4.0000	C	major	C	b7	N	N	N	C:7
+4.0000	6.0000	A	minor	A	N	N	N	N	A:min
+6.0000	8.0000	D	major	A	N	N	N	N	D:maj/A
+8.0000	10.0000	D	major	C	b7	9	N	N	D:7(9)/C
+10.0000	12.0000	E	major	E	N	N	N	N	E:maj
+12.0000	14.0000	A	minor	E	N	N	N	N	A:min/E
+14.0000	16.0000	C	major	E	N	N	N	N	C:maj/E
+16.0000	18.0000	C	major	C	N	9	N	N	C:maj(9)
+18.0000	20.0000	F	major	C	N	N	N	N	F:maj/C
+20.0000	22.0000	C	major	C	N	N	N	N	C:maj
+22.0000	24.0000	C	major	C	b7	N	N	N	C:7
+24.0000	26.0000	E	minor	E	N	N	N	N	E:min
+26.0000	28.0000	A	minor	E	b7	9	N	N	A:min7(9)/E
+28.0000	30.0000	A	minor	E	N	N	N	N	A:min/E
+30.0000	32.0000	F	major	F	N	N	N	N	F:maj

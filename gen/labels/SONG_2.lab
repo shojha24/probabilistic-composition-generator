@@ -1,0 +1,16 @@
+0.0000	2.0000	C	major	C	N	N	N	N	C:maj
+2.0000	4.0000	F	major	C	N	N	N	N	F:maj/C
+4.0000	6.0000	Bb	major	Bb	N	N	N	N	Bb:maj
+6.0000	8.0000	Eb	major	Bb	N	N	N	N	Eb:maj/Bb
+8.0000	10.0000	G	minor	Bb	N	N	N	N	G:min/Bb
+10.0000	12.0000	Ab	major	Ab	N	N	N	N	Ab:maj
+12.0000	14.0000	Db	major	Ab	N	N	N	N	Db:maj/Ab
+14.0000	16.0000	Db	major	Ab	b7	N	N	N	Db:7/Ab
+16.0000	18.0000	F#	major	F#	N	N	N	N	F#:maj
+18.0000	20.0000	Db	major	F	N	N	N	N	Db:maj/F
+20.0000	22.0000	C	minor	Eb	N	N	N	N	C:min/Eb
+22.0000	24.0000	C	minor	C	b7	N	N	N	C:min7
+24.0000	26.0000	C	minor	Ab	b7	N	N	N	C:min7/Ab
+26.0000	28.0000	C	minor	C	b7	N	N	N	C:min7
+28.0000	30.0000	C	minor	C	b7	9	N	N	C:min7(9)
+30.0000	32.0000	C	minor	C	b7	N	N	N	C:min7
