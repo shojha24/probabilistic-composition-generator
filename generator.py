@@ -67,6 +67,14 @@ QUALITY_SHORTHAND = {
 }
 
 VALID_GENRES = ("pop_rock", "jazz", "classical", "folk")
+
+GENRES_TO_TEMPS = {
+    "pop_rock": 1.2,
+    "jazz":     1.0,
+    "classical": 1.0,
+    "folk":     1.4,
+}
+
 _DEFAULT_DIST_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "distributions")
 
 
@@ -135,8 +143,7 @@ def _reconstruct_harte(root_name: str, triad: str, bass_name: str,
 
 class ChordGenerator:
     def __init__(self, genre="pop_rock", tonic_pc=0, num_chords=16,
-                 temperature=1.0, seed=None, dist_dir=_DEFAULT_DIST_DIR,
-                 bars_per_chord=1, bpm=120):
+                 temperature=1.0, seed=None, dist_dir=_DEFAULT_DIST_DIR, bpm=120):
         if genre not in VALID_GENRES:
             raise ValueError(f"genre must be one of {VALID_GENRES}, got {genre!r}")
 
@@ -146,13 +153,12 @@ class ChordGenerator:
             if tonic_pc is None:
                 raise ValueError(f"Unrecognised tonic: {tonic_pc!r}")
 
-        self.genre          = genre
-        self.tonic_pc       = int(tonic_pc) % 12
-        self.num_chords     = num_chords
-        self.temperature    = float(temperature)
-        self.bars_per_chord = bars_per_chord
-        self.bpm            = bpm
-        self.rng            = random.Random(seed)
+        self.genre       = genre
+        self.tonic_pc    = int(tonic_pc) % 12
+        self.num_chords  = num_chords
+        self.temperature = float(temperature)
+        self.bpm         = bpm
+        self.rng         = random.Random(seed)
 
         self._load_distributions(dist_dir)
 
@@ -205,14 +211,25 @@ class ChordGenerator:
         return states
 
     def generate(self) -> list[dict]:
-        seconds_per_bar = (60.0 / self.bpm) * 4
-        bar_len         = seconds_per_bar * self.bars_per_chord
+        seconds_per_beat = 60.0 / self.bpm
+        current_time = 0.0
+
+        # Dictionary of tokens to their length in beats
+        durations = {"ww": 8.0, "w": 4.0, "h": 2.0}
+        dur_keys = list(durations.keys())
+        # Weights dictate how common each duration is (e.g., 60% whole notes)
+        dur_weights = [0.15, 0.60, 0.25] 
 
         raw, prev_bass_abs = [], None
 
-        for i, state in enumerate(self._level1_walk()):
+        for state in self._level1_walk():
             interval_str, triad = state.rsplit("_", 1)
             root_pc = (int(interval_str) + self.tonic_pc) % 12
+
+            # Pick a duration for this specific chord
+            dur_token = self.rng.choices(dur_keys, weights=dur_weights, k=1)[0]
+            chord_beats = durations[dur_token]
+            chord_len_sec = seconds_per_beat * chord_beats
 
             # Extensions
             ext_dist = self._l2e.get(state)
@@ -240,20 +257,24 @@ class ChordGenerator:
                                        seventh, ninth, eleventh, thirteenth)
 
             raw.append({
-                "time_start":  round(i * bar_len, 4),
-                "time_end":    round((i + 1) * bar_len, 4),
-                "root":        root_name,
-                "triad":       triad,
-                "bass":        bass_name,
-                "seventh":     seventh,
-                "ninth":       ninth,
-                "eleventh":    eleventh,
-                "thirteenth":  thirteenth,
-                "harte":       harte,
-                "root_pc":     root_pc,
-                "bass_abs_pc": bass_abs_pc,
-                "tone_pool":   tone_pool,
+                "time_start":     round(current_time, 4),
+                "time_end":       round(current_time + chord_len_sec, 4),
+                "duration_token": dur_token,
+                "root":           root_name,
+                "triad":          triad,
+                "bass":           bass_name,
+                "seventh":        seventh,
+                "ninth":          ninth,
+                "eleventh":       eleventh,
+                "thirteenth":     thirteenth,
+                "harte":          harte,
+                "root_pc":        root_pc,
+                "bass_abs_pc":    bass_abs_pc,
+                "tone_pool":      tone_pool,
             })
+            
+            # Step time forward by the exact length of this chord
+            current_time += chord_len_sec
 
         return raw
 
@@ -359,7 +380,9 @@ class PadComposerFixed:
         else:
             midi_notes.append(tonic_midi + bass_pc - self.tonic_pc)
 
-        return _chord_token(sorted(set(midi_notes)), "w")
+        # Pull the specific duration dynamically set by the generator
+        dur = chord.get("duration_token", "w")
+        return _chord_token(sorted(set(midi_notes)), dur)
 
     def render_to_jfugue(self, bpm: int) -> str:
         parts = [f"T{bpm}", "V0", f"I{self.inst}"]
@@ -412,12 +435,14 @@ if __name__ == "__main__":
             gen_tonic = random.randint(0, 11)
             gen_num_chords = random.randint(10, 50)
             gen_bpm = random.randint(60, 180)
+            curr_genre = "jazz"
+            gen_temperature = GENRES_TO_TEMPS.get(curr_genre, 1.0)
 
             gen = ChordGenerator(
-                genre       = "jazz", # args.genre,
+                genre       = curr_genre, # args.genre,
                 tonic_pc    = gen_tonic,
                 num_chords  = gen_num_chords, # args.num,
-                temperature = args.temperature,
+                temperature = gen_temperature,
                 bpm         = gen_bpm, # args.bpm,
                 seed        = args.seed + i if args.seed is not None else None,
                 dist_dir    = args.dist_dir,
