@@ -1,0 +1,16 @@
+0.0000	0.4110	F	major	F	7	N	N	N	F:maj7
+0.4110	1.2329	Bb	minor	F	b7	N	N	N	Bb:min7/F
+1.2329	1.8493	F	minor	F	b7	9	N	N	F:min7(9)
+1.8493	2.6712	Ab	major	Ab	b7	N	N	N	Ab:7
+2.6712	4.3151	A	diminished	A	b7	N	N	N	A:hdim7
+4.3151	5.5479	D	major	A	b7	N	N	N	D:7/A
+5.5479	5.9589	G	minor	G	b7	N	N	N	G:min7
+5.9589	6.7808	F	major	F	N	N	N	N	F:maj
+6.7808	7.6027	G	minor	G	b7	N	N	N	G:min7
+7.6027	8.4247	C	major	G	b7	N	N	N	C:7/G
+8.4247	10.0685	F	major	F	b7	N	N	N	F:7
+10.0685	10.8904	F	major	F	b7	N	N	N	F:7
+10.8904	12.5342	F	minor	F	N	N	N	N	F:min
+12.5342	12.9452	G	diminished	G	b7	N	N	N	G:hdim7
+12.9452	14.5890	C	major	G	N	N	N	N	C:maj/G
+14.5890	16.2329	F	major	F	N	N	N	N	F:maj

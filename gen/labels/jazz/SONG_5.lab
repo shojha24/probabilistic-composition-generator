@@ -1,0 +1,14 @@
+0.0000	0.7547	E	major	E	N	N	N	N	E:maj
+0.7547	1.5094	D	major	D	7	N	N	N	D:maj7
+1.5094	3.0189	Ab	minor	Eb	b7	N	N	N	Ab:min7/Eb
+3.0189	3.7736	B	sus4	B	b7	N	N	N	B:7sus4
+3.7736	4.1509	B	minor	B	b7	N	N	N	B:min7
+4.1509	4.7170	E	major	B	7	N	N	N	E:maj7/B
+4.7170	6.2264	E	major	B	7	N	N	N	E:maj7/B
+6.2264	6.9811	Eb	diminished	Eb	b7	N	N	N	Eb:hdim7
+6.9811	7.5472	Ab	major	Eb	b7	b9	#11	b13	Ab:7(b9,#11,b13)/Eb
+7.5472	8.6792	Db	minor	Db	b7	N	N	N	Db:min7
+8.6792	9.4340	E	major	E	7	N	N	N	E:maj7
+9.4340	10.9434	B	major	Eb	b7	N	N	N	B:7/Eb
+10.9434	11.3208	Ab	minor	Eb	b7	N	N	N	Ab:min7/Eb
+11.3208	12.4528	G	diminished	G	bb7	N	N	N	G:dim7

@@ -50,8 +50,8 @@ public class HumanizedMidiRenderer {
 
     // ── Configuration ────────────────────────────────────────────────────────
 
-    private static final String INPUT_FILE = "gen/generated_scores.txt";
-    private static final String OUTPUT_DIR = "gen/midi_output";
+    private static String INPUT_FILE = "gen/generated_scores.txt";
+    private static String OUTPUT_DIR = "gen/midi_output";        
 
     private static final double TARGET_JITTER_MS = 15.0;
     private static final double VELOCITY_JITTER_SIGMA = 8.0;
@@ -68,6 +68,12 @@ public class HumanizedMidiRenderer {
     // ── Entry point ──────────────────────────────────────────────────────────
 
     public static void main(String[] args) {
+        // Add this check right at the start of main()
+        if (args.length >= 2) {
+            INPUT_FILE = args[0];
+            OUTPUT_DIR = args[1];
+        }
+
         new File(OUTPUT_DIR).mkdirs();
 
         try (BufferedReader br = new BufferedReader(new FileReader(INPUT_FILE))) {

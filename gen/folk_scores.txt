@@ -1,0 +1,30 @@
+START_SONG_0
+T175 V0 I0 D#4w.+G4w.+A#4w. F4h.+G#4h.+C5h.+D#5h. F4w+A#4w+D5w+G#5w D#4w+G4w+A#4w D#4ww+G4ww+A#4ww D#4h+G4h+A#4h D#4w+G4w+A#4w D#4ww+G#4ww+C5ww D#4w+G4w+A#4w D4w+A#4w+F5w+G#5w D#4w+G4w+A#4w D#4h+G#4h+C5h
+END_SONG
+START_SONG_1
+T149 V0 I0 D4ww+F#4ww+A4ww D4w+F#4w+A4w C#4w.+A4w.+E5w.+G5w. D4ww+F#4ww+A4ww D4ww+F#4ww+A4ww C#4w+A4w+E5w+G5w D4w+F#4w+A4w F3ww+D4ww+F#4ww+A4ww A4w.+C#5w.+E5w.+G5w. A3w+D4w+F#4w C5h.+E5h.+G5h. D4ww+F4ww+A4ww C#4w.+A4w.+E5w.+G5w. E4h+G#4h+B4h+D5h E4ww+A4ww+C#5ww D4ww+B4ww+F#5ww E4w+G#4w+B4w+D5w E4ww+A4ww+C#5ww D4w+F#4w+A4w C#4ww+A4ww+E5ww+G5ww D4w+F#4w+A4w D4ww+F#4ww+A4ww D4ww+F#4ww+A4ww D4h+F#4h+A4h C5ww+E5ww+G5ww D4ww+F4ww+A4ww F4h.+A4h.+C5h. G4w+B4w+D5w F#3w.+D4w.+A4w. D4h.+F#4h.+A4h. C#4w.+A4w.+E5w.+G5w. D4w+F#4w+A4w+C5w C#4w+A4w+E5w+G5w D4ww+F#4ww+A4ww D4w+F#4w+A4w C#4ww+A4ww+E5ww+G5ww
+END_SONG
+START_SONG_2
+T131 V0 I0 C4w+E4w+G4w C4w+E4w+G4w C4w+F4w+A4w D4w+F#4w+A4w+C5w D4h.+G4h.+B4h. C4q+E4q+G4q D4q.+F4q.+A4q. C4w+E4w+G4w C4h+F4h+A4h C4h+E4h+G4h C4w.+F4w.+A4w. D4w+F#4w+A4w+C5w D4ww+G4ww+B4ww+F5ww C4ww+E4ww+G4ww C4w+F4w+A4w C4w+E4w+G4w B3w+G4w+D5w+F5w C4w+E4w+G4w D4w+F4w+A4w D4w+G4w+B4w C4w+E4w+G4w
+END_SONG
+START_SONG_3
+T97 V0 I0 F4h+A4h+C5h E4q.+C5q.+G5q.+A#5q. F4ww+A4ww+C5ww E4w+C5w+G5w F4w+A4w+C5w F4w+A#4w+D5w F4h+A4h+C5h F4h+A4h+C5h F4w.+A4w.+C5w. F4q.+A#4q.+D5q. F4w+A4w+C5w F4w+A#4w+D5w E4ww+C5ww+G5ww+A#5ww F4w+A4w+C5w F4w+A4w+C5w E4h+C5h+G5h+A#5h F4h.+A4h.+C5h. F4ww+A4ww+C5ww E4ww+C5ww+G5ww F4w+G#4w+C5w G#4h+C5h+D#5h F4w.+A4w.+C5w. E4h.+C5h.+G5h. F4ww+A4ww+C5ww E4w+C5w+G5w+A#5w F4w+A4w+C5w F4w+A#4w+D5w E4w+C5w+G5w+A#5w F4w+A4w+C5w E4h.+C5h.+G5h.+A#5h. F4ww+A4ww+C5ww+D#5ww F4ww+A4ww+C5ww G4w+A#4w+D5w G4h.+C5h.+E5h.+A#5h. F4ww+A4ww+C5ww E4ww+C5ww+G5ww F4w.+A4w.+C5w. F4w+A4w+C5w E4ww+C5ww+G5ww+A#5ww F4w+A4w+C5w E4w+C5w+G5w
+END_SONG
+START_SONG_4
+T102 V0 I0 F4ww+A4ww+C5ww F4w+A#4w+D5w F4w+A4w+C5w D5w+F5w+A5w D4w+G4w+A#4w C5ww+E5ww+G5ww A#3w+G4w+B4w+D5w+F5w C5w+E5w+G5w+A#5w C4w+F4w+A4w C4ww+F4ww+A4ww G#3ww+F4ww+A4ww+C5ww A#4w+D5w+F5w
+END_SONG
+START_SONG_5
+T105 V0 I0 C4q.+E4q.+G4q. C4h.+E4h.+G4h. B3ww+G4ww+D5ww+F5ww C4w+E4w+G4w C4h+E4h+G4h D4w+F4w+A4w D4h.+G4h.+B4h. C4w+E4w+G4w C4h.+E4h.+G4h. C4w+E4w+G4w C4w+E4w+G4w A4w+C5w+E5w A3q+D4q+F4q C4w+E4w+G4w B3w+G4w+D5w D4h+F#4h+A4h+C5h D4w+G4w+B4w+F5w C4w+E4w+G4w D4w+F4w+A4w D4w+G4w+B4w+F5w D#3q.+C4q.+E4q.+G4q. E4w+G#4w+B4w+D5w D4w+F#4w+A4w+C5w D4ww+G4ww+B4ww C4w+E4w+G4w B3w.+G4w.+D5w. G4w+B4w+D5w+F5w G3w+C4w+E4w F4q+A4q+C5q G4w+B4w+D5w+F5w G3w+C4w+E4w G3w.+C4w.+E4w. G3w.+C4w.+E4w. G3ww+C4ww+E4ww G3ww+C4ww+E4ww G4ww+B4ww+D5ww F4ww+A4ww+C5ww E4w+G#4w+B4w+D5w E4w.+A4w.+C5w. D4w.+F4w.+A4w. D4w+G4w+B4w+F5w C4ww+E4ww+G4ww C4w+E4w+G4w C4w+E4w+G4w C4w+E4w+G4w D4w+F4w+A4w C4ww+E4ww+G4ww
+END_SONG
+START_SONG_6
+T145 V0 I0 D4h.+F#4h.+A4h.+C5h. C#4ww+A4ww+E5ww+G5ww D4w+F#4w+A4w C5h.+E5h.+G5h. C5w+E5w+G5w D4ww+F4ww+A4ww C4w.+A4w.+E5w. D4ww+F4ww+A4ww D4w+F4w+A4w C4w+A4w+E5w E4ww+G4ww+B4ww E4ww+A4ww+C#5ww D4ww+B4ww+F#5ww F#4h+A#4h+C#5h+E5h F#4w+B4w+D5w A4w.+C#5w.+E5w.+G5w. G#3ww+E4ww+B4ww+D5ww A4w+C#5w+E5w A3h+D4h+F#4h G4w+B4w+D5w F#3w+D4w+A4w A4w+C#5w+E5w A4q.+C#5q.+E5q.+G5q. A3w+D4w+F#4w G4w+B4w+D5w A4w+C#5w+E5w
+END_SONG
+START_SONG_7
+T151 V0 I0 E4q.+G#4q.+B4q. E4w+G#4w+B4w C#5w.+E5w.+G#5w. C4ww+G#4ww+D#5ww+F#5ww C#4w+F#4w+A4w B4ww+D#5ww+F#5ww+A5ww B3ww+E4ww+G#4ww A#3w+F#4w+C#5w+E5w C#5ww+E5ww+G#5ww B4w+D#5w+F#5w
+END_SONG
+START_SONG_8
+T145 V0 I0 A#3ww+D4ww+F4ww C4h+D#4h+G4h C4ww+F4ww+A4ww A#3ww+D4ww+F4ww A#3w+D4w+F4w D4w+F4w+A4w D#4w+G4w+A#4w D3w+A#3w+F4w F4ww+A4ww+C5ww F3h+A#3h+D4h+G#4h G4w+B4w+D5w+F5w G4w+B4w+D5w+F5w G3ww+C4ww+D#4ww G4h+A#4h+D5h F#3h.+D4h.+A4h.+C5h. D#4h+G4h+A#4h
+END_SONG
+START_SONG_9
+T60 V0 I0 A3ww+C#4ww+E4ww G#3w+E4w+B4w A3w+C#4w+E4w G#3h.+E4h.+B4h.+D5h. A3h+C#4h+E4h A3w.+C#4w.+E4w. B3ww+E4ww+G#4ww+D5ww A3w+C#4w+E4w A3ww+C#4ww+E4ww G#3h+E4h+B4h A3w.+C#4w.+E4w. G#3h.+E4h.+B4h.+D5h. A3w+C#4w+E4w B3w+D4w+F#4w B3h+E4h+G#4h+D5h A3w+C#4w+E4w
+END_SONG
