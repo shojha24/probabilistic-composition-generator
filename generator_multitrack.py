@@ -1,8 +1,9 @@
 """
-generator.py — Single-voice chord generator with long-tail reweighting
-========================================================================
-Generates chords and outputs one JFugue Staccato string per song
-using the Fixed Octave voicing implementation (PadComposerFixed).
+generator.py — Multi-instrument chord generator with long-tail reweighting
+============================================================================
+Generates chords and outputs one multi-voice JFugue Staccato string per
+song (chord pad, bass, extensions, arpeggiator, percussion) via
+MultitrackComposerVariable.
 
 This version adds, on top of the previous merged implementation:
 
@@ -617,6 +618,7 @@ class ChordGenerator:
                 "harte":          harte,
                 "root_pc":        root_pc,
                 "bass_abs_pc":    bass_abs_pc,
+                "bass_semi":      bass_semi,
                 "tone_pool":      tone_pool,
             })
 
@@ -655,75 +657,248 @@ def _midi_to_jfugue(midi: int) -> str:
 
 
 def _chord_token(midi_notes: list[int], duration: str) -> str:
+    """
+    Build a JFugue simultaneous-note token that advances the cursor by
+    exactly `duration`.
+
+    JFugue 5 rule: when notes are joined by `+`, the cursor advances by
+    the duration of the *last* note in the chain. Notes before the last
+    must be written WITHOUT a duration suffix so they share the last
+    note's clock tick:
+
+        C5+E5+G5w   <- cursor advances by one whole note
+
+    Putting a duration suffix on every note (e.g. "C5w+E5w+G5w") makes
+    JFugue advance the cursor once per repeated suffix, which silently
+    desyncs this voice against any other voice playing concurrently --
+    not audible with a single voice, but it accumulates across a song
+    once multiple voices need to stay tempo-locked (as in
+    MultitrackComposerVariable).
+    """
     if not midi_notes:
         return f"R{duration}"
-    return "+".join(f"{_midi_to_jfugue(m)}{duration}" for m in midi_notes)
+    tokens = [_midi_to_jfugue(m) for m in midi_notes]
+    return "+".join(tokens[:-1] + [tokens[-1] + duration])
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# PadComposerFixed
+# MultitrackComposerVariable
 # ─────────────────────────────────────────────────────────────────────────────
 
-class PadComposerFixed:
-    _DEFAULT_INST = 0
+class MultitrackComposerVariable:
+    """
+    Translates a chord sequence (with per-chord variable durations) into a
+    multi-voice JFugue Staccato string. Five voices: chord pad, bass,
+    upper extensions, arpeggiator, and GM percussion.
 
-    def __init__(self, chords: list[dict], tonic_pc: int = 0,
-                 inst: int = _DEFAULT_INST):
-        self.chords   = chords
-        self.tonic_pc = tonic_pc
-        self.inst     = inst
+    Voice layout
+    ────────────
+    V0  Chord pad      — block chords, mid-register (oct 4-5), held for
+                         the chord's full duration_token
+    V1  Bass           — single note, low register (oct 2-3), held for
+                         the chord's full duration_token
+    V2  Extensions     — stack of 9th/11th/13th tones, upper register
+                         (oct 5-6); rest when none are present
+    V3  Arpeggiator    — sixteenth-note pattern, SCALED to the chord's
+                         actual duration (see _slots_for_chord) rather
+                         than a fixed 16-slot bar -- a half-note chord
+                         gets 8 slots, a dotted-whole gets 24, etc., so
+                         the arp voice never desyncs from the pad/bass
+                         voices under variable chord lengths.
+    V9  Percussion     — kick/snare pattern, also slot-scaled per chord
+                         (see _measure_drums), preserving the same
+                         "kick on odd quarter-beats, snare on even
+                         quarter-beats" backbone at any chord length.
+
+    Every voice begins with T{bpm} V{n} I{instrument} so all voices share
+    the same tempo and the instrument is set before any note data.
+    """
+
+    _INST_PAD  = [0, 4, 16, 48, 49, 54, 88]
+    _INST_BASS = [32, 33, 34, 38, 43]
+    _INST_EXT  = [4, 5, 8, 11, 12]
+    _INST_ARP  = [73, 75, 26, 66, 80]
+
+    _KICK   = "BASS_DRUM"
+    _SNARE  = "ACOUSTIC_SNARE"
+    _HIHAT  = "CLOSED_HI_HAT"
+    _CRASH  = "CRASH_CYMBAL_1"
+
+    def __init__(self, chords: list[dict], song_id: int, seed: Optional[int] = None):
+        self.chords  = chords
+        self.song_id = song_id
+        rng = random.Random(seed if seed is not None else song_id)
+
+        self.inst_pad  = rng.choice(self._INST_PAD)
+        self.inst_bass = rng.choice(self._INST_BASS)
+        self.inst_ext  = rng.choice(self._INST_EXT)
+        self.inst_arp  = rng.choice(self._INST_ARP)
+
+        self._rng = rng
+
+    @staticmethod
+    def _slots_for_chord(chord: dict) -> int:
+        """Number of sixteenth-note slots spanning this chord's full duration.
+
+        Every DURATION_BEATS value is an integer multiple of 0.25 beats
+        (a sixteenth note), so this is always an exact integer -- no
+        rounding, no partial slots, no desync between voices.
+        """
+        beats = DURATION_BEATS[chord.get("duration_token", "w")]
+        return int(round(beats * 4))
+
+    # ── per-chord builders ──────────────────────────────────────────────
 
     def _measure_pad(self, chord: dict) -> str:
-        root_pc     = chord["root_pc"]
-        bass_pc     = chord["bass_abs_pc"]
-        triad_semis = list(TRIAD_TONES.get(chord["triad"], [0, 4, 7]))
-
-        TARGET_CENTER = 62
-        tonic_midi = 60 + self.tonic_pc
-        while tonic_midi < TARGET_CENTER - 6:
-            tonic_midi += 12
-        while tonic_midi > TARGET_CENTER + 6:
-            tonic_midi -= 12
-        root_midi = tonic_midi + ((root_pc - self.tonic_pc) % 12)
+        """V0: block chord (triad + optional 7th), held for the chord's
+        full duration token. Smart-inversion rule unchanged from the
+        single-voice version: a bass a semitone/major-seventh away from
+        the root pushes the root up an octave so the bass can breathe.
+        """
+        root_pc      = chord["root_pc"]
+        bass_pc      = chord["bass_abs_pc"]
+        triad_semis  = list(TRIAD_TONES.get(chord["triad"], [0, 4, 7]))
+        oct_base     = 60
 
         bass_rel = (bass_pc - root_pc) % 12
         if bass_rel in (1, 11) and len(triad_semis) >= 3:
             triad_semis = [triad_semis[1], triad_semis[2], triad_semis[0] + 12]
 
-        midi_notes = [root_midi + s for s in sorted(set(triad_semis))]
-
         seventh_semi = EXT_TO_SEMI.get(chord.get("seventh", "N"))
         if seventh_semi is not None:
-            seventh_midi = root_midi + seventh_semi
-            fifth_midi   = root_midi + triad_semis[-1]
-            if seventh_midi <= fifth_midi:
-                seventh_midi += 12
-            midi_notes.append(seventh_midi)
+            triad_semis.append(seventh_semi)
 
+        midi_notes = [oct_base + root_pc + s for s in sorted(set(triad_semis))]
+        dur = chord.get("duration_token", "w")
+        return _chord_token(midi_notes, dur)
+
+    def _measure_bass(self, chord: dict) -> str:
+        """V1: single bass note, octave 2-3, held for the chord's full
+        duration token."""
+        root_pc   = chord["root_pc"]
+        bass_pc   = chord["bass_abs_pc"]
+        bass_semi = chord["bass_semi"]
+        oct_base  = 36
+
+        bass_midi = oct_base + bass_pc
+        if bass_pc > root_pc and bass_semi > 7:
+            bass_midi -= 12
+        while bass_midi > 55: bass_midi -= 12
+        while bass_midi < 24: bass_midi += 12
+
+        dur = chord.get("duration_token", "w")
+        return f"{_midi_to_jfugue(bass_midi)}{dur}"
+
+    def _measure_ext(self, chord: dict) -> str:
+        """V2: stack of extension notes (9th/11th/13th), octave 5-6.
+        Rests for the chord's full duration if none are present."""
+        root_pc  = chord["root_pc"]
+        oct_base = 72
+        dur = chord.get("duration_token", "w")
+
+        ext_midis = []
         for key in ("ninth", "eleventh", "thirteenth"):
             semi = EXT_TO_SEMI.get(chord.get(key, "N"))
             if semi is not None:
-                midi_notes.append(root_midi + 12 + semi)
+                ext_midis.append(oct_base + root_pc + semi)
 
-        midi_notes = [m for m in midi_notes if m % 12 != bass_pc]
+        if not ext_midis:
+            return f"R{dur}"
+        return _chord_token(sorted(ext_midis), dur)
 
-        if midi_notes:
-            lowest_midi = min(midi_notes)
-            bass_midi = lowest_midi - 1
-            while bass_midi % 12 != bass_pc:
-                bass_midi -= 1
-            midi_notes.append(bass_midi)
-        else:
-            midi_notes.append(tonic_midi + bass_pc - self.tonic_pc)
+    def _measure_arp(self, chord: dict) -> str:
+        """V3: sixteenth-note arpeggio pattern, scaled to this chord's
+        actual duration (see _slots_for_chord) rather than a fixed
+        16-slot bar. 80% chord-tone / 20% non-chord-tone (NCT). Rests on
+        slot-0-of-each-quarter-beat with 60% probability, same ratio as
+        the original fixed-bar version, just re-applied at every quarter
+        boundary regardless of how many quarters this chord spans.
+        """
+        root_pc   = chord["root_pc"]
+        tone_pool = chord["tone_pool"]
+        nct_pool  = [s for s in range(12) if s not in tone_pool]
+        oct_base  = 72
 
-        dur = chord.get("duration_token", "w")
-        return _chord_token(sorted(set(midi_notes)), dur)
+        n_slots = self._slots_for_chord(chord)
+        tokens = []
+        for slot in range(n_slots):
+            if slot % 4 == 0 and self._rng.random() < 0.6:
+                tokens.append("Rs")
+            elif self._rng.random() < 0.80 or not nct_pool:
+                semi = self._rng.choice(tone_pool)
+                midi = oct_base + root_pc + semi
+                tokens.append(f"{_midi_to_jfugue(midi)}s")
+            else:
+                semi = self._rng.choice(nct_pool)
+                midi = oct_base + root_pc + semi
+                tokens.append(f"{_midi_to_jfugue(midi)}s")
+
+        return " ".join(tokens)
+
+    def _measure_drums(self, chord: dict, is_first_chord: bool) -> str:
+        """V9: kick/snare/hihat pattern, scaled to this chord's actual
+        duration (see _slots_for_chord). Preserves the original's
+        "kick on odd quarter-beats (1,3,...), snare on even quarter-beats
+        (2,4,...)" backbone at any chord length -- a quarter-note chord
+        gets a single kick, a dotted-half gets kick-snare-kick, a full
+        bar (whole note) reproduces the original fixed pattern exactly.
+        Hi-hat fills every other slot, with occasional rests, same as
+        the original.
+
+        `is_first_chord` controls whether a leading crash is prepended
+        (only ever on the very first chord of the song, matching the
+        original's "bar 0 gets an extra leading crash" behavior).
+        """
+        n_slots = self._slots_for_chord(chord)
+        n_quarters = max(1, n_slots // 4)
+
+        tokens = []
+        if is_first_chord:
+            tokens.append(f"[{self._CRASH}]s")
+
+        for slot in range(n_slots):
+            quarter_idx = slot // 4
+            is_quarter_downbeat = (slot % 4 == 0)
+            if is_quarter_downbeat and quarter_idx % 2 == 0:
+                tokens.append(f"[{self._KICK}]s")
+            elif is_quarter_downbeat and quarter_idx % 2 == 1:
+                tokens.append(f"[{self._SNARE}]s")
+            else:
+                if self._rng.random() < 0.15:
+                    tokens.append("Rs")
+                else:
+                    tokens.append(f"[{self._HIHAT}]s")
+
+        return " ".join(tokens)
+
+    # ── public API ────────────────────────────────────────────────────
 
     def render_to_jfugue(self, bpm: int) -> str:
-        parts = [f"T{bpm}", "V0", f"I{self.inst}"]
-        for chord in self.chords:
-            parts.append(self._measure_pad(chord))
-        return " ".join(parts)
+        """Build the full multi-voice JFugue Staccato string.
+
+        Every voice starts with T{bpm} so JFugue uses the same tempo when
+        computing absolute tick positions across voices.
+        """
+        voice_configs = [
+            (0, self.inst_pad,  self._measure_pad),
+            (1, self.inst_bass, self._measure_bass),
+            (2, self.inst_ext,  self._measure_ext),
+            (3, self.inst_arp,  self._measure_arp),
+        ]
+
+        voice_strings = []
+        for v_num, inst, measure_fn in voice_configs:
+            parts = [f"T{bpm}", f"V{v_num}", f"I{inst}"]
+            for chord in self.chords:
+                parts.append(measure_fn(chord))
+            voice_strings.append(" ".join(parts))
+
+        drum_parts = [f"T{bpm}", "V9"]
+        for i, chord in enumerate(self.chords):
+            drum_parts.append(self._measure_drums(chord, is_first_chord=(i == 0)))
+        voice_strings.append(" ".join(drum_parts))
+
+        return "  ".join(voice_strings)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -823,8 +998,8 @@ if __name__ == "__main__":
             lab_path = os.path.join(args.out_dir, f"SONG_{i}.lab")
             gen.write_lab(lab_path, chords)
 
-            jfugue_str = PadComposerFixed(
-                chords, tonic_pc=gen.tonic_pc
+            jfugue_str = MultitrackComposerVariable(
+                chords, song_id=i, seed=args.seed + i if args.seed is not None else None
             ).render_to_jfugue(bpm=song_bpm)
 
             f.write(f"START_SONG_{i}\n")
