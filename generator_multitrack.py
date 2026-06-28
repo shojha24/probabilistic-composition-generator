@@ -246,45 +246,46 @@ def _build_tone_pool(triad: str, seventh: str, ninth: str,
     return sorted(set(pool))
 
 
-def _smooth_bass(prev_abs_pc: int, curr_root_pc: int,
-                 sampled_semi: int, bass_dist: dict) -> int:
-    """Choose a bass semitone offset, deferring to voice-leading smoothness
-    only when the sampled offset wasn't already the distribution's top pick.
-
-    Unchanged from the corpus-anchored version: candidates are restricted
-    to offsets `bass_dist` itself assigns nonzero probability to, and a
-    dominant (argmax) sampled choice is never overridden by geometry
-    alone. This keeps bass smoothing from manufacturing inversions the
-    trained distribution has no support for -- see the inversion-inflation
-    discussion this replaces.
+def _smooth_bass(prev_abs_pc: int, curr_root_pc: int, bass_dist: dict, 
+                 smoothness_weight: float = 0.4) -> int:
     """
-    def cost(a, b):
-        diff = min(abs(a - b) % 12, 12 - abs(a - b) % 12)
-        if diff == 0: return -2.0
-        if diff <= 2: return -1.0
-        if diff <= 4: return  0.0
-        return diff * 0.5
-
+    Selects a bass offset by balancing corpus probability (plausibility) 
+    with voice-leading distance (smoothness).
+    """
     if not bass_dist:
-        return sampled_semi
+        return 0  # Fallback to root
 
-    dist = {int(k): v for k, v in bass_dist.items()}
-    sampled_prob = dist.get(sampled_semi)
-    if sampled_prob is None:
-        return sampled_semi
+    best_semi = 0
+    best_score = float('-inf')
 
-    max_prob = max(dist.values())
-    if sampled_prob >= max_prob:
-        return sampled_semi
+    # Normalize probabilities to 1.0 so they scale evenly against the distance metric
+    max_prob = max(bass_dist.values()) if bass_dist else 1.0
 
-    best_semi  = sampled_semi
-    best_cost  = cost(prev_abs_pc, (curr_root_pc + sampled_semi) % 12)
-    for semi, prob in dist.items():
+    for semi_str, prob in bass_dist.items():
         if prob <= 0:
-            continue
-        c = cost(prev_abs_pc, (curr_root_pc + semi) % 12)
-        if c < best_cost:
-            best_cost, best_semi = c, semi
+            continue  # Impossible inversions remain completely locked out
+
+        semi = int(semi_str)
+        curr_bass_pc = (curr_root_pc + semi) % 12
+
+        # Shortest distance around the pitch class circle (0 to 6 semitones)
+        dist = min(abs(prev_abs_pc - curr_bass_pc) % 12, 
+                   12 - abs(prev_abs_pc - curr_bass_pc) % 12)
+
+        # Invert distance so smaller leaps yield higher scores (0.0 to 1.0)
+        voice_leading_score = 1.0 - (dist / 6.0)
+
+        # Normalize the statistical probability (0.0 to 1.0 relative to max pick)
+        plausibility_score = prob / max_prob
+
+        # Combine the metrics
+        combined_score = (smoothness_weight * voice_leading_score) + \
+                         ((1.0 - smoothness_weight) * plausibility_score)
+
+        if combined_score > best_score:
+            best_score = combined_score
+            best_semi = semi
+
     return best_semi
 
 
