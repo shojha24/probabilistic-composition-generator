@@ -23,8 +23,6 @@ from collections import defaultdict
 CORPUS_TO_GENRE = {
     "mcgill billboard": "pop_rock",
     "billboard":        "pop_rock",
-    "nottingham music database": "folk",
-    "nottingham":       "folk",
     "isophonics":       "pop_rock",
     "ireal pro":        "jazz",
     "ireal-pro":        "jazz",
@@ -32,11 +30,8 @@ CORPUS_TO_GENRE = {
     "weimar jazz database": "jazz",
     "weimar-jazz":      "jazz",
     "weimarjazz":       "jazz",
-    "when in rome":     "classical",
-    "when-in-rome":     "classical",
-    "wheninrome":       "classical",
 }
-GENRES = ["pop_rock", "jazz", "classical", "folk"]
+GENRES = ["pop_rock", "jazz"]
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Chromatic pitch-class lookup  (covers every note in the dataset)
@@ -54,8 +49,6 @@ NOTE_TO_PC = {
     "A":  9,
     "A#":10, "Bb":10,
     "B": 11, "Cb":11,
-    # enharmonic edge cases in the dataset
-    "D#":3, "G#":8, "A#":10, "Fb":4,
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -385,50 +378,91 @@ for i, fpath in enumerate(jams_files):
         }
 
     # ── Key ────────────────────────────────────────────────────────────────
-    key_result = None
+    active_keys = []
     for kd in key_data:
-        key_result = parse_key(str(kd.get("value", "")))
-        if key_result:
-            break
+        val = str(kd.get("value", ""))
+        kr = parse_key(val)
+        if kr:
+            t = float(kd.get("time", 0.0))
+            d = float(kd.get("duration", 0.0))
+            active_keys.append({
+                "start": t,
+                "end": t + d,
+                "tonic_pc": kr[0]
+            })
 
-    if key_result is None:
+    if not active_keys:
         report["skipped_no_key"] += 1
         report["corpora"][corpus_label]["key_failures"] += 1
         continue
 
-    tonic_pc, mode = key_result
+    # Sort keys by start time to ensure chronological sequence
+    active_keys.sort(key=lambda x: x["start"])
+
+    def get_active_tonic(chord_time):
+        """Finds the active key for a given timestamp."""
+        for k in active_keys:
+            # Use a tiny epsilon (0.001) to forgive floating point inaccuracies in JAMS
+            if k["start"] - 0.001 <= chord_time < k["end"] + 0.001:
+                return k["tonic_pc"]
+        
+        # Fallback: If there is a tiny gap between annotations, use the most recent key
+        past_keys = [k for k in active_keys if k["start"] <= chord_time]
+        if past_keys:
+            return past_keys[-1]["tonic_pc"]
+        
+        # Absolute fallback: use the first key in the song
+        return active_keys[0]["tonic_pc"]
 
     # ── Parse chords ───────────────────────────────────────────────────────
     parsed = []
     for entry in chord_ann.get("data", []):
         val = entry.get("value", "N")
-        result = parse_harte(val, tonic_pc)
+        chord_time = float(entry.get("time", 0.0))
+        
+        # Dynamically resolve the key for this specific chord's timestamp
+        current_tonic = get_active_tonic(chord_time)
+
+        result = parse_harte(val, current_tonic)
+        
         if result is None:
             if val not in ("N", "X", "", None):
                 report["chord_parse_failures"] += 1
                 report["corpora"][corpus_label]["chord_failures"] += 1
+            parsed.append(None) # Phantom splicing fix
             continue
+            
         parsed.append(result)
 
-    report["total_chords_parsed"] += len(parsed)
-    report["corpora"][corpus_label]["chords"] += len(parsed)
+    # Count only the actual parsed chords, ignoring the Nones
+    valid_chords_count = sum(1 for p in parsed if p is not None)
+    report["total_chords_parsed"] += valid_chords_count
+    report["corpora"][corpus_label]["chords"] += valid_chords_count
 
     # ── Level 2: extension & bass distributions ────────────────────────────
-    for root_iv, triad, bass_iv, seventh, ninth, eleventh, thirteenth in parsed:
+    for item in parsed:
+        if item is None:
+            continue # FIX: Prevent unpacking error on silences
+            
+        root_iv, triad, bass_iv, seventh, ninth, eleventh, thirteenth = item
         state   = f"{root_iv}_{triad}"
         ext_key = f"({seventh},{ninth},{eleventh},{thirteenth})"
         level2_ext [genre][state][ext_key]    += 1
         level2_bass[genre][state][str(bass_iv)] += 1
 
     # ── Level 1: bigram transitions ────────────────────────────────────────
+    valid_transitions = 0
     for i in range(len(parsed) - 1):
+        if parsed[i] is None or parsed[i+1] is None:
+            continue # FIX: Breaks the phantom splice!
+            
         from_st = f"{parsed[i][0]}_{parsed[i][1]}"
         to_st   = f"{parsed[i+1][0]}_{parsed[i+1][1]}"
         level1[genre][from_st][to_st] += 1
+        valid_transitions += 1
 
-    n_trans = max(0, len(parsed) - 1)
-    report["total_transitions"] += n_trans
-    report["corpora"][corpus_label]["transitions"] += n_trans
+    report["total_transitions"] += valid_transitions
+    report["corpora"][corpus_label]["transitions"] += valid_transitions
     report["corpora"][corpus_label]["files"] += 1
     report["total_files"] += 1
 
