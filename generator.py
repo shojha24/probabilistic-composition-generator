@@ -96,7 +96,7 @@ QUALITY_SHORTHAND = {
     ("5",          "b7"):  "5",
 }
 
-VALID_GENRES = ("pop_rock", "jazz", "classical", "folk")
+VALID_GENRES = ("pop_rock", "jazz")
 
 # Base temperature per genre. Unchanged from the prior version -- this
 # scales level-1 (root+triad) transition *probabilities* on top of
@@ -109,15 +109,11 @@ VALID_GENRES = ("pop_rock", "jazz", "classical", "folk")
 GENRES_TO_TEMPS = {
     "pop_rock":  1.0,
     "jazz":      1.0,
-    "classical": 1.0,
-    "folk":      1.0,
 }
 
 GENRES_TO_SELF_TRANSITION_DISCOUNT = {
     "pop_rock":  0.8,
     "jazz":      1.0,
-    "classical": 0.9,
-    "folk":      0.8,
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -148,20 +144,6 @@ BETA_CONFIG = {
         "root_triad": 0.7, "bass": 0.6,
         "seventh": 0.8, "ninth": 0.6, "eleventh": 0.5, "thirteenth": 0.5,
     },
-    "classical": {
-        "root_triad": 0.7, "bass": 0.55,
-        "seventh": 0.6, "ninth": 0.5, "eleventh": 0.5, "thirteenth": 1.0,
-        # thirteenth fixed at 1.0: classical has literally zero observed
-        # non-N 13th values for any state (see module docstring on scope)
-        # -- there is nothing to redistribute toward, so beta is a no-op
-        # here regardless of value. Left at 1.0 for clarity.
-    },
-    "folk": {
-        "root_triad": 0.65, "bass": 0.55,
-        "seventh": 0.7, "ninth": 1.0, "eleventh": 0.6, "thirteenth": 1.0,
-        # ninth/thirteenth fixed at 1.0 for the same reason as classical's
-        # thirteenth above -- folk has no observed 9th or 13th variation.
-    },
 }
 
 # Duration tokens available per chord, in beats (quarter note = 1 beat).
@@ -182,14 +164,6 @@ GENRE_DURATION_WEIGHTS = {
         "ww": 0.01, "w.": 0.01, "w":  0.30, "h.": 0.08,
         "h":  0.40, "q.": 0.05, "q":  0.15,
     },
-    "classical": {
-        "ww": 0.10, "w.": 0.05, "w":  0.40, "h.": 0.10,
-        "h":  0.25, "q.": 0.05, "q":  0.05,
-    },
-    "folk": {
-        "ww": 0.25, "w.": 0.10, "w":  0.45, "h.": 0.05,
-        "h":  0.10, "q.": 0.02, "q":  0.03,
-    }
 }
 
 _DEFAULT_DIST_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "distributions")
