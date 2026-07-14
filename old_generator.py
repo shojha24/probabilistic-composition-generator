@@ -220,7 +220,7 @@ def _build_tone_pool(triad: str, seventh: str, ninth: str,
 
 
 def _smooth_bass(prev_abs_pc: int, curr_root_pc: int, bass_dist: dict, 
-                 smoothness_weight: float = 0.4) -> int:
+                 smoothness_weight: float = 0.6) -> int:
     """
     Selects a bass offset by balancing corpus probability (plausibility) 
     with voice-leading distance (smoothness).

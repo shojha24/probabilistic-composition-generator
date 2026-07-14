@@ -1,151 +1,171 @@
 """
-Phase 1: Transition & Probability Extraction
-=============================================
+Phase 1 (§1): Transition & Probability Extraction
+==================================================
 Extracts key-relative Level-1 transition matrices and Level-2 empirical
 extension / bass distributions from normalized JAMS files, partitioned by
 genre umbrella (Pop/Rock, Jazz, Classical).
 
-Verified against the full 2282-chord, 469k-instance vocabulary.
+This is a rebuild of a deprecated prototype. The chord/key parsing grammar,
+interval tables, and genre-routing logic are carried over unchanged (they
+were verified against the full 2282-chord, 469k-instance vocabulary); the
+control flow, state management, and I/O have been restructured for clarity,
+testability, and correctness (e.g. the per-file active-key lookup is now an
+explicit object instead of a loop-scoped closure, and every public piece of
+logic is a pure, independently testable function).
 
-Outputs (written to ./distributions/):
-  level1_transitions_{genre}.json   – key-relative (interval, triad) bigram counts + probs
-  level2_extensions_{genre}.json    – P(7th, 9th, 11th, 13th | interval, triad)
-  level2_bass_{genre}.json          – P(bass_interval | interval, triad)
-  extraction_report.json            – per-corpus file counts, skips, warnings
+Outputs (written to OUT_DIR, default ./distributions/):
+  level1_transitions_{genre}.json   - key-relative (interval, triad) bigram counts + probs
+  level2_extensions_{genre}.json    - P(7th, 9th, 11th, 13th | interval, triad)
+  level2_bass_{genre}.json          - P(bass_interval | interval, triad)
+  extraction_report.json            - per-corpus file counts, skips, warnings
 """
 
-import os, re, json, glob
+from __future__ import annotations
+
+import glob
+import json
+import os
+import re
 from collections import defaultdict
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Tuple
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Genre umbrella routing
 # ─────────────────────────────────────────────────────────────────────────────
-CORPUS_TO_GENRE = {
+CORPUS_TO_GENRE: Dict[str, str] = {
     "mcgill billboard": "pop_rock",
-    "billboard":        "pop_rock",
-    "isophonics":       "pop_rock",
-    "ireal pro":        "jazz",
-    "ireal-pro":        "jazz",
-    "irealpro":         "jazz",
+    "billboard": "pop_rock",
+    "isophonics": "pop_rock",
+    "ireal pro": "jazz",
+    "ireal-pro": "jazz",
+    "irealpro": "jazz",
     "weimar jazz database": "jazz",
-    "weimar-jazz":      "jazz",
-    "weimarjazz":       "jazz",
+    "weimar-jazz": "jazz",
+    "weimarjazz": "jazz",
 }
-GENRES = ["pop_rock", "jazz"]
+GENRES: List[str] = ["pop_rock", "jazz"]
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Chromatic pitch-class lookup  (covers every note in the dataset)
+# Chromatic pitch-class lookup (covers every note spelling in the dataset)
 # ─────────────────────────────────────────────────────────────────────────────
-NOTE_TO_PC = {
-    "C":  0, "B#": 0,
+NOTE_TO_PC: Dict[str, int] = {
+    "C": 0, "B#": 0,
     "C#": 1, "Db": 1,
-    "D":  2,
+    "D": 2,
     "D#": 3, "Eb": 3,
-    "E":  4, "Fb": 4,
-    "F":  5, "E#": 5,
+    "E": 4, "Fb": 4,
+    "F": 5, "E#": 5,
     "F#": 6, "Gb": 6,
-    "G":  7,
+    "G": 7,
     "G#": 8, "Ab": 8,
-    "A":  9,
-    "A#":10, "Bb":10,
-    "B": 11, "Cb":11,
+    "A": 9,
+    "A#": 10, "Bb": 10,
+    "B": 11, "Cb": 11,
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Quality → triad class
-# Covers all 24 quality tokens found in the normalised vocab.
+# Quality -> triad class (all 24 quality tokens found in the normalized vocab)
 # ─────────────────────────────────────────────────────────────────────────────
-QUALITY_TO_TRIAD = {
-    # plain major
-    "":       "major",   "maj":    "major",
-    "maj6":   "major",   "maj7":   "major",
-    "maj9":   "major",   "maj13":  "major",
-    "6":      "major",   "7":      "major",
-    "9":      "major",   "11":     "major",   "13":     "major",
-    "1":      "major",
-    # minor
-    "min":    "minor",   "m":      "minor",
-    "min6":   "minor",   "min7":   "minor",
-    "min9":   "minor",   "min11":  "minor",   "min13":  "minor",
-    "minmaj7":"minor",
-    # diminished
-    "dim":    "diminished", "dim7":  "diminished",
-    "hdim7":  "diminished",
-    # augmented
-    "aug":    "augmented",  "aug7":  "augmented",
-    # suspended
-    "sus4":   "sus4",   "sus":    "sus4",   "7sus4":  "sus4",
-    "sus2":   "sus2",
-    # power / 5th
-    "5":      "5",
+QUALITY_TO_TRIAD: Dict[str, str] = {
+    "": "major", "maj": "major",
+    "maj6": "major", "maj7": "major",
+    "maj9": "major", "maj13": "major",
+    "6": "major", "7": "major",
+    "9": "major", "11": "major", "13": "major",
+    "1": "major",
+    "min": "minor", "m": "minor",
+    "min6": "minor", "min7": "minor",
+    "min9": "minor", "min11": "minor", "min13": "minor",
+    "minmaj7": "minor",
+    "dim": "diminished", "dim7": "diminished",
+    "hdim7": "diminished",
+    "aug": "augmented", "aug7": "augmented",
+    "sus4": "sus4", "sus": "sus4", "7sus4": "sus4",
+    "sus2": "sus2",
+    "5": "5",
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Quality → 7th component
+# Quality -> seventh component
 # ─────────────────────────────────────────────────────────────────────────────
-QUALITY_TO_7TH = {
-    # natural 7th (major 7th interval)
-    "maj7":   "7",    "maj9":   "7",    "maj13":  "7",   "minmaj7": "7",
-    # flat 7th (minor 7th interval)
-    "7":      "b7",   "9":      "b7",   "11":     "b7",  "13":      "b7",
-    "min7":   "b7",   "min9":   "b7",   "min11":  "b7",  "min13":   "b7",
-    "hdim7":  "b7",   "7sus4":  "b7",   "aug7":   "b7",
-    # double-flat 7th (diminished 7th interval — must NOT be collapsed)
-    "dim7":   "bb7",
+QUALITY_TO_7TH: Dict[str, str] = {
+    # natural 7th (major-seventh interval)
+    "maj7": "7", "maj9": "7", "maj13": "7", "minmaj7": "7",
+    # flat 7th (minor-seventh interval)
+    "7": "b7", "9": "b7", "11": "b7", "13": "b7",
+    "min7": "b7", "min9": "b7", "min11": "b7", "min13": "b7",
+    "hdim7": "b7", "7sus4": "b7", "aug7": "b7",
+    # double-flat 7th (diminished-seventh interval - must NOT be collapsed to b7)
+    "dim7": "bb7",
     # no 7th
-    "":       "N",    "maj":    "N",    "min":    "N",
-    "dim":    "N",    "aug":    "N",    "sus4":   "N",
-    "sus2":   "N",    "5":      "N",
-    "maj6":   "N",    "min6":   "N",    "6":      "N",
-    "1":      "N",
+    "": "N", "maj": "N", "min": "N",
+    "dim": "N", "aug": "N", "sus4": "N",
+    "sus2": "N", "5": "N",
+    "maj6": "N", "min6": "N", "6": "N",
+    "1": "N",
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Interval tokens → semitones above root
-# Covers all 25 bass tokens + every paren extension token in the dataset.
+# Interval tokens -> semitones above root (25 bass tokens + paren extensions)
 # ─────────────────────────────────────────────────────────────────────────────
-INTERVAL_TO_SEMI = {
-    "1": 0,   "#1": 1,  "b1":  0,   # b1 = enharmonic unison / root
-    "b2": 1,  "2":  2,
-    "bb3":2,  "b3": 3,  "3":   4,
-    "b4": 4,  "4":  5,  "#4":  6,
-    "b5": 6,  "5":  7,  "#5":  8,
-    "b6": 8,  "6":  9,  "#6":  9,   "bb6": 8,
-    "bb7":9,  "b7": 10, "7":   11,
-    "b8": 11,           # b8 = leading-tone octave, treat as 11
-    "b9": 1,  "9":  2,  "#9":  3,   "bb9": 0,   # bb9 = enharmonic root
-    "11": 5,  "#11": 6,
-    "b13":8,  "13": 9,
+INTERVAL_TO_SEMI: Dict[str, int] = {
+    "1": 0, "#1": 1, "b1": 0,       # b1 = enharmonic unison / root
+    "b2": 1, "2": 2,
+    "bb3": 2, "b3": 3, "3": 4,
+    "b4": 4, "4": 5, "#4": 6,
+    "b5": 6, "5": 7, "#5": 8,
+    "b6": 8, "6": 9, "#6": 9, "bb6": 8,
+    "bb7": 9, "b7": 10, "7": 11,
+    "b8": 11,                       # b8 = leading-tone octave
+    "b9": 1, "9": 2, "#9": 3, "bb9": 0,  # bb9 = enharmonic root
+    "11": 5, "#11": 6,
+    "b13": 8, "13": 9,
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Helper: parse key annotation value
-# Handles: "C", "G:major", "Bb:major", "G:minor", "G mixolydian", "D:aeolian",
-#          "D:chromatic", "D:dorian", "Ab:mixolydian", "Bb:blues", "N"
-# Mode-altering scales are mapped to closest diatonic mode.
-# Returns (tonic_pc, mode) or None.
-# ─────────────────────────────────────────────────────────────────────────────
-MINOR_MODES = {"minor", "min", "aeolian", "dorian", "phrygian", "locrian",
-               "blues", "chromatic"}   # treat chromatic/blues as minor for interval math
+MINOR_MODES = {
+    "minor", "min", "aeolian", "dorian", "phrygian", "locrian",
+    "blues", "chromatic",  # mode-altering scales mapped to closest diatonic mode
+}
 MAJOR_MODES = {"major", "maj", "ionian", "mixolydian", "lydian"}
 
-def parse_key(value):
+_KEY_COLON_RE = re.compile(r'^([A-Ga-g][#b]?):(.+)$')
+_KEY_BARE_RE = re.compile(r'^([A-Ga-g][#b]?)$')
+
+_CHORD_RE = re.compile(
+    r'^([A-Ga-g][#b]?)'        # 1: root note
+    r'(?::([a-zA-Z0-9]+))?'    # 2: quality (optional)
+    r'(\([^)]*\))?'            # 3: paren extensions (optional)
+    r'(?:/([^/\s]+))?$'        # 4: bass (optional)
+)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Key parsing
+# ─────────────────────────────────────────────────────────────────────────────
+def parse_key(value: Optional[str]) -> Optional[Tuple[int, str]]:
+    """
+    Parse a key_mode annotation value into (tonic_pc, mode).
+
+    Handles: "C", "G:major", "Bb:major", "G:minor", "G mixolydian",
+             "D:aeolian", "D:chromatic", "D:dorian", "Ab:mixolydian",
+             "Bb:blues", "N".
+    Mode-altering scales are mapped to the closest diatonic mode.
+    """
     if not value or value.strip() in ("N", ""):
         return None
     v = value.strip()
 
     # Colon-separated: "G:major", "Bb:minor", "D:chromatic"
-    m = re.match(r'^([A-Ga-g][#b]?):(.+)$', v)
+    m = _KEY_COLON_RE.match(v)
     if m:
         note_str, mode_str = m.group(1), m.group(2).lower().strip()
         note_str = note_str[0].upper() + note_str[1:]
         pc = NOTE_TO_PC.get(note_str)
         if pc is None:
             return None
-        if mode_str in MINOR_MODES:
-            return (pc, "minor")
-        else:
-            return (pc, "major")
+        mode = "minor" if mode_str in MINOR_MODES else "major"
+        return (pc, mode)
 
     # Space-separated: "G major", "A minor", "G mixolydian"
     parts = v.split()
@@ -159,7 +179,7 @@ def parse_key(value):
         return (pc, mode)
 
     # Bare note: "C", "F#", "Bb"
-    m2 = re.match(r'^([A-Ga-g][#b]?)$', v)
+    m2 = _KEY_BARE_RE.match(v)
     if m2:
         note_str = m2.group(1)[0].upper() + m2.group(1)[1:]
         pc = NOTE_TO_PC.get(note_str)
@@ -169,24 +189,68 @@ def parse_key(value):
     return None
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Helper: parse a single Harte chord string
-# Returns (root_pc, triad, bass_interval_from_tonic, seventh, ninth, eleventh, thirteenth)
-# or None for "N" / "X" / unparseable.
-# ─────────────────────────────────────────────────────────────────────────────
-_CHORD_RE = re.compile(
-    r'^([A-Ga-g][#b]?)'       # 1: root note
-    r'(?::([a-zA-Z0-9]+))?'   # 2: quality (optional)
-    r'(\([^)]*\))?'            # 3: paren extensions (optional)
-    r'(?:/([^/\s]+))?$'        # 4: bass (optional)
-)
+@dataclass
+class KeyTimeline:
+    """
+    Holds the sequence of active keys for one file/track and resolves the
+    tonic in effect at any timestamp. Replaces the loop-scoped closure in the
+    original prototype with an explicit, independently testable object.
+    """
+    keys: List[Dict] = field(default_factory=list)  # [{start, end, tonic_pc}, ...]
 
-def parse_harte(value, tonic_pc):
-    """
-    Parse Harte string, resolve intervals relative to tonic_pc.
-    Returns (root_interval, triad, bass_interval, seventh, ninth, eleventh, thirteenth)
-    or None.
-    """
+    @classmethod
+    def from_key_mode_data(cls, key_data: List[dict]) -> "KeyTimeline":
+        active_keys = []
+        for kd in key_data:
+            parsed = parse_key(str(kd.get("value", "")))
+            if parsed is None:
+                continue
+            t = float(kd.get("time", 0.0))
+            d = float(kd.get("duration", 0.0))
+            active_keys.append({"start": t, "end": t + d, "tonic_pc": parsed[0]})
+        active_keys.sort(key=lambda k: k["start"])
+        return cls(keys=active_keys)
+
+    def __bool__(self) -> bool:
+        return len(self.keys) > 0
+
+    def tonic_at(self, chord_time: float) -> int:
+        """Resolve the active tonic pitch-class at a given timestamp."""
+        eps = 0.001
+        for k in self.keys:
+            if k["start"] - eps <= chord_time < k["end"] + eps:
+                return k["tonic_pc"]
+        past = [k for k in self.keys if k["start"] <= chord_time]
+        if past:
+            return past[-1]["tonic_pc"]
+        return self.keys[0]["tonic_pc"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Chord (Harte string) parsing
+# ─────────────────────────────────────────────────────────────────────────────
+@dataclass(frozen=True)
+class ParsedChord:
+    root_interval: int   # semitones above tonic, 0-11
+    triad: str
+    bass_interval: int   # semitones above root, 0-11
+    seventh: str         # "N" | "b7" | "7" | "bb7"
+    ninth: str           # "N" | "9" | "#9" | "b9"
+    eleventh: str        # "N" | "11" | "#11"
+    thirteenth: str      # "N" | "13" | "b13"
+
+    @property
+    def state(self) -> str:
+        """Level-1 state key: key-relative (interval, triad)."""
+        return f"{self.root_interval}_{self.triad}"
+
+    @property
+    def extension_key(self) -> str:
+        return f"({self.seventh},{self.ninth},{self.eleventh},{self.thirteenth})"
+
+
+def parse_harte(value: Optional[str], tonic_pc: int) -> Optional[ParsedChord]:
+    """Parse a Harte chord string, resolving intervals relative to tonic_pc."""
     if value in ("N", "X", "", None):
         return None
 
@@ -196,7 +260,7 @@ def parse_harte(value, tonic_pc):
 
     root_str, quality, paren_str, bass_str = m.groups()
     root_str = root_str[0].upper() + root_str[1:]
-    quality  = (quality or "").strip()
+    quality = (quality or "").strip()
 
     root_pc = NOTE_TO_PC.get(root_str)
     if root_pc is None:
@@ -207,17 +271,16 @@ def parse_harte(value, tonic_pc):
     # ── Triad ──────────────────────────────────────────────────────────────
     triad = QUALITY_TO_TRIAD.get(quality)
     if triad is None:
-        # Strip digits/accidentals and retry (catches things like "maj(9)" leftovers)
+        # Strip digits/accidentals/parens and retry (catches leftovers like "maj(9)")
         stripped = re.sub(r'[\d#b()]', '', quality)
         triad = QUALITY_TO_TRIAD.get(stripped, "major")
 
     # ── Seventh ────────────────────────────────────────────────────────────
     seventh = QUALITY_TO_7TH.get(quality, "N")
 
-    # ── Extensions from paren string ──────────────────────────────────────
+    # ── Extensions ─────────────────────────────────────────────────────────
     ninth = eleventh = thirteenth = "N"
 
-    # Also capture extensions baked into the quality name
     if quality in ("9", "min9", "maj9"):
         ninth = "9"
     if quality in ("11", "min11", "maj11"):
@@ -228,105 +291,89 @@ def parse_harte(value, tonic_pc):
     if paren_str:
         tokens = [t.strip() for t in paren_str.strip("()").split(",") if t.strip()]
         for tok in tokens:
-            if   tok in ("9",  "add9"):  ninth       = "9"
-            elif tok == "#9":            ninth       = "#9"
-            elif tok in ("b9", "bb9"):   ninth       = "b9"   # bb9 ≈ b9 for ACR
-            elif tok in ("11","add11"):  eleventh    = "11"
-            elif tok == "#11":           eleventh    = "#11"
-            elif tok in ("13","add13"):  thirteenth  = "13"
-            elif tok == "b13":           thirteenth  = "b13"
-            # Paren-embedded 7th override (e.g. sus4(b7,9) bakes b7 into paren)
+            if tok in ("9", "add9"):
+                ninth = "9"
+            elif tok == "#9":
+                ninth = "#9"
+            elif tok in ("b9", "bb9"):
+                ninth = "b9"          # bb9 collapsed to b9 for the ACR schema
+            elif tok in ("11", "add11"):
+                eleventh = "11"
+            elif tok == "#11":
+                eleventh = "#11"
+            elif tok in ("13", "add13"):
+                thirteenth = "13"
+            elif tok == "b13":
+                thirteenth = "b13"
             elif tok == "b7" and seventh == "N":
                 seventh = "b7"
             elif tok == "7" and seventh == "N":
                 seventh = "7"
             elif tok == "bb7" and seventh == "N":
                 seventh = "bb7"
-            # Non-extension paren tokens (omissions, colour tones) — ignore for
-            # the 6D schema but don't error: b3, b5, #5, 2, 3, 4, 5, 6, etc.
+            # Non-extension paren tokens (omissions/colour tones: b3, b5, #5,
+            # 2, 3, 4, 5, 6, ...) are intentionally ignored - out of scope for
+            # the 6D schema, but not an error.
 
     # ── Bass note ──────────────────────────────────────────────────────────
+    bass_interval = 0
     if bass_str:
         bass_str = bass_str.strip()
         bass_note = bass_str[0].upper() + bass_str[1:] if bass_str else ""
-        
         if bass_note in NOTE_TO_PC:
             bass_pc = NOTE_TO_PC[bass_note]
-            bass_interval = (bass_pc - root_pc) % 12  # <--- CHANGED: Relative to Root
+            bass_interval = (bass_pc - root_pc) % 12          # relative to root
         else:
             semis = INTERVAL_TO_SEMI.get(bass_str)
             if semis is not None:
-                bass_interval = semis % 12            # <--- CHANGED: Semis is already relative to root
-            else:
-                bass_interval = 0                     # Root position
-    else:
-        bass_interval = 0
+                bass_interval = semis % 12                    # already root-relative
 
-    return (root_interval, triad, bass_interval, seventh, ninth, eleventh, thirteenth)
+    return ParsedChord(root_interval, triad, bass_interval, seventh, ninth, eleventh, thirteenth)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Corpus genre resolver
+# Genre resolution
 # ─────────────────────────────────────────────────────────────────────────────
-def resolve_genre(ann_meta, corpus_dir_hint=""):
+def resolve_genre(ann_meta: dict, corpus_dir_hint: str = "") -> Optional[str]:
     raw = (ann_meta.get("corpus") or corpus_dir_hint or "").lower().strip()
-    # Try full string
+
     if raw in CORPUS_TO_GENRE:
         return CORPUS_TO_GENRE[raw]
-    # Try substring matches (longest match wins)
-    best = None
-    best_len = 0
+
+    best, best_len = None, 0
     for key, genre in CORPUS_TO_GENRE.items():
         k = key.lower()
         if k in raw and len(k) > best_len:
             best, best_len = genre, len(k)
     if best:
         return best
-    # Try directory name
-    dir_norm = corpus_dir_hint.lower().replace("-","").replace("_","").replace(" ","")
+
+    dir_norm = corpus_dir_hint.lower().replace("-", "").replace("_", "").replace(" ", "")
     for key, genre in CORPUS_TO_GENRE.items():
-        k = key.lower().replace("-","").replace("_","").replace(" ","")
-        if k == dir_norm or k in dir_norm:
+        k = key.lower().replace("-", "").replace("_", "").replace(" ", "")
+        if k == dir_norm or (k and k in dir_norm):
             return genre
+
     return None
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Accumulator structures
-# ─────────────────────────────────────────────────────────────────────────────
-level1     = {g: defaultdict(lambda: defaultdict(int)) for g in GENRES}
-level2_ext = {g: defaultdict(lambda: defaultdict(int)) for g in GENRES}
-level2_bass= {g: defaultdict(lambda: defaultdict(int)) for g in GENRES}
-
-report = {
-    "corpora": {},
-    "total_files": 0,
-    "total_chords_parsed": 0,
-    "total_transitions": 0,
-    "skipped_no_key": 0,
-    "skipped_unknown_corpus": 0,
-    "parse_errors": 0,
-    "chord_parse_failures": 0,
-}
+def infer_corpus_dir(fpath: str, data_root: str) -> str:
+    """Corpus directory name = path segment directly under data_root."""
+    norm_path = fpath.replace("\\", "/")
+    root_norm = os.path.normpath(data_root).replace("\\", "/")
+    root_parts = root_norm.split("/")
+    parts = norm_path.split("/")
+    try:
+        idx = next(i for i, p in enumerate(parts) if p == root_parts[-1])
+        return parts[idx + 1] if idx + 1 < len(parts) else ""
+    except StopIteration:
+        return ""
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# File discovery
-# ─────────────────────────────────────────────────────────────────────────────
-DATA_ROOT = os.environ.get("DATA_ROOT", "data_normalized")
-if not os.path.isdir(DATA_ROOT):
-    DATA_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data_normalized")
-
-jams_files = sorted(glob.glob(os.path.join(DATA_ROOT, "**", "*.jams"), recursive=True))
-print(f"Found {len(jams_files)} JAMS files under {DATA_ROOT}")
-if not jams_files:
-    print("WARNING: No JAMS files found. Set DATA_ROOT env var or run from project root.")
-
-
-def get_annotations(annotations):
-    """Return (chord_ann, chord_namespace, key_data_list)."""
+def get_annotations(annotations: List[dict]) -> Tuple[Optional[dict], Optional[str], List[dict]]:
+    """Return (chord_ann, chord_namespace, key_mode_data) from a JAMS annotation list."""
     chord_ann, chord_ns = None, None
-    key_data = []
+    key_data: List[dict] = []
     for ann in annotations:
         ns = ann.get("namespace", "")
         if ns == "chord_harte":
@@ -339,142 +386,134 @@ def get_annotations(annotations):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Main processing loop
+# Aggregation state
 # ─────────────────────────────────────────────────────────────────────────────
-for i, fpath in enumerate(jams_files):
-    # Infer corpus from directory name (segment after data_normalized/)
-    norm_path = fpath.replace("\\", "/")
-    parts = norm_path.split("/")
-    try:
-        idx = next(i for i, p in enumerate(parts) if "data_normalized" in p)
-        corpus_dir = parts[idx + 1] if idx + 1 < len(parts) else ""
-    except StopIteration:
-        corpus_dir = ""
+class Accumulator:
+    """Holds running counts across all files for one extraction run."""
+
+    def __init__(self, genres: List[str]):
+        self.genres = genres
+        self.level1: Dict[str, Dict[str, Dict[str, int]]] = {
+            g: defaultdict(lambda: defaultdict(int)) for g in genres
+        }
+        self.level2_ext: Dict[str, Dict[str, Dict[str, int]]] = {
+            g: defaultdict(lambda: defaultdict(int)) for g in genres
+        }
+        self.level2_bass: Dict[str, Dict[str, Dict[str, int]]] = {
+            g: defaultdict(lambda: defaultdict(int)) for g in genres
+        }
+        self.report = {
+            "corpora": {},
+            "total_files": 0,
+            "total_chords_parsed": 0,
+            "total_transitions": 0,
+            "skipped_no_key": 0,
+            "skipped_unknown_corpus": 0,
+            "parse_errors": 0,
+            "chord_parse_failures": 0,
+        }
+
+    def corpus_entry(self, corpus_label: str, genre: str) -> dict:
+        if corpus_label not in self.report["corpora"]:
+            self.report["corpora"][corpus_label] = {
+                "files": 0, "chords": 0, "transitions": 0,
+                "genre": genre, "key_failures": 0, "chord_failures": 0,
+            }
+        return self.report["corpora"][corpus_label]
+
+    def add_file(
+        self,
+        genre: str,
+        corpus_label: str,
+        parsed_chords: List[Optional[ParsedChord]],
+    ) -> None:
+        entry = self.corpus_entry(corpus_label, genre)
+
+        valid_count = sum(1 for p in parsed_chords if p is not None)
+        self.report["total_chords_parsed"] += valid_count
+        entry["chords"] += valid_count
+
+        # Level 2: extension & bass distributions
+        for chord in parsed_chords:
+            if chord is None:
+                continue
+            self.level2_ext[genre][chord.state][chord.extension_key] += 1
+            self.level2_bass[genre][chord.state][str(chord.bass_interval)] += 1
+
+        # Level 1: bigram transitions (skip across silences - no phantom splicing)
+        transitions = 0
+        for a, b in zip(parsed_chords, parsed_chords[1:]):
+            if a is None or b is None:
+                continue
+            self.level1[genre][a.state][b.state] += 1
+            transitions += 1
+
+        self.report["total_transitions"] += transitions
+        entry["transitions"] += transitions
+        entry["files"] += 1
+        self.report["total_files"] += 1
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Per-file processing
+# ─────────────────────────────────────────────────────────────────────────────
+def process_file(fpath: str, data_root: str, acc: Accumulator) -> None:
+    corpus_dir = infer_corpus_dir(fpath, data_root)
 
     try:
         with open(fpath, "r", encoding="utf-8") as f:
             data = json.load(f)
     except Exception:
-        report["parse_errors"] += 1
-        continue
+        acc.report["parse_errors"] += 1
+        return
 
     annotations = data.get("annotations", [])
-    chord_ann, chord_ns, key_data = get_annotations(annotations)
+    chord_ann, _chord_ns, key_data = get_annotations(annotations)
     if not chord_ann:
-        continue
+        return
 
-    # ── Genre ──────────────────────────────────────────────────────────────
     ann_meta = chord_ann.get("annotation_metadata", {})
     genre = resolve_genre(ann_meta, corpus_dir)
     if genre is None:
-        report["skipped_unknown_corpus"] += 1
-        continue
+        acc.report["skipped_unknown_corpus"] += 1
+        return
 
     corpus_label = ann_meta.get("corpus") or corpus_dir
-    if corpus_label not in report["corpora"]:
-        report["corpora"][corpus_label] = {
-            "files": 0, "chords": 0, "transitions": 0,
-            "genre": genre, "key_failures": 0, "chord_failures": 0
-        }
 
-    # ── Key ────────────────────────────────────────────────────────────────
-    active_keys = []
-    for kd in key_data:
-        val = str(kd.get("value", ""))
-        kr = parse_key(val)
-        if kr:
-            t = float(kd.get("time", 0.0))
-            d = float(kd.get("duration", 0.0))
-            active_keys.append({
-                "start": t,
-                "end": t + d,
-                "tonic_pc": kr[0]
-            })
+    timeline = KeyTimeline.from_key_mode_data(key_data)
+    if not timeline:
+        acc.report["skipped_no_key"] += 1
+        acc.corpus_entry(corpus_label, genre)["key_failures"] += 1
+        return
 
-    if not active_keys:
-        report["skipped_no_key"] += 1
-        report["corpora"][corpus_label]["key_failures"] += 1
-        continue
-
-    # Sort keys by start time to ensure chronological sequence
-    active_keys.sort(key=lambda x: x["start"])
-
-    def get_active_tonic(chord_time):
-        """Finds the active key for a given timestamp."""
-        for k in active_keys:
-            # Use a tiny epsilon (0.001) to forgive floating point inaccuracies in JAMS
-            if k["start"] - 0.001 <= chord_time < k["end"] + 0.001:
-                return k["tonic_pc"]
-        
-        # Fallback: If there is a tiny gap between annotations, use the most recent key
-        past_keys = [k for k in active_keys if k["start"] <= chord_time]
-        if past_keys:
-            return past_keys[-1]["tonic_pc"]
-        
-        # Absolute fallback: use the first key in the song
-        return active_keys[0]["tonic_pc"]
-
-    # ── Parse chords ───────────────────────────────────────────────────────
-    parsed = []
+    parsed: List[Optional[ParsedChord]] = []
     for entry in chord_ann.get("data", []):
         val = entry.get("value", "N")
         chord_time = float(entry.get("time", 0.0))
-        
-        # Dynamically resolve the key for this specific chord's timestamp
-        current_tonic = get_active_tonic(chord_time)
+        tonic = timeline.tonic_at(chord_time)
 
-        result = parse_harte(val, current_tonic)
-        
+        result = parse_harte(val, tonic)
         if result is None:
             if val not in ("N", "X", "", None):
-                report["chord_parse_failures"] += 1
-                report["corpora"][corpus_label]["chord_failures"] += 1
-            parsed.append(None) # Phantom splicing fix
+                acc.report["chord_parse_failures"] += 1
+                acc.corpus_entry(corpus_label, genre)["chord_failures"] += 1
+            parsed.append(None)
             continue
-            
         parsed.append(result)
 
-    # Count only the actual parsed chords, ignoring the Nones
-    valid_chords_count = sum(1 for p in parsed if p is not None)
-    report["total_chords_parsed"] += valid_chords_count
-    report["corpora"][corpus_label]["chords"] += valid_chords_count
+    acc.add_file(genre, corpus_label, parsed)
 
-    # ── Level 2: extension & bass distributions ────────────────────────────
-    for item in parsed:
-        if item is None:
-            continue # FIX: Prevent unpacking error on silences
-            
-        root_iv, triad, bass_iv, seventh, ninth, eleventh, thirteenth = item
-        state   = f"{root_iv}_{triad}"
-        ext_key = f"({seventh},{ninth},{eleventh},{thirteenth})"
-        level2_ext [genre][state][ext_key]    += 1
-        level2_bass[genre][state][str(bass_iv)] += 1
-
-    # ── Level 1: bigram transitions ────────────────────────────────────────
-    valid_transitions = 0
-    for i in range(len(parsed) - 1):
-        if parsed[i] is None or parsed[i+1] is None:
-            continue # FIX: Breaks the phantom splice!
-            
-        from_st = f"{parsed[i][0]}_{parsed[i][1]}"
-        to_st   = f"{parsed[i+1][0]}_{parsed[i+1][1]}"
-        level1[genre][from_st][to_st] += 1
-        valid_transitions += 1
-
-    report["total_transitions"] += valid_transitions
-    report["corpora"][corpus_label]["transitions"] += valid_transitions
-    report["corpora"][corpus_label]["files"] += 1
-    report["total_files"] += 1
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Normalise counts → probabilities
+# Normalization / output
 # ─────────────────────────────────────────────────────────────────────────────
 def dedefault(d):
     if isinstance(d, defaultdict):
         return {k: dedefault(v) for k, v in d.items()}
     return d
 
-def normalise(count_dict):
+
+def normalise(count_dict: dict) -> dict:
     prob = {}
     for state, outcomes in count_dict.items():
         total = sum(outcomes.values())
@@ -484,41 +523,67 @@ def normalise(count_dict):
     return prob
 
 
+def write_outputs(acc: Accumulator, out_dir: str) -> None:
+    os.makedirs(out_dir, exist_ok=True)
+
+    for genre in acc.genres:
+        l1_raw = dedefault(acc.level1[genre])
+        le_raw = dedefault(acc.level2_ext[genre])
+        lb_raw = dedefault(acc.level2_bass[genre])
+
+        with open(os.path.join(out_dir, f"level1_transitions_{genre}.json"), "w") as f:
+            json.dump({"counts": l1_raw, "probabilities": normalise(l1_raw)}, f, indent=2)
+
+        with open(os.path.join(out_dir, f"level2_extensions_{genre}.json"), "w") as f:
+            json.dump({"counts": le_raw, "probabilities": normalise(le_raw)}, f, indent=2)
+
+        with open(os.path.join(out_dir, f"level2_bass_{genre}.json"), "w") as f:
+            json.dump({"counts": lb_raw, "probabilities": normalise(lb_raw)}, f, indent=2)
+
+        n_states = len(l1_raw)
+        n_trans = sum(sum(v.values()) for v in l1_raw.values())
+        print(f"\n[{genre.upper()}]")
+        print(f"  L1 states: {n_states}   L1 transitions: {n_trans}")
+        print(f"  L2 ext states: {len(le_raw)}   L2 bass states: {len(lb_raw)}")
+
+    with open(os.path.join(out_dir, "extraction_report.json"), "w") as f:
+        json.dump(acc.report, f, indent=2)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
-# Write outputs
+# Entry point
 # ─────────────────────────────────────────────────────────────────────────────
-OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "distributions")
-os.makedirs(OUT_DIR, exist_ok=True)
+def run(data_root: Optional[str] = None, out_dir: Optional[str] = None) -> Accumulator:
+    data_root = data_root or os.environ.get("DATA_ROOT", "data_normalized")
+    if not os.path.isdir(data_root):
+        data_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data_normalized")
 
-for genre in GENRES:
-    l1_raw  = dedefault(level1     [genre])
-    le_raw  = dedefault(level2_ext [genre])
-    lb_raw  = dedefault(level2_bass[genre])
+    out_dir = out_dir or os.path.join(os.path.dirname(os.path.abspath(__file__)), "distributions")
 
-    with open(os.path.join(OUT_DIR, f"level1_transitions_{genre}.json"), "w") as f:
-        json.dump({"counts": l1_raw, "probabilities": normalise(l1_raw)}, f, indent=2)
+    jams_files = sorted(glob.glob(os.path.join(data_root, "**", "*.jams"), recursive=True))
+    print(f"Found {len(jams_files)} JAMS files under {data_root}")
+    if not jams_files:
+        print("WARNING: No JAMS files found. Set DATA_ROOT env var or run from project root.")
 
-    with open(os.path.join(OUT_DIR, f"level2_extensions_{genre}.json"), "w") as f:
-        json.dump({"counts": le_raw, "probabilities": normalise(le_raw)}, f, indent=2)
+    acc = Accumulator(GENRES)
+    for fpath in jams_files:
+        process_file(fpath, data_root, acc)
 
-    with open(os.path.join(OUT_DIR, f"level2_bass_{genre}.json"), "w") as f:
-        json.dump({"counts": lb_raw, "probabilities": normalise(lb_raw)}, f, indent=2)
+    write_outputs(acc, out_dir)
 
-    n_states = len(l1_raw)
-    n_trans  = sum(sum(v.values()) for v in l1_raw.values())
-    print(f"\n[{genre.upper()}]")
-    print(f"  L1 states: {n_states}   L1 transitions: {n_trans}")
-    print(f"  L2 ext states: {len(le_raw)}   L2 bass states: {len(lb_raw)}")
+    r = acc.report
+    print(f"\n{'=' * 60}")
+    print(f"Files processed       : {r['total_files']}")
+    print(f"Chords parsed         : {r['total_chords_parsed']:,}")
+    print(f"Transitions recorded  : {r['total_transitions']:,}")
+    print(f"Skipped - no key      : {r['skipped_no_key']}")
+    print(f"Skipped - unknown corp: {r['skipped_unknown_corpus']}")
+    print(f"File parse errors     : {r['parse_errors']}")
+    print(f"Chord parse failures  : {r['chord_parse_failures']}")
+    print(f"\nOutputs -> {out_dir}/")
 
-with open(os.path.join(OUT_DIR, "extraction_report.json"), "w") as f:
-    json.dump(report, f, indent=2)
+    return acc
 
-print(f"\n{'='*60}")
-print(f"Files processed       : {report['total_files']}")
-print(f"Chords parsed         : {report['total_chords_parsed']:,}")
-print(f"Transitions recorded  : {report['total_transitions']:,}")
-print(f"Skipped – no key      : {report['skipped_no_key']}")
-print(f"Skipped – unknown corp: {report['skipped_unknown_corpus']}")
-print(f"File parse errors     : {report['parse_errors']}")
-print(f"Chord parse failures  : {report['chord_parse_failures']}")
-print(f"\nOutputs → {OUT_DIR}/")
+
+if __name__ == "__main__":
+    run()
