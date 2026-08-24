@@ -176,7 +176,7 @@ _DEFAULT_DIST_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "di
 # ─────────────────────────────────────────────────────────────────────────────
 @dataclass
 class GenParams:
-    discount: float = 175           # D -- shared interpolation discount, all stages/levels (§9)
+    discount: float = 70           # D -- shared interpolation discount, all stages/levels (§9)
     add_k: float = 0              # k -- within-distribution Laplace smoothing (§9)
     min_count_a: int = 5000           # §4.2 Level A trie-selection threshold
     min_count_b: int = 5000           # §4.2 Level B trie-selection threshold
@@ -671,7 +671,7 @@ def parse_args():
     p.add_argument("--self-transition-discount", type=float, default=None,
                     help="delta: Stage 1 exact chord-repeat discount (§10.3).")
 
-    p.add_argument("--discount", type=float, default=175,
+    p.add_argument("--discount", type=float, default=200,
                     help="D: interpolation discount constant, shared across all stages/levels (§9).")
     p.add_argument("--add-k", type=float, default=0,
                     help="k: within-distribution Laplace smoothing constant (§9).")
@@ -682,7 +682,7 @@ def parse_args():
     p.add_argument("--epsilon-floor", type=float, default=0.0,
                     help="Optional epsilon floor of Level-0 mass mixed into Stage 1 (§8, §9).")
 
-    p.add_argument("--songs", type=int, default=5)
+    p.add_argument("--songs", type=int, default=100)
     p.add_argument("--seed", type=int, default=None)
     p.add_argument("--dist-dir", default=_DEFAULT_DIST_DIR)
     p.add_argument("--out-dir", default="gen/labels")
