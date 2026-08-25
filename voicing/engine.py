@@ -152,6 +152,7 @@ class Engine:
                                  extra_doubling_targets=tuple(policy.extra.get(
                                      "doubling_targets", ("root", "5th"))),
                                  gen_dir=self.gen_dir)
+        self.ctx["_selected_tone_flags"] = selected.flags
 
         dct_role, secondary_roles = compute_dct(chord, selected.degrees, gen_dir=self.gen_dir)
         dct_pc = dct_pitch_class(chord, selected.degrees, dct_role) if dct_role else None
