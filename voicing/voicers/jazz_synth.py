@@ -29,6 +29,7 @@ def candidate_source(p: CandidateGenParams) -> list[Candidate]:
         p.anchor_center, p.prev_midi, p.doubling_roles, p.max_doublings,
         p.rng, anchor_shift=p.anchor_shift, doubling_pcs=doubling_pcs,
         cluster_min_gap=p.policy.extra.get("cluster_min_gap", 3),
+        max_candidates=1000,
     )
 
 
@@ -56,16 +57,6 @@ def post_filter(candidate: Candidate, prev, ctx: dict, policy: VoicerPolicy) -> 
     chord = ctx.get("_current_chord")
     anchor = ctx.get("_current_anchor_center")
     if chord is None or anchor is None:
-        return False
-    bottom = min(candidate.pitches)
-    if not (anchor - 14 <= bottom <= anchor):
-        return False
-
-    roles = set(candidate.roles)
-    shell = _shell_roles(chord)
-    if chord.seventh != "N" and not shell <= roles:
-        return False
-    if "root" not in roles and chord.seventh == "N" and not shell <= roles:
         return False
 
     return True
@@ -95,8 +86,8 @@ def role_penalty(candidate: Candidate, prev, ctx: dict, policy: VoicerPolicy) ->
 
 
 SECTION_PROFILE = {
-    "verse": {"drift_free": 5, "max_voices": 6, "root_double_p": 0.15},
-    "prechorus": {"drift_free": 5, "max_voices": 6, "root_double_p": 0.15},
+    "verse": {"drift_free": 5, "max_voices": 7, "root_double_p": 0.15},
+    "prechorus": {"drift_free": 5, "max_voices": 7, "root_double_p": 0.15},
     "chorus": {"drift_free": 6, "max_voices": 7, "root_double_p": 0.20},
     "bridge": {"drift_free": 5, "max_voices": 6, "root_double_p": 0.15},
     "outro": {"drift_free": 5, "max_voices": 7, "root_double_p": 0.15},
