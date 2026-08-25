@@ -13,6 +13,7 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass, field
 from functools import lru_cache
+from math import comb
 from typing import Optional
 
 from .types import Degree
@@ -325,13 +326,29 @@ def apply_doubling_variants(assignment: list[tuple], doubling_roles: list[str],
                     for role in valid_roles}
 
     seen_keys = {frozenset(p for _, p in assignment)}
+    available_pitches = set().union(*role_options.values()) - {
+        p for _, p in assignment
+    }
+    # This is an upper bound because it ignores role eligibility and counts
+    # every subset of available pitches as reachable. That makes it safe:
+    # once this many distinct pitch sets have been emitted, no future
+    # random attempt can produce a new key. In the usual multi-role case
+    # the bound is much larger than `max_variants`, so RNG behavior and the
+    # existing attempt budget are untouched. It matters for low-cardinality
+    # chords, where repeated attempts can keep drawing the same small set of
+    # octave placements after the reachable space is exhausted.
+    max_reachable = 1 + sum(
+        comb(len(available_pitches), n)
+        for n in range(1, min(max_doublings, len(available_pitches)) + 1)
+    )
+    target_variants = min(max_variants, max_reachable)
     attempts = 0
     # A generous-but-bounded search budget: the deterministic fallback below
     # guarantees at least one feasible maximally-doubled variant regardless,
     # so this only needs to be "enough for good diversity," not "enough to
     # guarantee success."
     max_attempts = max_variants * 3
-    while len(variants) < max_variants and attempts < max_attempts:
+    while len(variants) < target_variants and attempts < max_attempts:
         attempts += 1
         n_doublings = rng.randint(1, max_doublings)
         current = list(assignment)
@@ -344,7 +361,7 @@ def apply_doubling_variants(assignment: list[tuple], doubling_roles: list[str],
             p = _weighted_octave_choice(options, anchor_center, rng, direction_bias=anchor_shift)
             current.append((role, p))
             used.add(p)
-        key = frozenset(p for _, p in current)
+        key = frozenset(used)
         if key in seen_keys:
             continue
         seen_keys.add(key)
@@ -380,7 +397,7 @@ def apply_doubling_variants(assignment: list[tuple], doubling_roles: list[str],
         current.append((role, p))
         used.add(p)
         added += 1
-    key = tuple(sorted(p for _, p in current))
+    key = tuple(sorted(used))
     if key not in seen_keys:
         variants.append(current)
 
@@ -430,10 +447,14 @@ def free_placement(role_pcs: list[tuple], window_lo: int, window_hi: int,
     out = []
     any_clash_clean = False
     for assignment in assignments:
+        remaining = max_candidates - len(out)
+        if remaining <= 0:
+            break
         for variant in apply_doubling_variants(assignment, doubling_roles, role_pc_lookup,
                                                 window_lo, window_hi, max_doublings, rng,
                                                 anchor_center=anchor_center,
-                                                anchor_shift=anchor_shift):
+                                                anchor_shift=anchor_shift,
+                                                max_variants=min(40, remaining)):
             pitches = [p for _, p in variant]
             roles = [r for r, _ in variant]
             cand = Candidate(pitches, roles).dedup_sorted()
@@ -782,4 +803,3 @@ def hand_split_free_placement(role_pcs: list[tuple], lh_window: tuple, rh_window
         )
         return out[:max_candidates] + direct
     return out[:max_candidates]
-

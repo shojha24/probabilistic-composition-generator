@@ -218,7 +218,9 @@ def candidate_source(p: CandidateGenParams) -> list:
     # `free_placement`'s own clash-aware fallback only fires when its pool
     # has *no* clash-clean candidate at all, and by definition it already
     # found one here.
-    safe = [c for c in raw if spacing_hard_ok(c.pitches, min_gap) and c not in matches]
+    matched_ids = {id(c) for c in matches}
+    safe = [c for c in raw
+            if id(c) not in matched_ids and spacing_hard_ok(c.pitches, min_gap)]
     # Always keep candidates that already satisfy the hard cluster/LIL
     # gates (spec 07 §7.3) even when they don't match `spread` -- for a
     # chord with a semitone-adjacent role pair (e.g. maj7's root/7th, or
