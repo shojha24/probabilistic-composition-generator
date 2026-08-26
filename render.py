@@ -31,7 +31,11 @@ def render_directory(input_dir: str, output: str, seed: int | None = None, mode:
             )
             chord_track = chord_module.render(progression)
             bass_module = BassModule(seed=None if seed is None else seed + index)
-            bass_track = bass_module.render(progression)
+            bass_track = bass_module.render(
+                progression,
+                pad_instrument=chord_module.selected_instrument,
+                pad_mode=mode == "pads",
+            )
             out.write(f"START_SONG_{index}\n")
             out.write(f"{chord_track}  {bass_track}\n")
             out.write("END_SONG\n")
@@ -42,7 +46,8 @@ def render_directory(input_dir: str, output: str, seed: int | None = None, mode:
                 f"({voicer}, chord={chord_module.last_instrument} "
                 f"[I{chord_module.last_instrument_program}], "
                 f"bass={bass_module.last_instrument.name} "
-                f"[I{bass_module.last_instrument.program}], {mode})"
+                f"[I{bass_module.last_instrument.program}]"
+                f"{' (pad collapse)' if bass_module.collapsed_to_pad else ''}, {mode})"
             )
     print(f"Rendered {len(files)} song(s) to {output}")
     print("Voicer summary:")

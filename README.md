@@ -232,6 +232,10 @@ Instruments marked for pads, arpeggios, or bass are filtered by rendering
 mode. The programs are zero-based General MIDI values, which are the numeric
 form accepted by JFugue's `I<number>` syntax.
 
+In pad mode, the bass has a seeded 30% chance to use the same instrument
+program as the chord pad. Its pitch remains in the bass register; only the
+instrument timbre collapses to the pad timbre.
+
 ### Useful generator options
 
 Use a fixed seed for repeatable output:

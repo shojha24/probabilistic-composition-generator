@@ -40,6 +40,7 @@ class ChordModule:
     last_voicer: str | None = field(default=None, init=False)
     last_instrument: str | None = field(default=None, init=False)
     last_instrument_program: int | None = field(default=None, init=False)
+    selected_instrument: Instrument | None = field(default=None, init=False)
 
     def render(self, progression: dict | Song) -> str:
         if self.mode not in {"pads", "arpeggios"}:
@@ -80,6 +81,7 @@ class ChordModule:
         self.last_voicer = policy.voicer_id
         self.last_instrument = selected_instrument.name
         self.last_instrument_program = selected_instrument.program
+        self.selected_instrument = selected_instrument
         events = progression.chords if isinstance(progression, Song) else progression["chords"]
         tokens = [
             chord_token(chord.midi, event.get("duration_token", "w")
