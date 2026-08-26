@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections import Counter
 from pathlib import Path
 
 from bass_module import BassModule
@@ -19,13 +20,30 @@ def render_directory(input_dir: str, output: str, seed: int | None = None, mode:
     files = sorted(Path(input_dir).glob("song_*.json"))
     if not files:
         raise FileNotFoundError(f"No song_*.json files found in {input_dir}")
+    voicer_counts = Counter()
     with open(output, "w", encoding="utf-8") as out:
         for index, path in enumerate(files):
             with open(path, encoding="utf-8") as source:
                 progression = json.load(source)
+            chord_module = ChordModule(
+                mode=mode,
+                seed=None if seed is None else seed + index,
+            )
+            chord_track = chord_module.render(progression)
+            bass_track = BassModule().render(progression)
             out.write(f"START_SONG_{index}\n")
-            out.write(render_song(progression, None if seed is None else seed + index, mode) + "\n")
+            out.write(f"{chord_track}  {bass_track}\n")
             out.write("END_SONG\n")
+            voicer = chord_module.last_voicer or "unknown"
+            voicer_counts[voicer] += 1
+            print(
+                f"Rendered song {index}: {path.name} "
+                f"({voicer}, {chord_module.last_instrument}, {mode})"
+            )
+    print(f"Rendered {len(files)} song(s) to {output}")
+    print("Voicer summary:")
+    for voicer, count in sorted(voicer_counts.items()):
+        print(f"  {voicer}: {count}")
 
 
 def main() -> None:

@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
-from voicing.engine import Engine
+from voicing.engine import Engine, VoicingImpossible
 from voicing.types import Song
 from voicing.voicers import jazz_guitar, jazz_piano, jazz_synth
 from voicing.voicers import pop_guitar, pop_piano, pop_synth
@@ -39,6 +39,8 @@ class ChordModule:
 
     mode: str = "pads"
     seed: int | None = None
+    last_voicer: str | None = field(default=None, init=False)
+    last_instrument: str | None = field(default=None, init=False)
 
     def render(self, progression: dict | Song) -> str:
         if self.mode not in {"pads", "arpeggios"}:
@@ -48,10 +50,27 @@ class ChordModule:
 
         song = progression if isinstance(progression, Song) else Song.from_dict(progression)
         rng = random.Random(self.seed)
-        instrument = rng.choice(tuple(INSTRUMENTS))
-        policy = POLICIES[(song.genre, instrument)]
-        engine = Engine(policy, {"seed": rng.randrange(2**32)})
-        voiced = engine.run(song)
+        instruments = list(INSTRUMENTS)
+        rng.shuffle(instruments)
+        failures = []
+        voiced = None
+        instrument = None
+        for candidate_instrument in instruments:
+            policy = POLICIES[(song.genre, candidate_instrument)]
+            engine = Engine(policy, {"seed": rng.randrange(2**32)})
+            try:
+                voiced = engine.run(song)
+                instrument = candidate_instrument
+                break
+            except VoicingImpossible as error:
+                failures.append(f"{candidate_instrument}: {error}")
+        if voiced is None or instrument is None:
+            details = "; ".join(failures)
+            raise RuntimeError(
+                f"No supported {song.genre} instrument could voice the progression: {details}"
+            )
+        self.last_voicer = policy.voicer_id
+        self.last_instrument = instrument
         events = progression.chords if isinstance(progression, Song) else progression["chords"]
         tokens = [
             chord_token(chord.midi, event.get("duration_token", "w")

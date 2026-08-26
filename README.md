@@ -4,17 +4,20 @@
 
 This project creates symbolic chord progressions for chord-recognition data.
 
-The current pipeline has two Python stages:
+The current pipeline has these Python stages:
 
 1. `extract_distributions.py` learns count tables from normalized JAMS files.
-2. `chord_gen.py` samples chord-event sequences from those tables.
+2. `chord_gen.py` samples chord-event sequences from those tables and assigns
+   genre-specific durations.
+3. `chord_module.py` selects a genre-compatible voicer and renders pad chords.
+4. `bass_module.py` renders the generated bass notes.
+5. `render.py` combines the tracks into synchronized JFugue score text.
 
 The voicing stage is documented in [`voicing/README.md`](voicing/README.md).
 It converts chord events into MIDI pitches after chord generation.
 
-JFugue rendering is the next integration stage. A minimally working proof of
-concept is available in `HumanizedMidiRenderer.java`. Older rendering code is
-available in `old_src/`.
+JFugue score text is now produced by `render.py`. MIDI conversion and
+humanization use `HumanizedMidiRenderer.java`.
 
 ## Pipeline
 
@@ -30,16 +33,18 @@ extract_distributions.py
         v
 chord_gen.py
         |
-        +--> chord-event JSON files
-        +--> generated score input
+        +--> chord-event JSON files with durations
         |
         v
-voicing/ engine
+chord_module.py + bass_module.py
         |
-        +--> voiced MIDI chord data
+        +--> synchronized JFugue score tracks
         |
         v
-JFugue / HumanizedMidiRenderer
+render.py
+        |
+        v
+HumanizedMidiRenderer.java
         |
         v
 MIDI files
@@ -180,10 +185,12 @@ For each song, the generator performs these stages:
 1. Sample the root and triad with the Stage 1 backoff model.
 2. Sample the bass with the Stage 2 autoregressive model.
 3. Walk the Stage 3 extension trie.
-4. Write the resulting chord events.
+4. Sample a duration from the genre-specific duration distribution.
+5. Compute per-chord beat and second timing from the BPM.
+6. Write the resulting chord events and timing metadata.
 
 The generator does not choose MIDI octaves or instrument shapes. Those tasks
-belong to the voicing engine.
+belong to `chord_module.py` and the voicing engine.
 
 ## Chord, bass, and score rendering
 
@@ -315,7 +322,7 @@ The voicing engine performs tone selection, candidate generation, hard
 filtering, cost calculation, and probabilistic selection. See
 [`voicing/README.md`](voicing/README.md) for the full process.
 
-## JFugue rendering plan
+## Score and JFugue rendering
 
 The planned rendering flow is:
 
@@ -335,7 +342,17 @@ HumanizedMidiRenderer
 MIDI sequence
 ```
 
-`HumanizedMidiRenderer.java` currently provides a proof of concept. It:
+`render.py` currently produces the synchronized score text. It:
+
+- reads generated chord-event JSON files;
+- selects a piano, guitar, or synth voicer by genre;
+- renders pad chords and bass notes;
+- preserves each chord's duration token in both tracks;
+- writes `START_SONG_N` and `END_SONG` blocks.
+
+Arpeggio mode is exposed by the interface but is not implemented yet.
+
+`HumanizedMidiRenderer.java` provides the next, Java-based conversion step. It:
 
 - reads JFugue pattern text;
 - creates a MIDI sequence;
@@ -347,15 +364,45 @@ MIDI sequence
 - resolves retrigger overlap;
 - writes MIDI files.
 
-The Java renderer is not yet the integrated output stage of the Python
-generator. The integration must define:
+The Python-to-JFugue event format is defined by `render.py`.
 
-1. the Python-to-JFugue event format;
-2. channel assignments;
-3. tempo and duration mapping;
-4. voicer-to-instrument mapping;
-5. output naming and metadata;
-6. error handling for invalid patterns.
+### Run the Java MIDI renderer
+
+Install a JDK and place `jfugue-5.0.9.jar` in the repository root (or replace
+the path below with the location of your JFugue JAR). First create score text:
+
+```bash
+python3 render.py \
+  --in-dir ./gen/pop-rock-labels \
+  --out ./gen/pop_rock_scores.txt \
+  --mode pads \
+  --seed 7
+```
+
+Compile the renderer:
+
+```bash
+javac -cp jfugue-5.0.9.jar HumanizedMidiRenderer.java
+```
+
+Run it with the score input and MIDI output directory:
+
+```bash
+java -cp ".:jfugue-5.0.9.jar" \
+  HumanizedMidiRenderer \
+  ./gen/pop_rock_scores.txt \
+  ./gen/midi_output
+```
+
+On Windows, use `;` instead of `:` in the Java classpath:
+
+```powershell
+java -cp ".;jfugue-5.0.9.jar" HumanizedMidiRenderer `
+  .\gen\pop_rock_scores.txt .\gen\midi_output
+```
+
+The renderer writes one `.mid` file per `START_SONG_N` block. The Java step
+is implemented, but it is not automatically invoked by `render.py`.
 
 Do not treat a JFugue string as the source of chord semantics. The structured
 chord event and voiced MIDI data remain the source records.
@@ -367,12 +414,16 @@ The current responsibilities are:
 | Component | Responsibility |
 |---|---|
 | `extract_distributions.py` | Learn count tables |
-| `chord_gen.py` | Sample symbolic chord events |
+| `chord_gen.py` | Sample timed symbolic chord events |
+| `chord_module.py` | Select a voicer and render pad chord tracks |
+| `bass_module.py` | Render bass tracks |
+| `render.py` | Combine tracks into JFugue score text |
 | `voicing/` | Select and realize MIDI voicings |
-| `HumanizedMidiRenderer.java` | Prototype JFugue-to-MIDI rendering |
+| `HumanizedMidiRenderer.java` | Convert JFugue text to humanized MIDI |
 | `old_src/` | Historical implementation and reference material |
 
-The current Python chord generator does not produce final audio.
+The Python pipeline produces score text, not final audio. Java converts the
+score text to MIDI; audio synthesis is a separate downstream step.
 
 ## Validation
 
@@ -396,14 +447,14 @@ Use a fixed seed when comparing changes to generation or voicing behavior.
 
 The project has these known limits:
 
-- The JFugue renderer is a proof of concept, not the final integrated stage.
-- The Python-to-JFugue adapter is not yet defined.
+- The Java renderer remains a proof of concept and is not invoked by
+  `render.py`.
+- Arpeggio rendering is not implemented.
 - Statistical distribution targets need larger calibration reports.
 - Extended guitar shapes use an explicit programmatic derivation because
   complete canonical coverage is not available in the reviewed sources.
 - A narrow pop-synth context can still fail on a dense major seventh,
   ninth, sharp-eleventh chord.
 
-The next implementation step is to connect voiced chord events to a stable
-JFugue pattern format and then pass that format to
-`HumanizedMidiRenderer`.
+The next implementation step is to invoke the Java renderer from the score
+pipeline, if a single-command MIDI workflow is required.
