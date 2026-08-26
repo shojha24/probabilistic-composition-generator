@@ -219,6 +219,19 @@ chord duration tokens, so they remain synchronized. `--mode arpeggios` is
 part of the interface, but currently reports that arpeggio rendering is not
 implemented.
 
+Instrument programs are selected reproducibly when `--seed` is supplied.
+Chord tracks choose from the expanded role-aware catalog in `instruments.py`.
+This includes grand, bright, honky-tonk, Rhodes, DX7, harpsichord, clavinet,
+vibraphone, marimba, organ, acoustic and electric guitars, overdrive,
+distortion, sitar, banjo, shamisen, koto, synth pads, choir, bowed, metallic,
+halo, sweep, synth strings, atmosphere, and soundtrack programs.
+
+Bass tracks choose among acoustic, finger/pick electric, fretless, slap,
+synth, contrabass, cello, square-wave, sawtooth, and basslead programs.
+Instruments marked for pads, arpeggios, or bass are filtered by rendering
+mode. The programs are zero-based General MIDI values, which are the numeric
+form accepted by JFugue's `I<number>` syntax.
+
 ### Useful generator options
 
 Use a fixed seed for repeatable output:

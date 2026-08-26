@@ -30,7 +30,8 @@ def render_directory(input_dir: str, output: str, seed: int | None = None, mode:
                 seed=None if seed is None else seed + index,
             )
             chord_track = chord_module.render(progression)
-            bass_track = BassModule().render(progression)
+            bass_module = BassModule(seed=None if seed is None else seed + index)
+            bass_track = bass_module.render(progression)
             out.write(f"START_SONG_{index}\n")
             out.write(f"{chord_track}  {bass_track}\n")
             out.write("END_SONG\n")
@@ -38,7 +39,10 @@ def render_directory(input_dir: str, output: str, seed: int | None = None, mode:
             voicer_counts[voicer] += 1
             print(
                 f"Rendered song {index}: {path.name} "
-                f"({voicer}, {chord_module.last_instrument}, {mode})"
+                f"({voicer}, chord={chord_module.last_instrument} "
+                f"[I{chord_module.last_instrument_program}], "
+                f"bass={bass_module.last_instrument.name} "
+                f"[I{bass_module.last_instrument.program}], {mode})"
             )
     print(f"Rendered {len(files)} song(s) to {output}")
     print("Voicer summary:")
