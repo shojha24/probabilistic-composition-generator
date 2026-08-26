@@ -25,6 +25,10 @@ CHORD_INSTRUMENTS = {
         Instrument("percussive-organ", 17, frozenset(("bass", "arpeggios"))),
         Instrument("rock-organ", 18, frozenset(("pads", "bass"))),
         Instrument("church-organ", 19, frozenset(("pads",))),
+        Instrument("shakuhachi", 77, frozenset(("pads",))),
+        Instrument("bagpipe", 109, frozenset(("pads",))),
+        Instrument("fiddle", 110, frozenset(("pads", "arpeggios"))),
+        Instrument("shanai", 111, frozenset(("pads",))),
     ),
     "guitar": (
         Instrument("acoustic-guitar-nylon", 24, frozenset(("arpeggios",))),
