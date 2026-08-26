@@ -236,6 +236,10 @@ In pad mode, the bass has a seeded 30% chance to use the same instrument
 program as the chord pad. Its pitch remains in the bass register; only the
 instrument timbre collapses to the pad timbre.
 
+When the generated bass pitch is in MIDI 40–47 and the corresponding chord
+voicing also contains a note in MIDI 40–47, the bass moves down one octave.
+If there is no overlap, the bass pitch is unchanged.
+
 ### Useful generator options
 
 Use a fixed seed for repeatable output:

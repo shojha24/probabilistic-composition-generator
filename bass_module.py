@@ -22,6 +22,7 @@ class BassModule:
         progression: dict | Song,
         pad_instrument: Instrument | None = None,
         pad_mode: bool = False,
+        chord_midis: list[list[int]] | None = None,
     ) -> str:
         song = progression if isinstance(progression, Song) else Song.from_dict(progression)
         if not 0.0 <= self.pad_collapse_probability <= 1.0:
@@ -42,9 +43,12 @@ class BassModule:
             program = self.instrument
         events = progression.chords if isinstance(progression, Song) else progression["chords"]
         tokens = []
-        for event in events:
+        for index, event in enumerate(events):
             bass_pc = (event["root_interval"] + event.get("bass_interval", 0) + song.tonic_pc) % 12
             midi = 36 + bass_pc
+            chord_pitches = chord_midis[index] if chord_midis and index < len(chord_midis) else ()
+            if 40 <= midi <= 47 and any(40 <= pitch <= 47 for pitch in chord_pitches):
+                midi -= 12
             duration = event.get("duration_token", "w")
             tokens.append(f"{midi_to_jfugue(midi)}{duration}")
         return f"T{song.bpm} I{program} " + " ".join(tokens)

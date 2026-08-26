@@ -35,6 +35,7 @@ def render_directory(input_dir: str, output: str, seed: int | None = None, mode:
                 progression,
                 pad_instrument=chord_module.selected_instrument,
                 pad_mode=mode == "pads",
+                chord_midis=chord_module.last_voiced_midis,
             )
             out.write(f"START_SONG_{index}\n")
             out.write(f"{chord_track}  {bass_track}\n")
