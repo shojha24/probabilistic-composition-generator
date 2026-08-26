@@ -47,7 +47,6 @@ CHORD_INSTRUMENTS = {
     "synth": (
         Instrument("new-age-pad", 88, frozenset(("pads",))),
         Instrument("warm-pad", 89, frozenset(("pads",))),
-        Instrument("polysynth", 90, frozenset(("arpeggios",))),
         Instrument("choir-pad", 91, frozenset(("pads",))),
         Instrument("bowed-pad", 92, frozenset(("pads",))),
         Instrument("metallic-pad", 93, frozenset(("pads",))),
