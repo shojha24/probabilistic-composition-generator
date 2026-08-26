@@ -89,8 +89,8 @@ NOTE_TO_PC = {
 # whatever the extraction script actually emits, not to the spec's prose
 # description of it.
 try:
-    from extract_distributions_new import QUALITY_TO_TRIAD as _EXT_QUALITY_TO_TRIAD
-    from extract_distributions_new import QUALITY_TO_7TH as _EXT_QUALITY_TO_7TH
+    from extract_distributions import QUALITY_TO_TRIAD as _EXT_QUALITY_TO_TRIAD
+    from extract_distributions import QUALITY_TO_7TH as _EXT_QUALITY_TO_7TH
 except ImportError:
     _EXT_QUALITY_TO_TRIAD = None
     _EXT_QUALITY_TO_7TH = None
@@ -153,6 +153,28 @@ _TRIAD_FALLBACK = {
 
 EXT_SLOTS = ("seventh", "ninth", "eleventh", "thirteenth")
 VALID_GENRES = ("pop_rock", "jazz")  # §10.1
+DURATION_BEATS = {
+    "ww": 8.0, "w.": 6.0, "w": 4.0, "h.": 3.0,
+    "h": 2.0, "q.": 1.5, "q": 1.0,
+}
+DEFAULT_DURATION_WEIGHTS = {
+    "ww": 0.08, "w.": 0.07, "w": 0.50, "h.": 0.09,
+    "h": 0.13, "q.": 0.05, "q": 0.08,
+}
+GENRE_DURATION_WEIGHTS = {
+    "pop_rock": {
+        "ww": 0.02, "w.": 0.03, "w": 0.60, "h.": 0.05,
+        "h": 0.20, "q.": 0.05, "q": 0.05,
+    },
+    "jazz": {
+        "ww": 0.01, "w.": 0.01, "w": 0.30, "h.": 0.08,
+        "h": 0.40, "q.": 0.05, "q": 0.15,
+    },
+}
+GENRE_LABEL_DIRS: Dict[str, str] = {
+    "jazz": "jazz-labels",
+    "pop_rock": "pop-rock-labels",
+}
 
 # Stage 1 Level-1 temperature default table, §10.3. The spec doesn't supply
 # tuned values (that's an empirical exercise per §9), so both genres default
@@ -486,6 +508,7 @@ class ChordGenerator:
         dist_dir: str = _DEFAULT_DIST_DIR,
         bpm: int = 120,
         params: Optional[GenParams] = None,
+        duration_weights: Optional[Dict[str, float]] = None,
     ):
         if genre not in VALID_GENRES:
             raise ValueError(f"genre must be one of {VALID_GENRES}, got {genre!r}")
@@ -501,7 +524,19 @@ class ChordGenerator:
         self.tonic_pc = int(tonic_pc) % 12
         self.num_chords = num_chords
         self.bpm = bpm
+        if bpm <= 0:
+            raise ValueError(f"bpm must be positive, got {bpm}")
         self.rng = random.Random(seed)
+        self.duration_weights = dict(
+            duration_weights
+            if duration_weights is not None
+            else GENRE_DURATION_WEIGHTS.get(genre, DEFAULT_DURATION_WEIGHTS)
+        )
+        unknown = set(self.duration_weights) - set(DURATION_BEATS)
+        if unknown:
+            raise ValueError(f"Unknown duration token(s): {sorted(unknown)}")
+        if not self.duration_weights or sum(self.duration_weights.values()) <= 0:
+            raise ValueError("duration_weights must contain a positive total weight")
 
         self.params = params if params is not None else GenParams()
         self.params.temperature = float(
@@ -557,6 +592,8 @@ class ChordGenerator:
     def generate(self) -> List[dict]:
         state_hist = GenState()
         events: List[dict] = []
+        current_time = 0.0
+        seconds_per_beat = 60.0 / self.bpm
 
         for t in range(self.num_chords):
             # ---- Stage 1 ------------------------------------------------
@@ -600,6 +637,13 @@ class ChordGenerator:
             root_name = PC_TO_NOTE[root_pc]
             bass_name = PC_TO_NOTE[bass_pc]
             harte = reconstruct_harte(root_name, triad, bass_name, seventh, ninth, eleventh, thirteenth)
+            duration_token = self.rng.choices(
+                list(self.duration_weights), weights=list(self.duration_weights.values()), k=1
+            )[0]
+            duration_beats = DURATION_BEATS[duration_token]
+            duration_seconds = duration_beats * seconds_per_beat
+            time_start = current_time
+            current_time += duration_seconds
 
             events.append({
                 "root_interval": root_interval,
@@ -612,6 +656,11 @@ class ChordGenerator:
                 "root": root_name,
                 "bass": bass_name,
                 "harte": harte,
+                "duration_token": duration_token,
+                "duration_beats": duration_beats,
+                "duration_seconds": duration_seconds,
+                "time_start": time_start,
+                "time_end": current_time,
             })
 
             state_hist.prev_states.append(chosen_state)
@@ -630,6 +679,9 @@ class ChordGenerator:
             "tonic_pc": self.tonic_pc,
             "bpm": self.bpm,
             "num_chords": self.num_chords,
+            "duration_total_seconds": sum(
+                event["duration_seconds"] for event in events
+            ),
             "chords": events,
         }
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
@@ -685,7 +737,12 @@ def parse_args():
     p.add_argument("--songs", type=int, default=100)
     p.add_argument("--seed", type=int, default=None)
     p.add_argument("--dist-dir", default=_DEFAULT_DIST_DIR)
-    p.add_argument("--out-dir", default="gen/labels")
+    p.add_argument(
+        "--out-dir",
+        default=None,
+        help="Output directory override. By default, use gen/jazz-labels or "
+             "gen/pop-rock-labels according to each song's genre.",
+    )
     return p.parse_args()
 
 
@@ -706,8 +763,6 @@ def main():
     num_lo, num_hi = _parse_range(args.random_num_range)
     bpm_lo, bpm_hi = _parse_range(args.random_bpm_range)
 
-    os.makedirs(args.out_dir, exist_ok=True)
-
     base_params = GenParams(
         discount=args.discount,
         add_k=args.add_k,
@@ -716,7 +771,20 @@ def main():
         epsilon_floor=args.epsilon_floor,
     )
 
-    print(f"Generating {args.songs} song(s) -> {args.out_dir}/")
+    if args.out_dir is not None:
+        output_dirs = {genre: args.out_dir for genre in VALID_GENRES}
+        output_description = args.out_dir
+    else:
+        output_dirs = {
+            genre: os.path.join("gen", GENRE_LABEL_DIRS[genre])
+            for genre in VALID_GENRES
+        }
+        output_description = "genre-specific directories below gen/"
+
+    for output_dir in set(output_dirs.values()):
+        os.makedirs(output_dir, exist_ok=True)
+
+    print(f"Generating {args.songs} song(s) -> {output_description}")
     for i in range(args.songs):
         song_genre = random.choice(VALID_GENRES) if args.random_genre else args.genre
         song_tonic = random.randint(0, 11) if args.random_tonic else fixed_tonic
@@ -737,7 +805,10 @@ def main():
             params=GenParams(**{**base_params.__dict__}),
         )
         events = gen.generate()
-        gen.write_song(os.path.join(args.out_dir, f"song_{i}.json"), events)
+        gen.write_song(
+            os.path.join(output_dirs[song_genre], f"song_{i}.json"),
+            events,
+        )
 
     print("Done.")
 

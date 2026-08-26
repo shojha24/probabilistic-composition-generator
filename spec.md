@@ -462,7 +462,9 @@ p.add_argument("--self-transition-discount", type=float, default=None)
 p.add_argument("--songs",       type=int, default=5)
 p.add_argument("--seed",        type=int, default=None)
 p.add_argument("--dist-dir",    default=_DEFAULT_DIST_DIR)
-p.add_argument("--out-dir",     default="gen/labels")
+p.add_argument("--out-dir",     default=None,
+               help="Optional output override. By default, use "
+                    "gen/jazz-labels or gen/pop-rock-labels by genre.")
 return p.parse_args()
 ```
 
@@ -481,7 +483,7 @@ is loaded for the whole invocation.
 | `--songs` | int | `5` | Number of independent songs to generate in this run, each with its own fresh `init_state()` (§6) — Markov context does not carry across songs, consistent with the segmentation rule in §1.1. |
 | `--seed` | int | `None` (unset) | RNG seed for reproducible sampling across all stochastic draws (backoff sampling, trie walks, voicer softmax, and any `--random-*` resolution). Unset means non-deterministic. |
 | `--dist-dir` | path | `_DEFAULT_DIST_DIR` | Directory containing the trained count tables / extension tries produced by §7 training (per-genre, loaded by `load_genre_model`). |
-| `--out-dir` | path | `gen/labels` | Output directory for generated chord-event label files. |
+| `--out-dir` | path | genre-specific under `gen/` | Optional output override. Without it, jazz uses `gen/jazz-labels` and pop/rock uses `gen/pop-rock-labels`. |
 
 **Randomization flags.** Each `--random-X` flag causes `X` to be resolved by uniform
 random draw instead of taking its explicit/default value, independently **once per
