@@ -19,6 +19,7 @@ POLICIES = {
     ("pop_rock", "guitar"): pop_guitar.POLICY,
     ("pop_rock", "synth"): pop_synth.POLICY,
 }
+CHORD_FAMILY_WEIGHTS = {"guitar": 0.46, "piano": 0.27, "synth": 0.27}
 def midi_to_jfugue(midi: int) -> str:
     names = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
     return f"{names[midi % 12]}{midi // 12 - 1}"
@@ -55,7 +56,14 @@ class ChordModule:
             family for family, instruments in CHORD_INSTRUMENTS.items()
             if any(self.mode in instrument.roles for instrument in instruments)
         ]
+        primary = rng.choices(
+            families,
+            weights=[CHORD_FAMILY_WEIGHTS[family] for family in families],
+            k=1,
+        )[0]
+        families.remove(primary)
         rng.shuffle(families)
+        families.insert(0, primary)
         failures = []
         voiced = None
         family = None

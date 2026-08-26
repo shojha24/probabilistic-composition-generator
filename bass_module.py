@@ -13,7 +13,7 @@ from chord_module import midi_to_jfugue
 class BassModule:
     instrument: int | None = None
     seed: int | None = None
-    pad_collapse_probability: float = 0.30
+    pad_collapse_probability: float = 0.25
     last_instrument: Instrument | None = None
     collapsed_to_pad: bool = False
 
