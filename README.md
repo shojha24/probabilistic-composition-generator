@@ -219,6 +219,11 @@ chord duration tokens, so they remain synchronized. `--mode arpeggios` is
 part of the interface, but currently reports that arpeggio rendering is not
 implemented.
 
+The chord track is written to JFugue voice `V0` and the bass track to `V1`.
+Each note in a block chord receives the duration token. This keeps all chord
+tones sustained for the complete chord duration and prevents the bass from
+playing after the chord track.
+
 Instrument programs are selected reproducibly when `--seed` is supplied.
 Chord tracks choose from the expanded role-aware catalog in `instruments.py`.
 This includes grand, bright, honky-tonk, Rhodes, DX7, harpsichord, clavinet,

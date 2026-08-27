@@ -29,7 +29,7 @@ def chord_token(midis: list[int], duration: str) -> str:
     if not midis:
         return f"R{duration}"
     notes = [midi_to_jfugue(midi) for midi in midis]
-    return "+".join(notes[:-1] + [notes[-1] + duration])
+    return "+".join(f"{note}{duration}" for note in notes)
 
 
 @dataclass
@@ -98,4 +98,4 @@ class ChordModule:
                         if isinstance(event, dict) else "w")
             for chord, event in zip(voiced, events)
         ]
-        return f"T{song.bpm} I{selected_instrument.program} " + " ".join(tokens)
+        return f"T{song.bpm} V0 I{selected_instrument.program} " + " ".join(tokens)

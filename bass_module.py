@@ -51,4 +51,4 @@ class BassModule:
                 midi -= 12
             duration = event.get("duration_token", "w")
             tokens.append(f"{midi_to_jfugue(midi)}{duration}")
-        return f"T{song.bpm} I{program} " + " ".join(tokens)
+        return f"V1 I{program} " + " ".join(tokens)
