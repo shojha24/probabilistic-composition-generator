@@ -182,5 +182,5 @@ POLICY = VoicerPolicy(
            # ("jazz synth's controlled exemption"); guitar needs the same
            # treatment for the same physical reason. True <10-semitone
            # clashes are still rejected.
-           "cluster_min_gap": 10},
+           "cluster_min_gap": 10, "cluster_cap": 4},
 )

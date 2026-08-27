@@ -253,7 +253,7 @@ class Engine:
                     if not low_interval_limit_ok(c.pitches):
                         continue
                     min_gap = policy.extra.get("cluster_min_gap", 13)
-                    if not self._cluster_ok(c, min_gap):
+                    if not self._cluster_ok(c, min_gap, policy.extra.get("cluster_cap")):
                         continue
                     centroid = centroid_of(c.pitches)
                     if not drift_ok(centroid, center, eff_drift_tol):
@@ -306,7 +306,7 @@ class Engine:
                                                            lvl_window_hi, center):
                             wok = window_ok(repaired.pitches, lvl_window_lo, lvl_window_hi)
                             lil = low_interval_limit_ok(repaired.pitches)
-                            clu = self._cluster_ok(repaired, min_gap)
+                            clu = self._cluster_ok(repaired, min_gap, policy.extra.get("cluster_cap"))
                             drf = drift_ok(centroid_of(repaired.pitches), center, eff_drift_tol)
                             if not (wok and lil and clu and drf):
                                 continue
@@ -343,7 +343,7 @@ class Engine:
                             continue
                         if not (window_ok(repaired.pitches, lvl_window_lo, lvl_window_hi) and
                                  low_interval_limit_ok(repaired.pitches) and
-                                 self._cluster_ok(repaired, min_gap) and
+                                 self._cluster_ok(repaired, min_gap, policy.extra.get("cluster_cap")) and
                                  drift_ok(centroid_of(repaired.pitches), center, eff_drift_tol)):
                             continue
                         if not self._dct_filter(repaired, dct_role, dct_pc, secondary_roles,
@@ -353,7 +353,17 @@ class Engine:
                         break
 
                 if filtered:
-                    chosen_diag = {"candidates": len(filtered), "tau": policy.tau, "level": level}
+                    chosen_diag = {
+                        "candidates": len(filtered),
+                        "tau": policy.tau,
+                        "level": level,
+                        "voicing_template": self._template_name(filtered[0]),
+                        "register_mapping": {
+                            "bass": "root/bass",
+                            "mid": "3rd/7th/essential",
+                            "top": "9th/11th/13th",
+                        },
+                    }
                     chosen = self._select(filtered, prev_cand, prev_chord, chord, policy, center,
                                            drift_free, chosen_diag)
                     window_relaxed = lvl_window_relaxed
@@ -406,7 +416,7 @@ class Engine:
         return voiced, chosen
 
     # ------------------------------------------------------------------
-    def _cluster_ok(self, candidate, min_gap: int) -> bool:
+    def _cluster_ok(self, candidate, min_gap: int, cluster_cap: int | None = None) -> bool:
         from .spacing import semitone_cluster_ok
         exempt = candidate.meta.get("cluster_exempt_pairs")
         if not exempt:
@@ -424,7 +434,24 @@ class Engine:
                     limit = relaxed_gap if pair_exempt else min_gap
                     if gap < limit:
                         return False
+        if cluster_cap is not None:
+            pitches = sorted(candidate.pitches)
+            for start, low in enumerate(pitches):
+                count = sum(high - low <= 12 for high in pitches[start:])
+                if count > cluster_cap:
+                    return False
         return True
+
+    @staticmethod
+    def _template_name(candidate) -> str:
+        roles = set(candidate.roles)
+        if "root" not in roles and {"3rd", "7th"} <= roles:
+            return "rootless"
+        if "7th" in roles and len(roles) <= 4:
+            return "shell"
+        if any(role in roles for role in ("9th", "11th", "13th")):
+            return "triad_plus_extension"
+        return "drop2_or_closed"
 
     def _dct_filter(self, candidate, dct_role, dct_pc, secondary_roles, sampled_branch,
                      relax_any_branch: bool) -> bool:

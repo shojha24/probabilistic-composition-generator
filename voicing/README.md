@@ -99,6 +99,9 @@ The low-interval limit prevents dense low-register voicings.
 The semitone-cluster rule separates pitch classes that are one semitone apart.
 Some policies use a documented lower threshold for a controlled exemption.
 
+Policies also cap local density at four notes inside a 12-semitone window.
+This allows standard four-note 7th chords while limiting denser stacks.
+
 ### Register anchoring
 
 The engine uses an anchor center for each chord.

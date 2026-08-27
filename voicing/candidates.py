@@ -243,6 +243,19 @@ def beam_octave_assignment(role_pcs: list[tuple], window_lo: int, window_hi: int
                 if placed and not low_interval_limit_ok(placed + [p]):
                     continue
                 extra = abs(p - anchor_center) * 0.5
+                # Keep structural roles in idiomatic register bands while
+                # retaining the anchor as the primary global constraint.
+                span = window_hi - window_lo
+                role_target = {
+                    "root": window_lo + 0.18 * span,
+                    "5th": window_lo + 0.30 * span,
+                    "3rd": window_lo + 0.52 * span,
+                    "7th": window_lo + 0.56 * span,
+                    "9th": window_lo + 0.78 * span,
+                    "11th": window_lo + 0.84 * span,
+                    "13th": window_lo + 0.90 * span,
+                }.get(role, anchor_center)
+                extra += abs(p - role_target) * 0.12
                 if anchor_shift > 0 and p < anchor_center:
                     extra += (anchor_center - p) * 0.9
                 elif anchor_shift < 0 and p > anchor_center:
@@ -354,7 +367,18 @@ def apply_doubling_variants(assignment: list[tuple], doubling_roles: list[str],
         current = list(assignment)
         used = {p for _, p in current}
         for _ in range(n_doublings):
-            role = rng.choice(valid_roles)
+            eligible_roles = [
+                candidate_role for candidate_role in valid_roles
+                if candidate_role != "3rd"
+                and not (
+                    candidate_role in {"7th", "9th", "11th", "13th"}
+                    and sum(1 for existing_role, _ in current
+                            if existing_role == candidate_role) >= 1
+                )
+            ]
+            if not eligible_roles:
+                break
+            role = rng.choice(eligible_roles)
             options = [p for p in role_options[role] if p not in used]
             if not options:
                 continue

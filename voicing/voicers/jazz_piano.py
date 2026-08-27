@@ -177,5 +177,6 @@ POLICY = VoicerPolicy(
         "doubling_targets": ("root", "5th"),
         "fixed_voice_count": False,
         "cluster_min_gap": 3,
+        "cluster_cap": 4,
     },
 )

@@ -332,5 +332,6 @@ POLICY = VoicerPolicy(
     dct_mode_weights={"top": 0.35, "isolated": 0.35, "octave": 0.30},
     candidate_source=candidate_source, role_penalty=role_penalty, post_filter=post_filter,
     section_profile=SECTION_PROFILE,
-    extra={"doubling_targets": ("root", "5th"), "dct_repair_ok": True, "on_commit": _on_commit},
+    extra={"doubling_targets": ("root", "5th"), "cluster_cap": 4,
+           "dct_repair_ok": True, "on_commit": _on_commit},
 )

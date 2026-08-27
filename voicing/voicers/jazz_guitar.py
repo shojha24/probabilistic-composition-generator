@@ -85,5 +85,5 @@ POLICY = VoicerPolicy(
     candidate_source=candidate_source, role_penalty=role_penalty,
     post_filter=post_filter, section_profile=SECTION_PROFILE,
     extra={"max_fret": MAX_FRET, "max_fret_span": MAX_FRET_SPAN,
-           "drop_tracker": drop_tracker, "cluster_min_gap": 10},
+           "drop_tracker": drop_tracker, "cluster_min_gap": 10, "cluster_cap": 4},
 )

@@ -123,5 +123,5 @@ POLICY = VoicerPolicy(
     dct_mode_weights={"top": 0.50, "isolated": 0.20, "octave": 0.30},
     candidate_source=candidate_source, role_penalty=role_penalty, post_filter=post_filter,
     section_profile=SECTION_PROFILE,
-    extra={"doubling_targets": ("root", "5th")},
+    extra={"doubling_targets": ("root", "5th"), "cluster_cap": 4},
 )
