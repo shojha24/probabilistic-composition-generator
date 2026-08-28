@@ -15,6 +15,7 @@ from ..engine import CandidateGenParams
 from ..guitar.model import shape_distance
 from ..guitar.library import make_shape_library_source, ExtensionDropTracker
 from ..guitar.pop_shapes import ALL_SHAPES, SHAPES_BY_KEY
+from ..types import resolve_degrees
 
 MAX_FRET = 12
 MAX_FRET_SPAN = 4  # spec 02 §2: "5 allowed with penalty" -- enforced via role_penalty, not a hard cutoff
@@ -112,6 +113,11 @@ def post_filter(candidate: Candidate, prev, ctx: dict, policy: VoicerPolicy) -> 
     chord = ctx.get("_current_chord")
     dct_role = ctx.get("_current_dct_role")
     dct_pc = ctx.get("_current_dct_pc")
+    third_role = next(
+        (degree.role for degree in resolve_degrees(chord)
+         if degree.role == "3rd" or "3rd" in degree.merged_from),
+        None,
+    ) if chord is not None else None
 
     # Hazard 1 (spec 02 §7): the doubled-root maj7 trap. A maj7's 7th sits
     # a semitone below a root; a root copy 1-2 semitones above a sounded
@@ -133,6 +139,19 @@ def post_filter(candidate: Candidate, prev, ctx: dict, policy: VoicerPolicy) -> 
     # N19's confusion between "5", maj, and min -- so a 3rd-dropped
     # candidate is rejected outright rather than merely logged.
     if "3rd" in (candidate.meta.get("extensions_dropped") or ()):
+        return False
+
+    # A collision can store the quality-bearing third under an extension
+    # role (for example sus4+11 uses 11th with merged_from=("3rd",)).
+    # Rootless-shape integrity must follow that merged role, not assume the
+    # visible role name is literally "3rd".
+    roles = set(candidate.roles)
+    rootless = "root" not in roles
+    if chord is not None and chord.seventh != "N" and rootless \
+            and third_role is not None and not {third_role, "7th"} <= roles:
+        return False
+    if chord is not None and chord.seventh == "N" and rootless \
+            and third_role in roles and "5th" not in roles:
         return False
 
     # Hazard 3 (spec 02 §7): open-string ambiguity. Extended-chord shapes
@@ -182,5 +201,7 @@ POLICY = VoicerPolicy(
            # ("jazz synth's controlled exemption"); guitar needs the same
            # treatment for the same physical reason. True <10-semitone
            # clashes are still rejected.
-           "cluster_min_gap": 10, "cluster_cap": 4},
+           "cluster_min_gap": 10, "cluster_cap": 4, "spacing_floor": 3,
+           "spacing_floor_low": 6, "spacing_exception_tensions": 2,
+           "spacing_exception_voices": 6, "spacing_exception_max_gaps": 1},
 )

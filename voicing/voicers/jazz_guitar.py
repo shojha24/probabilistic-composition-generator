@@ -13,6 +13,7 @@ from ..guitar.library import ExtensionDropTracker, make_shape_library_source
 from ..guitar.model import shape_distance
 from ..guitar.pop_shapes import ALL_SHAPES, SHAPES_BY_KEY
 from ..policy import VoicerPolicy
+from ..types import resolve_degrees
 
 MAX_FRET = 15
 MAX_FRET_SPAN = 4
@@ -55,9 +56,16 @@ def post_filter(candidate: Candidate, prev, ctx: dict, policy: VoicerPolicy) -> 
 
     roles = set(candidate.roles)
     rootless = "root" not in roles
-    if chord.seventh != "N" and rootless and not {"3rd", "7th"} <= roles:
+    third_role = next(
+        (degree.role for degree in resolve_degrees(chord)
+         if degree.role == "3rd" or "3rd" in degree.merged_from),
+        None,
+    )
+    if chord.seventh != "N" and rootless and third_role is not None \
+            and not {third_role, "7th"} <= roles:
         return False
-    if chord.seventh == "N" and "3rd" in roles and rootless and "5th" not in roles:
+    if chord.seventh == "N" and third_role in roles and rootless \
+            and "5th" not in roles:
         return False
 
     # Shared DCT filtering enforces the sampled top/isolated exposure branch.
@@ -85,5 +93,8 @@ POLICY = VoicerPolicy(
     candidate_source=candidate_source, role_penalty=role_penalty,
     post_filter=post_filter, section_profile=SECTION_PROFILE,
     extra={"max_fret": MAX_FRET, "max_fret_span": MAX_FRET_SPAN,
-           "drop_tracker": drop_tracker, "cluster_min_gap": 10, "cluster_cap": 4},
+           "drop_tracker": drop_tracker, "cluster_min_gap": 10, "cluster_cap": 4,
+           "spacing_floor": 3, "spacing_floor_low": 6,
+           "spacing_exception_tensions": 2, "spacing_exception_voices": 6,
+           "spacing_exception_max_gaps": 1},
 )

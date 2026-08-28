@@ -102,6 +102,46 @@ Some policies use a documented lower threshold for a controlled exemption.
 Policies also cap local density at four notes inside a 12-semitone window.
 This allows standard four-note 7th chords while limiting denser stacks.
 
+Each policy also prefers an adjacent spacing floor of 3 semitones. Pairs with
+a lower note below MIDI 48 prefer 6 semitones. These are soft scoring costs,
+not eligibility gates: realistic 1–2 semitone upper-voice intervals remain
+available, especially around labeled extensions.
+
+Voice count is also softly regularized. The first optional doubling is free;
+each further extra voice receives a multiplicatively larger cost. Policies
+can tune this with `extra["voice_excess_penalty"]` and
+`extra["voice_excess_growth"]`. The policy maximum remains a real ceiling, so
+unusual dense voicings are still possible when explicitly supported.
+
+The jazz-synth pad uses a more permissive close-cluster setting because its
+wide free-placement register must retain all labeled tensions. It still uses
+the shared soft spacing preference and DCT checks.
+
+### Register templates
+
+Piano and synth candidate generation uses explicit register templates rather
+than moving a selected chord after the fact. The shared families are:
+
+- `balanced`: the original anchor-centered placement;
+- `closed`: compact core and upper tones;
+- `open` and `shell_spread`: separated foundation and color tones;
+- `tension_top`: a clear upper extension landmark;
+- `wide`: broad pad spacing;
+- `root_spread`: separated root/fifth foundation;
+- `rare_feature`: a more distinctive layout for rare triads and dense labels.
+
+Jazz piano adds `jazz_shell`, `jazz_tension_top`, `jazz_open`, and `jazz_rare`
+so its third/seventh shell remains in the lower hand while extensions stay in
+the upper hand. Guitar uses shape-family metadata instead of free-placement
+templates, including compact and rare-feature shape families.
+
+For each chord, a deterministic target rotates with the song seed and chord
+index. The target profile gets a bounded generation slice placed ahead of the
+full balanced fallback; this prevents deduplication from making alternate
+profiles unreachable without sacrificing difficult-chord coverage. Every
+candidate still passes the normal window, spacing, DCT, drift, hand, and
+fretboard gates, and the target is only a soft selection preference.
+
 ### Register anchoring
 
 The engine uses an anchor center for each chord.

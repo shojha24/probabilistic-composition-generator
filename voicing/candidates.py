@@ -196,11 +196,164 @@ def role_octave_options(pc: int, window_lo: int, window_hi: int) -> tuple:
     return tuple(p for p in range(window_lo, window_hi + 1) if p % 12 == pc % 12)
 
 
+# Fractions of the active register window used as soft targets by the
+# octave-assignment beam. These are register mappings, not post-selection
+# pitch moves: every resulting candidate still goes through the engine's
+# spacing, DCT, drift, and instrument-specific gates.
+TEMPLATE_ROLE_TARGETS = {
+    # Preserve the original mapping as the stable default for callers that
+    # do not opt into the expanded template set.
+    "balanced": {
+        "root": 0.18, "5th": 0.30, "3rd": 0.52, "7th": 0.56,
+        "9th": 0.78, "11th": 0.84, "13th": 0.90,
+    },
+    # A compact core with upper extensions allowed to sit closer together.
+    "closed": {
+        "root": 0.20, "5th": 0.31, "3rd": 0.43, "7th": 0.50,
+        "9th": 0.60, "11th": 0.67, "13th": 0.74,
+    },
+    # A root/fifth foundation with the guide tones and colors progressively
+    # higher, suitable for open pads and two-hand piano textures.
+    "open": {
+        "root": 0.12, "5th": 0.28, "3rd": 0.46, "7th": 0.61,
+        "9th": 0.75, "11th": 0.84, "13th": 0.94,
+    },
+    # Keep the shell readable while separating it from the color tones.
+    "shell_spread": {
+        "root": 0.10, "5th": 0.25, "3rd": 0.48, "7th": 0.68,
+        "9th": 0.78, "11th": 0.88, "13th": 0.96,
+    },
+    # Make the highest active extension the clearest register landmark.
+    "tension_top": {
+        "root": 0.10, "5th": 0.24, "3rd": 0.42, "7th": 0.55,
+        "9th": 0.79, "11th": 0.90, "13th": 0.98,
+    },
+    # A deliberately broad pad mapping; it remains bounded by the active
+    # window and is useful for rare, fully spelled extension stacks.
+    "wide": {
+        "root": 0.08, "5th": 0.24, "3rd": 0.46, "7th": 0.64,
+        "9th": 0.82, "11th": 0.92, "13th": 0.98,
+    },
+    # Rare-feature layout: preserve every role while giving unusual triads
+    # and dense extension stacks a clearly separated upper identity.
+    "rare_feature": {
+        "root": 0.09, "5th": 0.34, "3rd": 0.64, "7th": 0.58,
+        "9th": 0.75, "11th": 0.87, "13th": 0.95,
+    },
+    # Power/root-only layout: keep the low foundation and move a fifth or
+    # additional root copy away from it when the chord has few roles.
+    "root_spread": {
+        "root": 0.10, "5th": 0.78, "3rd": 0.46, "7th": 0.61,
+        "9th": 0.80, "11th": 0.90, "13th": 0.98,
+    },
+    # Piano-specific jazz mappings keep the quality-bearing shell inside
+    # the lower hand while reserving the upper register for color tones.
+    "jazz_shell": {
+        "root": 0.16, "5th": 0.28, "3rd": 0.38, "7th": 0.50,
+        "9th": 0.74, "11th": 0.84, "13th": 0.94,
+    },
+    "jazz_tension_top": {
+        "root": 0.14, "5th": 0.25, "3rd": 0.36, "7th": 0.49,
+        "9th": 0.78, "11th": 0.89, "13th": 0.98,
+    },
+    "jazz_rare": {
+        "root": 0.12, "5th": 0.29, "3rd": 0.41, "7th": 0.59,
+        "9th": 0.78, "11th": 0.89, "13th": 0.97,
+    },
+    "jazz_open": {
+        "root": 0.12, "5th": 0.31, "3rd": 0.41, "7th": 0.55,
+        "9th": 0.76, "11th": 0.87, "13th": 0.96,
+    },
+}
+
+RARE_TRIADS = frozenset(("diminished", "augmented", "sus2", "5", "1"))
+
+
+def needs_rare_templates(chord) -> bool:
+    return chord.triad in RARE_TRIADS or sum(
+        getattr(chord, slot) != "N"
+        for slot in ("seventh", "ninth", "eleventh", "thirteenth")
+    ) >= 2
+
+
+def template_profiles_for(chord, policy) -> tuple[str, ...]:
+    """Return the configured placement profiles for one chord.
+
+    Rare triads and multi-extension labels receive additional candidates,
+    rather than replacing the normal pool. This keeps common voicings
+    available for voice leading while giving underrepresented features more
+    physically valid ways to appear.
+    """
+    profiles = list(policy.extra.get("template_profiles", ("balanced",)))
+    if needs_rare_templates(chord):
+        profiles.extend(policy.extra.get("rare_template_profiles", ()))
+    profiles = tuple(dict.fromkeys(
+        profile for profile in profiles if profile in TEMPLATE_ROLE_TARGETS
+    ))
+    return profiles or ("balanced",)
+
+
+def preferred_template_for(chord, policy, ctx: dict) -> str:
+    """Choose a deterministic rotating target for the current chord.
+
+    Candidate pools still contain every configured profile, so a target can
+    yield to voice leading or a hard physical constraint. Ordinary chords
+    rotate across all profiles; rare triads and dense extension labels rotate
+    over their rare-profile subset so those features receive deliberate
+    coverage instead of only being passively available. The song seed avoids
+    identical template sequences in every song.
+    """
+    profiles = template_profiles_for(chord, policy)
+    rare_profiles = tuple(
+        profile for profile in policy.extra.get("rare_template_profiles", ())
+        if profile in profiles
+    )
+    # Rare labels should not merely have extra alternatives; they should
+    # actively exercise those alternatives. Keep the ordinary profiles in
+    # the candidate pool for local voice-leading fallbacks, but rotate the
+    # target over rare profiles whenever the chord qualifies.
+    target_profiles = (
+        rare_profiles if needs_rare_templates(chord) and rare_profiles
+        else profiles
+    )
+    t = ctx.get("_current_t")
+    key = t if t is not None else len(ctx.setdefault("_template_targets", {}))
+    cache = ctx.setdefault("_template_targets", {})
+    if key not in cache:
+        seed = int(ctx.get("seed", 0))
+        cache[key] = target_profiles[(seed + int(key)) % len(target_profiles)]
+    target = cache[key]
+    ctx["_template_target"] = target
+    return target
+
+
+def template_selection_penalty(candidate: Candidate, chord, ctx: dict,
+                               policy) -> float:
+    """Softly favor the profile targeted for this chord.
+
+    The penalty is deliberately soft: an unavailable or physically awkward
+    target must never make a legal chord unvoiceable.
+    """
+    target = ctx.get("_template_target")
+    mismatch_penalty = float(policy.extra.get("template_mismatch_penalty", 0.0))
+    if not target or not mismatch_penalty:
+        return 0.0
+    if candidate.meta.get("voicing_template") == target:
+        return 0.0
+    if needs_rare_templates(chord):
+        mismatch_penalty += float(
+            policy.extra.get("rare_template_mismatch_penalty", 0.0)
+        )
+    return mismatch_penalty
+
+
 def beam_octave_assignment(role_pcs: list[tuple], window_lo: int, window_hi: int,
                             anchor_center: int, prev_midi: Optional[list],
                             beam_width: int = 120,
                             rng: Optional[random.Random] = None,
-                            anchor_shift: int = 0) -> list[list[tuple]]:
+                            anchor_shift: int = 0,
+                            template: str = "balanced",
+                            role_windows: Optional[dict] = None) -> list[list[tuple]]:
     """Assign one absolute octave to each (role, pc) pair, via beam search
     minimizing running distance-to-anchor (and, softly, distance to a
     similar prior pitch, to seed reasonable VL-distance candidates before
@@ -216,11 +369,22 @@ def beam_octave_assignment(role_pcs: list[tuple], window_lo: int, window_hi: int
     section's placements, or simply the register with more available
     octave slots), which quietly cancels out the shift. Sections with no
     shift keep pure symmetric behaviour."""
+    role_targets = TEMPLATE_ROLE_TARGETS.get(
+        template, TEMPLATE_ROLE_TARGETS["balanced"])
+    # The original balanced mapping remains a light tie-breaker. Explicit
+    # profiles need a stronger beam preference so their alternatives survive
+    # the bounded search instead of collapsing into the same few placements;
+    # hard spacing and instrument gates still decide whether they are usable.
+    template_weight = 0.12 if template == "balanced" else 0.38
+    role_pc_map = dict(role_pcs)
     beams = [([], 0.0)]  # (assignment_so_far, partial_cost)
     prev_sorted = sorted(prev_midi) if prev_midi else []
 
     for role, pc in role_pcs:
         options = role_octave_options(pc, window_lo, window_hi)
+        if role_windows and role in role_windows:
+            role_lo, role_hi = role_windows[role]
+            options = tuple(p for p in options if role_lo <= p <= role_hi)
         if not options:
             # no legal placement inside the window for this pc; caller must
             # relax the window (spec 07 §9 ladder step 6)
@@ -246,16 +410,33 @@ def beam_octave_assignment(role_pcs: list[tuple], window_lo: int, window_hi: int
                 # Keep structural roles in idiomatic register bands while
                 # retaining the anchor as the primary global constraint.
                 span = window_hi - window_lo
-                role_target = {
-                    "root": window_lo + 0.18 * span,
-                    "5th": window_lo + 0.30 * span,
-                    "3rd": window_lo + 0.52 * span,
-                    "7th": window_lo + 0.56 * span,
-                    "9th": window_lo + 0.78 * span,
-                    "11th": window_lo + 0.84 * span,
-                    "13th": window_lo + 0.90 * span,
-                }.get(role, anchor_center)
-                extra += abs(p - role_target) * 0.12
+                target_fraction = role_targets.get(role, 0.50)
+                if template.startswith("jazz_"):
+                    clashes = [
+                        other_role
+                        for other_role, other_pc in role_pc_map.items()
+                        if other_role != role
+                        and (pc - other_pc) % 12 in (1, 11)
+                    ]
+                    # A sounded root and seventh should not form a
+                    # one-semitone stack in the lower hand. For jazz
+                    # templates, put the root above the shell when that
+                    # particular clash exists; the rootless case remains
+                    # governed by the ordinary shell mapping.
+                    if role == "root" and "7th" in clashes:
+                        target_fraction = max(target_fraction, 0.82)
+                    elif role == "7th" and "root" in clashes:
+                        target_fraction = min(target_fraction, 0.48)
+                    elif role in {"root", "3rd", "5th", "7th"} and any(
+                            other in {"9th", "11th", "13th"}
+                            for other in clashes):
+                        target_fraction = min(target_fraction, 0.42)
+                    elif role in {"9th", "11th", "13th"} and any(
+                            other in {"root", "3rd", "5th", "7th"}
+                            for other in clashes):
+                        target_fraction = max(target_fraction, 0.80)
+                role_target = window_lo + target_fraction * span
+                extra += abs(p - role_target) * template_weight
                 if anchor_shift > 0 and p < anchor_center:
                     extra += (anchor_center - p) * 0.9
                 elif anchor_shift < 0 and p > anchor_center:
@@ -437,7 +618,8 @@ def free_placement(role_pcs: list[tuple], window_lo: int, window_hi: int,
                     rng: random.Random, beam_width: int = 120,
                     max_candidates: int = 400, anchor_shift: int = 0,
                     doubling_pcs: Optional[dict] = None,
-                    cluster_min_gap: int = 13) -> list[Candidate]:
+                    cluster_min_gap: int = 13,
+                    template: str = "balanced") -> list[Candidate]:
     """Generic free-placement candidate generator: beam-search octave
     assignment + doubling variants. `role_pcs` is the list of (role, pc)
     pairs for the *required* (non-doubled) degrees only.
@@ -451,7 +633,7 @@ def free_placement(role_pcs: list[tuple], window_lo: int, window_hi: int,
     that thinned role was the only way to reach the voice-count floor."""
     assignments = beam_octave_assignment(role_pcs, window_lo, window_hi,
                                           anchor_center, prev_midi, beam_width, rng,
-                                          anchor_shift=anchor_shift)
+                                          anchor_shift=anchor_shift, template=template)
     # See note on `_MAX_BASE_ASSIGNMENTS_FOR_DOUBLING` in
     # `hand_split_free_placement`: expanding doubling variants for every
     # surviving beam is wasteful; the beam is already ordered best-first.
@@ -481,7 +663,9 @@ def free_placement(role_pcs: list[tuple], window_lo: int, window_hi: int,
                                                 max_variants=min(40, remaining)):
             pitches = [p for _, p in variant]
             roles = [r for r, _ in variant]
-            cand = Candidate(pitches, roles).dedup_sorted()
+            cand = Candidate(
+                pitches, roles, meta={"voicing_template": template}
+            ).dedup_sorted()
             out.append(cand)
             if clash_edges and _candidate_clash_ok(cand, clash_edges, cluster_min_gap):
                 any_clash_clean = True
@@ -494,7 +678,7 @@ def free_placement(role_pcs: list[tuple], window_lo: int, window_hi: int,
     if clash_color is not None and not any_clash_clean:
         direct = _clash_aware_free_candidates(
             role_pcs, role_pc_lookup, clash_color, window_lo, window_hi,
-            anchor_center, rng, min_gap=cluster_min_gap,
+            anchor_center, rng, min_gap=cluster_min_gap, template=template,
         )
         return out[:max_candidates] + direct
     return out[:max_candidates]
@@ -503,7 +687,8 @@ def free_placement(role_pcs: list[tuple], window_lo: int, window_hi: int,
 def _clash_aware_free_candidates(role_pcs: list[tuple], role_pc_lookup: dict,
                                   clash_color: dict, window_lo: int, window_hi: int,
                                   anchor_center: int, rng: random.Random,
-                                  min_gap: int = 13, max_variants: int = 24) -> list[Candidate]:
+                                  min_gap: int = 13, max_variants: int = 24,
+                                  template: str = "balanced") -> list[Candidate]:
     """`_clash_aware_direct_candidates`'s counterpart for hand-less voicers
     (pads/synths via plain `free_placement`): places every clash-colored
     role in one of two registers -- strictly below `anchor_center` or at
@@ -544,8 +729,123 @@ def _clash_aware_free_candidates(role_pcs: list[tuple], role_pc_lookup: dict,
                        for r in free_roles]
             pitches = [p for _, p in placed]
             roles = [r for r, _ in placed]
-            out.append(Candidate(pitches, roles).dedup_sorted())
+            out.append(Candidate(
+                pitches, roles, meta={"voicing_template": template}
+            ).dedup_sorted())
     return out
+
+
+def _merge_template_candidates(candidates: list[Candidate],
+                               max_candidates: int) -> list[Candidate]:
+    """Remove physical duplicates after several register profiles are merged.
+
+    A profile is only a generation preference; it must not make the same
+    realized pitch/hand assignment count several times in the softmax pool.
+    """
+    out = []
+    seen = set()
+    for candidate in candidates:
+        hands = tuple(
+            (name, tuple(values))
+            for name, values in sorted((candidate.hands or {}).items())
+        )
+        key = (tuple(candidate.pitches), tuple(candidate.roles),
+               candidate.shape_id, hands)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(candidate)
+        if len(out) >= max_candidates:
+            break
+    return out
+
+
+def _isolated_profile_args(args: tuple, profile: str,
+                           target_profile: Optional[str]) -> tuple:
+    """Give an expanded target profile a private RNG stream.
+
+    Reserving extra candidates for a target is intentionally additive, but
+    consuming those extra random draws from the engine stream would change
+    every later chord in a song. The normal profiles keep the caller's RNG;
+    only the extra target generation is isolated.
+    """
+    if profile != target_profile:
+        return args
+    rng_index = next(
+        (index for index, value in enumerate(args)
+         if isinstance(value, random.Random)),
+        None,
+    )
+    if rng_index is None:
+        return args
+    local_rng = random.Random()
+    local_rng.setstate(args[rng_index].getstate())
+    profile_args = list(args)
+    profile_args[rng_index] = local_rng
+    return tuple(profile_args)
+
+
+def free_placement_templates(*args, templates=("balanced",),
+                              preferred_template: Optional[str] = None,
+                              **kwargs) -> list[Candidate]:
+    """Generate one bounded candidate pool for each explicit profile.
+
+    Keeping profile generation separate from selection gives the engine
+    several intentional register families while retaining its existing
+    voice-leading, diversity, and hard-gate scoring.
+    """
+    profiles = tuple(dict.fromkeys(templates or ("balanced",)))
+    requested = int(kwargs.get("max_candidates", 400))
+    # Preserve the original pool for difficult chords, then append a
+    # bounded slice from each alternate profile. Capping the merged result
+    # at `requested` would let the first (balanced) pool consume the entire
+    # output and make the new templates inert.
+    per_profile = max(24, (requested + (2 * len(profiles)) - 1)
+                      // (2 * len(profiles)))
+    target_profile = (
+        preferred_template
+        if preferred_template in profiles and preferred_template != "balanced"
+        else None
+    )
+    # Keep a bounded target slice ahead of the balanced pool. The old
+    # balanced-first ordering made alternate profiles inert for low-cardinality
+    # chords: balanced often generated every physically reachable pitch set
+    # before an alternate profile was merged, so deduplication discarded the
+    # alternate metadata and its target preference. The balanced pool remains
+    # full-sized as a fallback; only the target profile receives an additional
+    # reserved slice, capped so dense synth pools do not grow without bound.
+    target_budget = (
+        max(per_profile, min(requested, max(96, per_profile * 3)))
+        if target_profile is not None else 0
+    )
+    generated = []
+    profile_budgets = {}
+    for profile in profiles:
+        if profile == "balanced":
+            profile_budgets[profile] = requested
+        elif profile == target_profile:
+            profile_budgets[profile] = target_budget
+        else:
+            profile_budgets[profile] = per_profile
+    generated_by_profile = {}
+    for profile in profiles:
+        profile_kwargs = dict(kwargs)
+        profile_kwargs["template"] = profile
+        # Keep the original balanced pool intact. Additional profiles are
+        # additive alternatives, not a reason to starve the baseline pool
+        # of candidates that previously made difficult chords realizable.
+        profile_kwargs["max_candidates"] = profile_budgets[profile]
+        profile_args = _isolated_profile_args(args, profile, target_profile)
+        generated_by_profile[profile] = free_placement(*profile_args, **profile_kwargs)
+    merge_profiles = (
+        (target_profile,) + tuple(profile for profile in profiles
+                                  if profile != target_profile)
+        if target_profile is not None else profiles
+    )
+    for profile in merge_profiles:
+        generated.extend(generated_by_profile[profile])
+    expanded_limit = sum(profile_budgets.values())
+    return _merge_template_candidates(generated, expanded_limit)
 
 
 def _clash_bipartition(role_pcs: list[tuple], min_gap: int) -> Optional[dict]:
@@ -671,7 +971,8 @@ def _clash_aware_direct_candidates(role_pcs: list[tuple], role_pc_lookup: dict,
                                     clash_color: dict, lh_window: tuple, rh_window: tuple,
                                     lh_max_voices: int, rh_max_voices: int,
                                     anchor_center: int, rng: random.Random,
-                                    max_hand_span: int, max_variants: int = 24) -> list[Candidate]:
+                                    max_hand_span: int, max_variants: int = 24,
+                                    template: str = "balanced") -> list[Candidate]:
     """Direct (not beam-search-derived) fallback candidate construction for
     when the shared octave-assignment beam search + contiguous-by-pitch
     hand split finds *no* valid partition at all (see `_clash_bipartition`).
@@ -727,7 +1028,8 @@ def _clash_aware_direct_candidates(role_pcs: list[tuple], role_pc_lookup: dict,
             pitches = lh_pitches + rh_pitches
             roles = [r for r, _ in lh_placed] + [r for r, _ in rh_placed]
             out.append(Candidate(pitches, roles,
-                                  hands={"lh": lh_pitches, "rh": rh_pitches}).dedup_sorted())
+                                  hands={"lh": lh_pitches, "rh": rh_pitches},
+                                  meta={"voicing_template": template}).dedup_sorted())
     return out
 
 
@@ -738,7 +1040,9 @@ def hand_split_free_placement(role_pcs: list[tuple], lh_window: tuple, rh_window
                                rng: random.Random, beam_width: int = 120,
                                max_candidates: int = 400, anchor_shift: int = 0,
                                doubling_pcs: Optional[dict] = None,
-                               cluster_min_gap: int = 13) -> list[Candidate]:
+                               cluster_min_gap: int = 13,
+                               template: str = "balanced",
+                               role_windows: Optional[dict] = None) -> list[Candidate]:
     """Piano hand-split candidate generator (specs 01, 04): beam-search over
     the combined window, then greedily partition into LH (lowest voices) /
     RH (remaining), rejecting partitions that violate voice caps or hand
@@ -751,7 +1055,8 @@ def hand_split_free_placement(role_pcs: list[tuple], lh_window: tuple, rh_window
     window_hi = max(lh_window[1], rh_window[1])
     assignments = beam_octave_assignment(role_pcs, window_lo, window_hi,
                                           anchor_center, prev_midi, beam_width, rng,
-                                          anchor_shift=anchor_shift)
+                                          anchor_shift=anchor_shift, template=template,
+                                          role_windows=role_windows)
     # Expanding doubling variants for every surviving beam assignment (up
     # to `beam_width`, e.g. 120) is wasteful -- profiling showed this
     # fan-out as the dominant cost in the whole engine. The beam search
@@ -802,7 +1107,8 @@ def hand_split_free_placement(role_pcs: list[tuple], lh_window: tuple, rh_window
                 pitches = lh_pitches + rh_pitches
                 roles = [r for r, _ in lh_part] + [r for r, _ in rh_part]
                 cand = Candidate(pitches, roles,
-                                  hands={"lh": lh_pitches, "rh": rh_pitches}).dedup_sorted()
+                                  hands={"lh": lh_pitches, "rh": rh_pitches},
+                                  meta={"voicing_template": template}).dedup_sorted()
                 out.append(cand)
                 if clash_edges and _candidate_clash_ok(cand, clash_edges, cluster_min_gap):
                     any_clash_clean = True
@@ -824,6 +1130,56 @@ def hand_split_free_placement(role_pcs: list[tuple], lh_window: tuple, rh_window
         direct = _clash_aware_direct_candidates(
             role_pcs, role_pc_lookup, clash_color, lh_window, rh_window,
             lh_max_voices, rh_max_voices, anchor_center, rng, max_hand_span,
+            template=template,
         )
         return out[:max_candidates] + direct
     return out[:max_candidates]
+
+
+def hand_split_free_placement_templates(*args, templates=("balanced",),
+                                        preferred_template: Optional[str] = None,
+                                        **kwargs) -> list[Candidate]:
+    """Hand-split counterpart to :func:`free_placement_templates`."""
+    profiles = tuple(dict.fromkeys(templates or ("balanced",)))
+    requested = int(kwargs.get("max_candidates", 400))
+    per_profile = max(24, (requested + (2 * len(profiles)) - 1)
+                      // (2 * len(profiles)))
+    target_profile = (
+        preferred_template
+        if preferred_template in profiles and preferred_template != "balanced"
+        else None
+    )
+    target_budget = (
+        max(per_profile, min(requested, max(96, per_profile * 3)))
+        if target_profile is not None else 0
+    )
+    role_windows_by_template = kwargs.pop("role_windows_by_template", {})
+    generated = []
+    profile_budgets = {}
+    for profile in profiles:
+        if profile == "balanced":
+            profile_budgets[profile] = requested
+        elif profile == target_profile:
+            profile_budgets[profile] = target_budget
+        else:
+            profile_budgets[profile] = per_profile
+    generated_by_profile = {}
+    for profile in profiles:
+        profile_kwargs = dict(kwargs)
+        profile_kwargs["template"] = profile
+        if profile in role_windows_by_template:
+            profile_kwargs["role_windows"] = role_windows_by_template[profile]
+        profile_kwargs["max_candidates"] = profile_budgets[profile]
+        profile_args = _isolated_profile_args(args, profile, target_profile)
+        generated_by_profile[profile] = hand_split_free_placement(
+            *profile_args, **profile_kwargs
+        )
+    merge_profiles = (
+        (target_profile,) + tuple(profile for profile in profiles
+                                  if profile != target_profile)
+        if target_profile is not None else profiles
+    )
+    for profile in merge_profiles:
+        generated.extend(generated_by_profile[profile])
+    expanded_limit = sum(profile_budgets.values())
+    return _merge_template_candidates(generated, expanded_limit)

@@ -17,8 +17,13 @@ from .dct import (compute_dct, dct_pitch_class, exposure_branch, predicate_top,
                    predicate_isolated, predicate_octave, secondary_ok)
 from .vl import vl_distance, normalize_vl, transformation_bonus
 from .anchor import anchor_center as compute_anchor_center, drift_penalty, window_ok, drift_ok, centroid_of
-from .spacing import spacing_hard_ok, spacing_penalty, low_interval_limit_ok
-from .candidates import dct_expose_repair, post_filter_repair
+from .spacing import policy_spacing_penalty, spacing_hard_ok, spacing_penalty, low_interval_limit_ok
+from .candidates import (
+    dct_expose_repair,
+    post_filter_repair,
+    preferred_template_for,
+    template_selection_penalty,
+)
 from .diversity import DiversityCounter, shape_signature
 
 logger = logging.getLogger("voicing.engine")
@@ -146,6 +151,7 @@ class Engine:
             eff_policy = dataclasses.replace(policy, root_double_p=root_double_p,
                                               root_omission_p=root_omission_p)
 
+        preferred_template_for(chord, policy, self.ctx)
         selected = select_tones(chord, eff_policy, self.ctx, self.rng,
                                  root_omission_gate=self.root_omission_gate,
                                  branch_b_requires_octave_dct=self.branch_b_requires_octave_dct,
@@ -153,6 +159,7 @@ class Engine:
                                      "doubling_targets", ("root", "5th"))),
                                  gen_dir=self.gen_dir)
         self.ctx["_selected_tone_flags"] = selected.flags
+        self.ctx["_selected_tone_count"] = len(selected.degrees)
 
         dct_role, secondary_roles = compute_dct(chord, selected.degrees, gen_dir=self.gen_dir)
         dct_pc = dct_pitch_class(chord, selected.degrees, dct_role) if dct_role else None
@@ -239,7 +246,6 @@ class Engine:
                 if not allow_dropped:
                     raw = [c for c in raw if not c.meta.get("extensions_dropped")]
 
-                allow_soft_spacing_prune = (level < 1)
                 eff_drift_tol = policy.drift_tol * (1.5 if level >= 2 else 1.0)
 
                 filtered = []
@@ -257,9 +263,6 @@ class Engine:
                         continue
                     centroid = centroid_of(c.pitches)
                     if not drift_ok(centroid, center, eff_drift_tol):
-                        continue
-                    if allow_soft_spacing_prune and spacing_penalty(c.pitches, policy.extra.get(
-                            "max_close_pairs", 2)) > 3.0:
                         continue
                     spacing_survivors.append(c)
                     if not self._dct_filter(c, dct_role, dct_pc, secondary_roles, sampled_branch,
@@ -357,7 +360,6 @@ class Engine:
                         "candidates": len(filtered),
                         "tau": policy.tau,
                         "level": level,
-                        "voicing_template": self._template_name(filtered[0]),
                         "register_mapping": {
                             "bass": "root/bass",
                             "mid": "3rd/7th/essential",
@@ -366,6 +368,7 @@ class Engine:
                     }
                     chosen = self._select(filtered, prev_cand, prev_chord, chord, policy, center,
                                            drift_free, chosen_diag)
+                    chosen_diag["voicing_template"] = self._template_name(chosen)
                     window_relaxed = lvl_window_relaxed
                     break
             if chosen is not None:
@@ -444,6 +447,9 @@ class Engine:
 
     @staticmethod
     def _template_name(candidate) -> str:
+        explicit = candidate.meta.get("voicing_template")
+        if explicit:
+            return explicit
         roles = set(candidate.roles)
         if "root" not in roles and {"3rd", "7th"} <= roles:
             return "rootless"
@@ -503,10 +509,23 @@ class Engine:
             centroid = centroid_of(c.pitches)
             cost += policy.w_drift * drift_penalty(centroid, center, drift_free)
             cost += policy.w_space * spacing_penalty(c.pitches, policy.extra.get("max_close_pairs", 2))
+            cost += policy.w_space * policy_spacing_penalty(c, chord, policy)
+            # Keep additional octave copies available, but make density
+            # progressively more expensive after the first optional voice.
+            # This preserves rare two-extra-voice realizations without
+            # routinely selecting redundant four-copy chord tones.
+            required_voices = int(self.ctx.get("_selected_tone_count", len(c.pitches)))
+            extra_voices = max(0, len(c.pitches) - required_voices)
+            priced_extras = max(0, extra_voices - 1)
+            if priced_extras:
+                base = float(policy.extra.get("voice_excess_penalty", 1.0))
+                growth = float(policy.extra.get("voice_excess_growth", 2.5))
+                cost += base * (growth ** priced_extras)
             chord_type = chord.chord_type()
             sig = shape_signature(policy.voicer_id, c.pitches, self.signature_bands, None,
                                    extra=c.meta.get("signature_extra", ()))
             cost += policy.w_div * self.diversity.penalty(chord_type, sig)
+            cost += template_selection_penalty(c, chord, self.ctx, policy)
             if policy.role_penalty is not None:
                 cost += policy.w_role * policy.role_penalty(c, prev_cand, self.ctx, policy)
             costs.append(cost)

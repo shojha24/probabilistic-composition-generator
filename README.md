@@ -283,6 +283,56 @@ python chord_gen.py \
 The temperature changes Stage 1 probability concentration. The self-transition
 discount reduces exact repeated `(root, triad)` states.
 
+### Target corpus generation
+
+The existing generation interface remains unchanged by default. To generate
+the §08 quota-aware corpus, use:
+
+```bash
+python chord_gen.py \
+  --target-corpus \
+  --target-songs 100 \
+  --seed 7 \
+  --dist-dir ./distributions
+```
+
+For a target corpus with randomized per-song tonic and BPM values, use the
+debug shortcut:
+
+```bash
+python chord_gen.py --target-corpus --debug --seed 7
+```
+
+`--target-corpus` generates exactly 250,000 chord events: 125,000 jazz events
+and 125,000 pop/rock events. It writes target output separately from the
+validation-style generated labels:
+
+```text
+gen/target-jazz-labels/
+gen/target-pop-rock-labels/
+```
+
+Use `--target-events N` for a smaller or custom total. The event budget is
+split between genres, and the §08 minimums are scaled for smaller budgets:
+
+```bash
+python chord_gen.py \
+  --target-events 20000 \
+  --target-songs 100 \
+  --seed 7 \
+  --out-dir ./gen-target
+```
+
+With `--out-dir`, target mode creates `jazz-labels/` and
+`pop-rock-labels/` subdirectories below the supplied path. In target mode,
+`--target-songs` controls the number of songs **per genre** and defaults to
+`--songs`. `--random-tonic` and `--random-bpm` are honored per song.
+`--random-genre` is ignored because target mode always generates both genres.
+`--random-num` is ignored because target mode must preserve the exact event
+budget and requested song count. `--target-corpus` and `--target-events` are
+mutually exclusive. Generation reports an error if a requested budget is too
+small to satisfy its scaled minimums.
+
 ## Chord-event data
 
 The internal chord-event contract contains:

@@ -6,7 +6,12 @@ rootless-by-default comping with a 3rd+7th LH skeleton and extensions in RH.
 """
 from __future__ import annotations
 
-from ..candidates import Candidate, hand_split_free_placement
+from ..candidates import (
+    Candidate,
+    hand_split_free_placement_templates,
+    needs_rare_templates,
+    template_profiles_for,
+)
 from ..engine import CandidateGenParams
 from ..policy import VoicerPolicy
 from ..types import resolve_degrees
@@ -51,14 +56,32 @@ def candidate_source(p: CandidateGenParams) -> list[Candidate]:
     }
     lh_window = (min(LH_WINDOW[0], p.window_lo), LH_WINDOW[1])
     rh_window = (RH_WINDOW[0], max(RH_WINDOW[1], p.window_hi))
-    raw = hand_split_free_placement(
+    shell = set(_shell_roles(p))
+    profiles = template_profiles_for(p.chord, p.policy)
+    role_windows = {
+        profile: {
+            role: (
+                lh_window if role in shell else rh_window
+            )
+            for role, _pc in role_pcs
+            if profile.startswith("jazz_")
+            and (role in shell or role in {"9th", "11th", "13th"})
+        }
+        for profile in profiles
+    }
+    raw = hand_split_free_placement_templates(
         role_pcs, lh_window, rh_window, LH_MAX_VOICES, RH_MAX_VOICES,
         MAX_HAND_SPAN, p.anchor_center, p.prev_midi, p.doubling_roles,
         p.max_doublings, p.rng, anchor_shift=p.anchor_shift,
         doubling_pcs=doubling_pcs,
         cluster_min_gap=p.policy.extra.get("cluster_min_gap", 13),
+        templates=profiles,
+        preferred_template=(
+            p.ctx.get("_template_target")
+            if needs_rare_templates(p.chord) else None
+        ),
+        role_windows_by_template=role_windows,
     )
-    shell = set(_shell_roles(p))
     out = []
     for candidate in raw:
         hands = candidate.hands or {}
@@ -178,5 +201,14 @@ POLICY = VoicerPolicy(
         "fixed_voice_count": False,
         "cluster_min_gap": 3,
         "cluster_cap": 4,
+        "spacing_floor": 3,
+        "spacing_floor_low": 6,
+        "spacing_exception_tensions": 2,
+        "spacing_exception_voices": 6,
+        "spacing_exception_max_gaps": 1,
+        "template_profiles": ("balanced", "jazz_shell", "jazz_tension_top", "jazz_open"),
+        "rare_template_profiles": ("jazz_rare", "root_spread"),
+        "template_mismatch_penalty": 1.8,
+        "rare_template_mismatch_penalty": 2.5,
     },
 )

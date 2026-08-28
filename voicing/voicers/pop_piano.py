@@ -4,7 +4,12 @@ voicing/voicers/pop_piano.py -- spec 01, the reference/calibration voicer.
 from __future__ import annotations
 
 from ..policy import VoicerPolicy
-from ..candidates import hand_split_free_placement, Candidate
+from ..candidates import (
+    Candidate,
+    hand_split_free_placement_templates,
+    needs_rare_templates,
+    template_profiles_for,
+)
 from ..engine import CandidateGenParams
 from ..types import resolve_degrees
 
@@ -31,11 +36,17 @@ def candidate_source(p: CandidateGenParams) -> list:
     # wider than the nominal LH/RH windows.
     lh_window = (min(LH_WINDOW[0], p.window_lo), LH_WINDOW[1])
     rh_window = (RH_WINDOW[0], max(RH_WINDOW[1], p.window_hi))
-    return hand_split_free_placement(
+    profiles = template_profiles_for(p.chord, p.policy)
+    return hand_split_free_placement_templates(
         role_pcs, lh_window, rh_window, LH_MAX_VOICES, RH_MAX_VOICES, MAX_HAND_SPAN,
         p.anchor_center, p.prev_midi, p.doubling_roles, p.max_doublings, p.rng,
         anchor_shift=p.anchor_shift, doubling_pcs=doubling_pcs,
         cluster_min_gap=p.policy.extra.get("cluster_min_gap", 13),
+        templates=profiles,
+        preferred_template=(
+            p.ctx.get("_template_target")
+            if needs_rare_templates(p.chord) else None
+        ),
     )
 
 
@@ -106,7 +117,7 @@ def role_penalty(candidate: Candidate, prev, ctx: dict, policy: VoicerPolicy) ->
 SECTION_PROFILE = {
     "verse": {"drift_free": 4, "max_voices": 5, "root_double_p": 0.60},
     "prechorus": {"drift_free": 5, "max_voices": 6, "root_double_p": 0.70},
-    "chorus": {"drift_free": 8, "max_voices": 7, "root_double_p": 0.85, "anchor_shift": 4},
+    "chorus": {"drift_free": 8, "max_voices": 7, "root_double_p": 0.85, "anchor_shift": 7},
     "bridge": {"drift_free": 6, "max_voices": 6, "root_double_p": 0.65, "anchor_shift": -3},
     "outro": {"drift_free": 5, "max_voices": 6, "root_double_p": 0.70},
 }
@@ -123,5 +134,17 @@ POLICY = VoicerPolicy(
     dct_mode_weights={"top": 0.50, "isolated": 0.20, "octave": 0.30},
     candidate_source=candidate_source, role_penalty=role_penalty, post_filter=post_filter,
     section_profile=SECTION_PROFILE,
-    extra={"doubling_targets": ("root", "5th"), "cluster_cap": 4},
+    extra={
+        "doubling_targets": ("root", "5th"),
+        "cluster_cap": 4,
+        "spacing_floor": 3,
+        "spacing_floor_low": 6,
+        "spacing_exception_tensions": 2,
+        "spacing_exception_voices": 6,
+        "spacing_exception_max_gaps": 1,
+        "template_profiles": ("balanced", "open", "closed", "root_spread"),
+        "rare_template_profiles": ("rare_feature", "tension_top"),
+        "template_mismatch_penalty": 1.3,
+        "rare_template_mismatch_penalty": 1.8,
+    },
 )

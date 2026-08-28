@@ -6,6 +6,45 @@ from __future__ import annotations
 from typing import Optional
 
 
+def policy_spacing_ok(candidate, chord, policy) -> bool:
+    """Compatibility helper for callers that still need a spacing verdict.
+
+    The policy floor is a preference, not an eligibility gate. Candidate
+    selection uses :func:`policy_spacing_penalty`; this function therefore
+    remains permissive so realistic close voicings are not filtered out.
+    """
+    return True
+
+
+def policy_spacing_penalty(candidate, chord, policy) -> float:
+    """Return the soft cost for policy-preferred adjacent spacing.
+
+    Close intervals are realistic in piano and upper-register voicings, so
+    this never rejects a candidate. Low-register gaps receive a stronger
+    penalty, while labeled upper extensions receive a reduced penalty.
+    """
+    settings = policy.extra
+    floor = int(settings.get("spacing_floor", 0))
+    low_floor = int(settings.get("spacing_floor_low", floor))
+    if floor <= 0:
+        return 0.0
+
+    pitches = sorted(candidate.pitches)
+    roles = [role for _, role in sorted(zip(candidate.pitches, candidate.roles))]
+    penalty = 0.0
+    for index, (lower, upper) in enumerate(zip(pitches, pitches[1:])):
+        required = low_floor if lower < 48 else floor
+        gap = upper - lower
+        if gap >= required:
+            continue
+        shortfall = required - gap
+        upper_is_extension = roles[index + 1] in {"9th", "11th", "13th"}
+        # Extensions are the most musically natural place for close spacing.
+        multiplier = 0.35 if upper_is_extension and lower >= 48 else 0.25
+        penalty += shortfall * multiplier
+    return penalty
+
+
 def low_interval_limit_ok(midi: list[int]) -> bool:
     """Hard: no interval smaller than a perfect 5th (7 semitones) below
     MIDI 48, and no interval smaller than a major 3rd (4 semitones) below

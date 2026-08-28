@@ -62,7 +62,8 @@ def _has_extension(chord_type: tuple) -> bool:
 
 
 def _try_assignment(cur_required: list, role_semi: dict, string_nums: tuple, root_pc: int,
-                     cluster_min_gap: int = 10, max_fret_span: int = 6):
+                     cluster_min_gap: int = 10, max_fret_span: int = 6,
+                     prefer_low_interval_safe: bool = False):
     """Place `cur_required` roles onto `string_nums` (root claims the
     first/lowest string if present, remaining roles fill upward in
     `DEGREE_ORDER` priority -- the "close stack redistributed across
@@ -110,6 +111,7 @@ def _try_assignment(cur_required: list, role_semi: dict, string_nums: tuple, roo
     than silently emitting a clashing shape), or `(None, None, None,
     None)` if the roles don't fit on the available strings at all."""
     from itertools import combinations, permutations
+    from ..spacing import low_interval_limit_ok
 
     ordered = [r for r in DEGREE_ORDER if r in cur_required]
     n = len(string_nums)
@@ -133,11 +135,16 @@ def _try_assignment(cur_required: list, role_semi: dict, string_nums: tuple, roo
                        for (i, _r), f in zip(assignment, combo)]
         n_violations = 0
         for a, b in combinations(abs_pitches, 2):
-            if abs(a - b) % 12 in (1, 11) and abs(a - b) < cluster_min_gap:
+            # Distinct strings may legitimately carry the same pitch class,
+            # but never the same absolute MIDI pitch: Candidate.dedup_sorted
+            # would otherwise remove one role while the shape metadata still
+            # claims that both strings are sounding.
+            if a == b or (abs(a - b) % 12 in (1, 11)
+                          and abs(a - b) < cluster_min_gap):
                 n_violations += 1
         return n_violations
 
-    best_capped = None   # span <= max_fret_span: (violations, max_fret, span, frets, roles_out)
+    best_capped = None   # span <= max_fret_span: (violations, lil_bad, max_fret, span, frets, roles_out)
     best_any = None      # fallback with no span cap, same key
     for string_subset in combinations(non_root_string_idxs, len(non_root_roles)):
         for perm in permutations(non_root_roles):
@@ -148,29 +155,40 @@ def _try_assignment(cur_required: list, role_semi: dict, string_nums: tuple, roo
             for combo in product(*choice_lists):
                 span = max(combo) - min(combo)
                 violations = cluster_violations(assignment, combo)
-                key = (violations, max(combo), span)
                 frets = ["x"] * n
                 roles_out = [None] * n
                 for (i, r), f in zip(assignment, combo):
                     frets[i] = f
                     roles_out[i] = r
-                entry = (violations, max(combo), span, tuple(frets), tuple(roles_out))
-                if best_any is None or key < (best_any[0], best_any[1], best_any[2]):
+                abs_pitches = [
+                    OPEN_STRINGS[STRING_NUMS.index(string_nums[i])] + f
+                    for (i, _r), f in zip(assignment, combo)
+                ]
+                lil_bad = not low_interval_limit_ok(abs_pitches)
+                key = (violations, lil_bad if prefer_low_interval_safe else False,
+                       max(combo), span)
+                entry = (violations, lil_bad, max(combo), span,
+                         tuple(frets), tuple(roles_out))
+                if best_any is None or key < (
+                        best_any[0], best_any[1], best_any[2], best_any[3]):
                     best_any = entry
                 if span <= max_fret_span and (
-                        best_capped is None or key < (best_capped[0], best_capped[1], best_capped[2])):
+                        best_capped is None or key < (
+                            best_capped[0], best_capped[1],
+                            best_capped[2], best_capped[3])):
                     best_capped = entry
     best = best_capped if best_capped is not None else best_any
     if best is None:
         return None, None, None, None
-    violations, _max_fret, span, frets, roles_out = best
+    violations, _lil_bad, _max_fret, span, frets, roles_out = best
     return frets, roles_out, span, violations
 
 
 def derive_shape(chord_type: tuple, root_string: int, shape_id: str,
                   max_fret_span: int = 6, bass_module_active: bool = True,
                   gen_dir: Optional[str] = None, cluster_min_gap: int = 10,
-                  initial_dropped: tuple = ()) -> Optional[tuple]:
+                  initial_dropped: tuple = (),
+                  prefer_low_interval_safe: bool = False) -> Optional[tuple]:
     """Derive one movable shape for `chord_type` rooted on `root_string`.
     Returns `(Shape, dropped_roles)`, or `None` if infeasible even after
     the full §3.3 omission ladder (a genuine coverage gap the caller
@@ -189,7 +207,12 @@ def derive_shape(chord_type: tuple, root_string: int, shape_id: str,
     voicing (rootless comping is standard jazz/pop-guitar practice, not
     an exotic fallback) would have been perfectly idiomatic -- but this
     function stops at the first violation-free fit, so without seeding
-    it never explores that thinner option on its own."""
+    it never explores that thinner option on its own.
+
+    `prefer_low_interval_safe` is reserved for completeness-gap shapes whose
+    default lowest-fret assignment would fail the shared low-register
+    interval gate after transposition. It changes only the tie-break among
+    clash-free assignments; it does not relax any guitar or spacing rule."""
     chord = _dummy_chord(chord_type)
     degrees = resolve_degrees(chord)
     dct_role, _ = compute_dct(chord, degrees, gen_dir=gen_dir)
@@ -208,7 +231,8 @@ def derive_shape(chord_type: tuple, root_string: int, shape_id: str,
         if cur_required and len(cur_required) <= n_strings:
             frets, degs, span, violations = _try_assignment(
                 cur_required, role_semi, string_nums, root_pc,
-                cluster_min_gap=cluster_min_gap, max_fret_span=max_fret_span)
+                cluster_min_gap=cluster_min_gap, max_fret_span=max_fret_span,
+                prefer_low_interval_safe=prefer_low_interval_safe)
             if frets is not None and span <= max_fret_span:
                 if violations == 0:
                     full_frets = ["x"] * 6
@@ -264,4 +288,3 @@ def derive_shape(chord_type: tuple, root_string: int, shape_id: str,
                 )
                 return shape, dropped_snapshot
             return None
-

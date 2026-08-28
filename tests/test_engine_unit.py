@@ -1,5 +1,6 @@
 """Spec 07 §13 items 1-5: unit tests for the shared engine."""
 import itertools
+import random
 import sys
 import os
 
@@ -8,6 +9,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from voicing.types import ChordEvent, resolve_degrees, TRIAD_THIRD_FIFTH, EXT_SEMI
 from voicing.dct import compute_dct, predicate_top, predicate_isolated, predicate_octave
 from voicing.vl import vl_distance
+from voicing.candidates import free_placement_templates, preferred_template_for
+from voicing.voicers import pop_piano
+from voicing.guitar.derive import derive_shape
+from voicing.guitar.model import realize
+from voicing.spacing import low_interval_limit_ok
 
 
 def test_degree_resolution_all_triads_and_tokens():
@@ -125,6 +131,45 @@ def test_vl_distance_symmetric_and_zero_and_unmatched():
     # hand-computed matching: a=[60,64], b=[61,66] -> best matching is
     # 60->61 (1) + 64->66 (2) = 3, not 60->66(6)+64->61(3)=9
     assert vl_distance([60, 64], [61, 66]) == 3.0
+
+
+def test_template_target_survives_candidate_pool_merge():
+    """A non-balanced target must remain selectable after profile merging."""
+    candidates = free_placement_templates(
+        [("root", 0), ("3rd", 4), ("5th", 7)],
+        43, 88, 60, None, ["root", "5th"], 2, random.Random(3),
+        templates=("balanced", "root_spread"),
+        preferred_template="root_spread",
+        max_candidates=40,
+    )
+    assert any(c.meta.get("voicing_template") == "root_spread"
+               for c in candidates)
+
+
+def test_rare_chords_rotate_over_rare_template_subset():
+    rare = ChordEvent(root_interval=0, triad="diminished", bass_interval=0)
+    common = ChordEvent(root_interval=0, triad="major", bass_interval=0)
+    rare_target = preferred_template_for(
+        rare, pop_piano.POLICY, {"seed": 3, "_current_t": 0}
+    )
+    common_target = preferred_template_for(
+        common, pop_piano.POLICY, {"seed": 3, "_current_t": 0}
+    )
+    assert rare_target in pop_piano.POLICY.extra["rare_template_profiles"]
+    assert common_target in pop_piano.POLICY.extra["template_profiles"]
+
+
+def test_derived_guitar_shape_prefers_low_register_safe_fingering():
+    chord_type = ("sus4", "b7", "9", "11", "13")
+    result = derive_shape(
+        chord_type, 5, "sus4-extended-a-shape",
+        prefer_low_interval_safe=True,
+    )
+    assert result is not None
+    shape, _dropped = result
+    realized = realize(shape, chord_root_pc=10, max_fret=12)
+    assert realized is not None
+    assert low_interval_limit_ok(realized["pitches"])
 
 
 if __name__ == "__main__":

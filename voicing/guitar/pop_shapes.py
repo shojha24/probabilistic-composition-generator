@@ -137,6 +137,83 @@ _SUS_SHAPES = [
            [("sus4", "N", "N", "N", "N")]),
 ]
 
+# Compact alternatives retain every triad tone while using different string
+# sets from the full barre shapes above. They are especially useful when a
+# rare triad lands at a register/fret position where the fuller shape is
+# technically legal but repeatedly loses the softmax competition.
+_COMPACT_SHAPES = [
+    _shape("E-compact-major", 6, [0, X, X, 1, 0, 0],
+           ("root", None, None, "3rd", "5th", "root"),
+           [("major", "N", "N", "N", "N")], tags=("compact", "hand_authored")),
+    _shape("E-compact-minor", 6, [0, X, X, 0, 0, 0],
+           ("root", None, None, "3rd", "5th", "root"),
+           [("minor", "N", "N", "N", "N")], tags=("compact", "hand_authored")),
+    _shape("A-compact-major", 5, [X, 0, 2, 2, 2, X],
+           (None, "root", "5th", "root", "3rd", None),
+           [("major", "N", "N", "N", "N")], tags=("compact", "hand_authored")),
+    _shape("A-compact-minor", 5, [X, 0, 2, 2, 1, X],
+           (None, "root", "5th", "root", "3rd", None),
+           [("minor", "N", "N", "N", "N")], tags=("compact", "hand_authored")),
+    _shape("D-compact-major", 4, [X, X, 0, 2, X, 2],
+           (None, None, "root", "5th", None, "3rd"),
+           [("major", "N", "N", "N", "N")], tags=("compact", "hand_authored")),
+    _shape("D-compact-minor", 4, [X, X, 0, 2, X, 1],
+           (None, None, "root", "5th", None, "3rd"),
+           [("minor", "N", "N", "N", "N")], tags=("compact", "hand_authored")),
+    _shape("E-compact-sus4", 6, [0, 2, X, 2, 0, 0],
+           ("root", "5th", None, "3rd", "5th", "root"),
+           [("sus4", "N", "N", "N", "N")], tags=("compact", "hand_authored")),
+    _shape("A-compact-sus4", 5, [X, 0, 2, 2, 3, X],
+           (None, "root", "5th", "root", "3rd", None),
+           [("sus4", "N", "N", "N", "N")], tags=("compact", "hand_authored")),
+    _shape("D-compact-sus4", 4, [X, X, 0, 2, 3, 3],
+           (None, None, "root", "5th", "root", "3rd"),
+           [("sus4", "N", "N", "N", "N")], tags=("compact", "hand_authored")),
+]
+
+# These are complete, low-span movable shapes for triads that previously
+# depended entirely on the generic derivation backstop. Keeping the unusual
+# pitch-class identity intact is more useful for this corpus than replacing
+# it with a familiar major/minor approximation.
+_RARE_TRIAD_SHAPES = [
+    _shape("E-compact-diminished", 6, [0, 1, X, 0, X, X],
+           ("root", "5th", None, "3rd", None, None),
+           [("diminished", "N", "N", "N", "N")],
+           tags=("rare_feature", "hand_authored")),
+    _shape("A-compact-diminished", 5, [X, 0, 1, X, 1, X],
+           (None, "root", "5th", None, "3rd", None),
+           [("diminished", "N", "N", "N", "N")],
+           tags=("rare_feature", "hand_authored")),
+    _shape("D-compact-diminished", 4, [X, X, 0, 1, X, 1],
+           (None, None, "root", "5th", None, "3rd"),
+           [("diminished", "N", "N", "N", "N")],
+           tags=("rare_feature", "hand_authored")),
+    _shape("E-compact-augmented", 6, [0, X, X, 1, 1, 0],
+           ("root", None, None, "3rd", "5th", "root"),
+           [("augmented", "N", "N", "N", "N")],
+           tags=("rare_feature", "hand_authored")),
+    _shape("A-compact-augmented", 5, [X, 0, X, X, 2, 1],
+           (None, "root", None, None, "3rd", "5th"),
+           [("augmented", "N", "N", "N", "N")],
+           tags=("rare_feature", "hand_authored")),
+    _shape("D-compact-augmented", 4, [X, X, 0, 3, X, 2],
+           (None, None, "root", "5th", None, "3rd"),
+           [("augmented", "N", "N", "N", "N")],
+           tags=("rare_feature", "hand_authored")),
+    _shape("E-compact-sus2", 6, [0, 2, X, X, X, 2],
+           ("root", "5th", None, None, None, "3rd"),
+           [("sus2", "N", "N", "N", "N")],
+           tags=("rare_feature", "hand_authored")),
+    _shape("A-compact-sus2", 5, [X, 0, 2, X, 0, X],
+           (None, "root", "5th", None, "3rd", None),
+           [("sus2", "N", "N", "N", "N")],
+           tags=("rare_feature", "hand_authored")),
+    _shape("D-compact-sus2", 4, [X, X, 0, 2, X, 0],
+           (None, None, "root", "5th", None, "3rd"),
+           [("sus2", "N", "N", "N", "N")],
+           tags=("rare_feature", "hand_authored")),
+]
+
 # Bare-root ("1", e.g. C:1) chords: no 3rd/5th at all, just the root
 # pitch class doubled across 3 non-adjacent strings so a shape exists
 # with >= min_voices=3 notes -- a single-string root has only 1 pitch and
@@ -146,11 +223,12 @@ _ROOT_ONLY_SHAPES = [
            [("1", "N", "N", "N", "N")]),
     _shape("A-root3", 5, [X, 0, X, 2, X, 5], (None, "root", None, "root", None, "root"),
            [("1", "N", "N", "N", "N")]),
-    _shape("D-root3", 4, [X, 5, 0, X, 3, X], (None, "root", "root", None, "root", None),
-           [("1", "N", "N", "N", "N")]),
 ]
 
-_HAND_SHAPES += _POWER_SHAPES + _SUS_SHAPES + _ROOT_ONLY_SHAPES
+_HAND_SHAPES += (
+    _POWER_SHAPES + _SUS_SHAPES + _COMPACT_SHAPES +
+    _RARE_TRIAD_SHAPES + _ROOT_ONLY_SHAPES
+)
 
 
 # ---------------------------------------------------------------------------
@@ -175,6 +253,10 @@ _EXTENDED_CHORD_TYPES_11_13 = [
     ("major", "b7", "9", "#11", "N"),
     ("major", "b7", "9", "N", "13"),
     ("major", "b7", "9", "N", "b13"),
+    # Maj7(#11) has the same adjacent-third/#11 register hazard as the
+    # dominant #11 family, but its complete shape must be available so the
+    # labeled 9th is not forced through the guitar omission ladder.
+    ("major", "7", "9", "#11", "N"),
 ]
 
 _DERIVED_SHAPES = []
@@ -310,9 +392,20 @@ def _close_completeness_gaps():
                         if matches:
                             continue
                         # Genuine gap: derive a shape for this exact combo.
+                        # A sus4+11 stores its quality-bearing fourth under
+                        # the 11th role. In the fully extended dominant
+                        # variant, the lowest-fret assignment is often
+                        # register-invalid even though it is semitone-correct
+                        # (the shared low-interval gate rejects it). Prefer a
+                        # low-interval-safe assignment for this completeness
+                        # shape only; ordinary derived-shape choices retain
+                        # their established fretboard anchoring.
+                        prefer_low_interval_safe = ct == (
+                            "sus4", "b7", "9", "11", "13")
                         for rs in (6, 5, 4):
                             res = derive_shape(ct, rs, f"gapfill-{ct}-{rs}",
-                                                bass_module_active=True)
+                                                bass_module_active=True,
+                                                prefer_low_interval_safe=prefer_low_interval_safe)
                             if res is not None:
                                 shape, _ = res
                                 bucket = list(SHAPES_BY_KEY.get(key, ()))

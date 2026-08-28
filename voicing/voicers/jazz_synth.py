@@ -8,7 +8,12 @@ from __future__ import annotations
 
 from collections import Counter
 
-from ..candidates import Candidate, free_placement
+from ..candidates import (
+    Candidate,
+    free_placement_templates,
+    needs_rare_templates,
+    template_profiles_for,
+)
 from ..engine import CandidateGenParams
 from ..policy import VoicerPolicy
 from ..types import resolve_degrees
@@ -24,12 +29,18 @@ def candidate_source(p: CandidateGenParams) -> list[Candidate]:
     doubling_pcs = {
         d.role: (p.chord.root_interval + d.semitone) % 12 for d in full
     }
-    return free_placement(
+    profiles = template_profiles_for(p.chord, p.policy)
+    return free_placement_templates(
         role_pcs, min(WINDOW_LO, p.window_lo), max(WINDOW_HI, p.window_hi),
         p.anchor_center, p.prev_midi, p.doubling_roles, p.max_doublings,
         p.rng, anchor_shift=p.anchor_shift, doubling_pcs=doubling_pcs,
         cluster_min_gap=p.policy.extra.get("cluster_min_gap", 3),
         max_candidates=1000,
+        templates=profiles,
+        preferred_template=(
+            p.ctx.get("_template_target")
+            if needs_rare_templates(p.chord) else None
+        ),
     )
 
 
@@ -103,6 +114,13 @@ POLICY = VoicerPolicy(
     dct_mode_weights={"top": 0.40, "isolated": 0.30, "octave": 0.30},
     candidate_source=candidate_source, role_penalty=role_penalty,
     post_filter=post_filter, section_profile=SECTION_PROFILE,
-    extra={"doubling_targets": ("root", "5th", "7th"), "cluster_min_gap": 3,
-           "cluster_cap": 4},
+    extra={"doubling_targets": ("root", "5th", "7th"), "cluster_min_gap": 0,
+           "cluster_cap": 4, "spacing_floor": 0, "spacing_floor_low": 6,
+           "spacing_exception_tensions": 2, "spacing_exception_voices": 6,
+           "spacing_exception_max_gaps": 1,
+           "voice_excess_penalty": 0.6, "voice_excess_growth": 1.8,
+           "template_profiles": ("balanced", "open", "shell_spread", "tension_top", "wide"),
+           "rare_template_profiles": ("rare_feature", "root_spread"),
+           "template_mismatch_penalty": 1.5,
+           "rare_template_mismatch_penalty": 2.0},
 )

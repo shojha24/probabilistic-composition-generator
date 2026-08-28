@@ -167,16 +167,17 @@ def make_shape_library_source(shapes: list, shapes_by_key: dict, max_fret: int,
             realized = realize(shape, root_pc, max_fret=max_fret)
             if realized is None:
                 continue
+            template = shape.tags[0] if shape.tags else shape.id
             cand = Candidate(
                 pitches=realized["pitches"], roles=realized["roles"], shape_id=shape.id,
                 meta={
                     "root_fret": realized["root_fret"], "muted": realized["muted"],
                     "strings": realized["strings"], "root_string": shape.root_string,
-                    "family": shape.tags[0] if shape.tags else shape.id,
+                    "family": template, "voicing_template": template,
                     "fret_span": fret_span, "extensions_dropped": list(dropped),
-                    "signature_extra": (shape.root_string, shape.tags[0] if shape.tags else shape.id),
+                    "signature_extra": (shape.root_string, template),
                 },
-            )
+            ).dedup_sorted()
             out.append(cand)
         return out
 

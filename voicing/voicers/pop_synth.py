@@ -10,7 +10,12 @@ from __future__ import annotations
 from collections import Counter
 
 from ..policy import VoicerPolicy
-from ..candidates import free_placement, Candidate
+from ..candidates import (
+    Candidate,
+    free_placement_templates,
+    needs_rare_templates,
+    template_profiles_for,
+)
 from ..engine import CandidateGenParams
 from ..types import resolve_degrees
 from ..spacing import spacing_hard_ok
@@ -56,6 +61,12 @@ def _spread_for_section(section: str) -> str:
 # spec 03 §8's additional gate target: emitted `spread` classes must be
 # distributed no more skewed than this across the dataset.
 _SPREAD_TARGET = {"wide": 0.60, "open": 0.25, "sparse": 0.15}
+# `_matches_spread` is intentionally a loose realized-shape classifier, so a
+# small reserve is needed for requested "wide" shapes that land in the
+# fallback "open" bucket. Keep the published target above for reporting, but
+# steer the corrective sampler against this conservative control target so
+# the realized mix can still meet the 60/25/15 gate.
+_SPREAD_CONTROL_TARGET = {"wide": 0.62, "open": 0.25, "sparse": 0.13}
 
 
 def _spread_for_chord(section: str, ctx: dict, t) -> str:
@@ -114,7 +125,7 @@ def _spread_for_chord(section: str, ctx: dict, t) -> str:
         # every time an under-realizing "wide"/"sparse" request silently
         # fell back to it.
         rel_deficit = {
-            k: (_SPREAD_TARGET[k] - tally[k] / total) / _SPREAD_TARGET[k]
+            k: (_SPREAD_CONTROL_TARGET[k] - tally[k] / total) / _SPREAD_CONTROL_TARGET[k]
             for k in tally
         }
         best = max(rel_deficit, key=rel_deficit.get)
@@ -197,11 +208,17 @@ def candidate_source(p: CandidateGenParams) -> list:
     doubling_pcs = {d.role: (p.chord.root_interval + d.semitone) % 12 for d in full_degrees}
     window_lo = min(WINDOW_LO, p.window_lo)
     window_hi = max(WINDOW_HI, p.window_hi)
-    raw = free_placement(
+    profiles = template_profiles_for(p.chord, p.policy)
+    raw = free_placement_templates(
         role_pcs, window_lo, window_hi, p.anchor_center, p.prev_midi,
         p.doubling_roles, p.max_doublings, p.rng,
         anchor_shift=p.anchor_shift, doubling_pcs=doubling_pcs,
         cluster_min_gap=p.policy.extra.get("cluster_min_gap", 13),
+        templates=profiles,
+        preferred_template=(
+            p.ctx.get("_template_target")
+            if needs_rare_templates(p.chord) else None
+        ),
     )
     spread = _spread_for_chord(p.section, p.ctx, p.ctx.get("_current_t"))
     min_gap = p.policy.extra.get("cluster_min_gap", 13)
@@ -333,5 +350,13 @@ POLICY = VoicerPolicy(
     candidate_source=candidate_source, role_penalty=role_penalty, post_filter=post_filter,
     section_profile=SECTION_PROFILE,
     extra={"doubling_targets": ("root", "5th"), "cluster_cap": 4,
-           "dct_repair_ok": True, "on_commit": _on_commit},
+           "spacing_floor": 3, "spacing_floor_low": 6,
+           "spacing_exception_tensions": 2, "spacing_exception_voices": 6,
+           "spacing_exception_max_gaps": 1,
+           "voice_excess_penalty": 0.6, "voice_excess_growth": 1.8,
+           "dct_repair_ok": True, "on_commit": _on_commit,
+           "template_profiles": ("balanced", "open", "wide", "tension_top"),
+           "rare_template_profiles": ("rare_feature", "root_spread"),
+           "template_mismatch_penalty": 0.7,
+           "rare_template_mismatch_penalty": 1.0},
 )
