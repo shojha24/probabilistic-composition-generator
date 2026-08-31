@@ -23,11 +23,11 @@ WINDOW_HI = 91
 
 
 def candidate_source(p: CandidateGenParams) -> list[Candidate]:
-    role_pcs = [(d.role, (p.chord.root_interval + d.semitone) % 12)
+    role_pcs = [(d.role, (p.root_pc + d.semitone) % 12)
                 for d in p.degrees]
     full = resolve_degrees(p.chord)
     doubling_pcs = {
-        d.role: (p.chord.root_interval + d.semitone) % 12 for d in full
+        d.role: (p.root_pc + d.semitone) % 12 for d in full
     }
     profiles = template_profiles_for(p.chord, p.policy)
     return free_placement_templates(

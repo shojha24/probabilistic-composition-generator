@@ -16,6 +16,10 @@ The current pipeline has these Python stages:
 The voicing stage is documented in [`voicing/README.md`](voicing/README.md).
 It converts chord events into MIDI pitches after chord generation.
 
+`target_corpus_gen.py` is a separate opt-in generator for the §08
+quota-aware corpus. It reuses `chord_gen.py`'s natural sampling primitives but
+does not change the ordinary generator interface or behavior.
+
 JFugue score text is now produced by `render.py`. MIDI conversion and
 humanization use `HumanizedMidiRenderer.java`.
 
@@ -208,10 +212,17 @@ python render.py \
   --seed 7
 ```
 
+Directory rendering requires an explicit integer `--seed` and accepts one or
+more `--in-dir` values. Each directory's source files are validated and
+sorted by numeric ID before rendering, so `song_10.json` follows
+`song_9.json`; input directories are processed in command-line order.
+Malformed filenames, duplicate numeric IDs within one directory, and
+duplicate input directories fail the render.
+
 `render.py` combines two tracks for each song:
 
-- `chord_module.py` selects one piano, guitar, or synth policy for the song
-  genre and renders voiced block chords;
+- `chord_module.py` tries the renderer's six-voicer order, prioritizing the
+  song's genre, and renders voiced block chords;
 - `bass_module.py` renders the generated bass pitch in a low register.
 
 The output uses `START_SONG_N` and `END_SONG` markers. Both tracks use the
@@ -223,6 +234,18 @@ The chord track is written to JFugue voice `V0` and the bass track to `V1`.
 Each note in a block chord receives the duration token. This keeps all chord
 tones sustained for the complete chord duration and prevents the bass from
 playing after the chord track.
+
+Every score has a sidecar manifest at
+`<score>.manifest.json`. It records the numeric source ID and filename,
+source directory, source SHA-256, genre, tonic, BPM, chord count, selected
+voicer, per-song seed, render command, and generator revision. The manifest is
+the authoritative pairing between source labels and `START_SONG_N` score
+blocks. It also records the six-voicer preference order and aggregate
+`voicer_counts`.
+Each failed fallback voicer is logged with its policy and failing chord before
+the next voicer is tried. If every policy fails, the raised error repeats the
+complete per-voicer failure list. A voicing failure stops the render; events
+are never silently skipped.
 
 Instrument programs are selected reproducibly when `--seed` is supplied.
 Chord tracks choose from the expanded role-aware catalog in `instruments.py`.
@@ -285,12 +308,11 @@ discount reduces exact repeated `(root, triad)` states.
 
 ### Target corpus generation
 
-The existing generation interface remains unchanged by default. To generate
-the §08 quota-aware corpus, use:
+The ordinary `chord_gen.py` interface generates natural, unconstrained songs.
+To generate the §08 quota-aware corpus, use the separate target generator:
 
 ```bash
-python chord_gen.py \
-  --target-corpus \
+python target_corpus_gen.py \
   --target-songs 100 \
   --seed 7 \
   --dist-dir ./distributions
@@ -300,10 +322,10 @@ For a target corpus with randomized per-song tonic and BPM values, use the
 debug shortcut:
 
 ```bash
-python chord_gen.py --target-corpus --debug --seed 7
+python target_corpus_gen.py --debug --seed 7
 ```
 
-`--target-corpus` generates exactly 250,000 chord events: 125,000 jazz events
+The target generator produces exactly 250,000 chord events by default: 125,000 jazz events
 and 125,000 pop/rock events. It writes target output separately from the
 validation-style generated labels:
 
@@ -312,11 +334,60 @@ gen/target-jazz-labels/
 gen/target-pop-rock-labels/
 ```
 
+Target songs are tagged with a `voicer_family` hint, distributed approximately
+equally among `guitar`, `piano`, and `synth`. Guitar-tagged songs use a
+guitar-compatible sparse extension profile; the dense-extension quotas are
+filled by the piano- and synth-tagged songs. During combined directory
+rendering, `render.py` tracks all six realized voicers and orders candidates
+hierarchically for each song: the least-used in-genre voicer, the hinted
+in-genre voicer, the remaining in-genre voicers, then the equivalent
+out-of-genre sequence. It still falls back when a progression cannot be
+voiced by an earlier candidate.
+
+Target generation does not preflight the assigned family. Family metadata is
+only a rendering preference, so a full render may fall back to another
+genre-compatible family when the hint cannot be realized.
+
+Songs without `voicer_family` metadata, including older or independently
+created JSON files, remain supported: combined directory rendering still uses
+the six-voicer hierarchy, while standalone rendering chooses a
+genre-compatible family using the normal family weights. An unrecognized hint
+is treated as absent.
+
+Render both target directories into one score corpus:
+
+```bash
+python render.py \
+  --in-dir ./gen/target-jazz-labels \
+  --in-dir ./gen/target-pop-rock-labels \
+  --out ./gen/scores.txt \
+  --mode pads \
+  --seed 7
+```
+
+Validate the combined target score corpus and write a machine-readable report:
+
+```bash
+python3 eda/validate_rendered_corpus.py \
+  --labels-dir ./gen/target-jazz-labels ./gen/target-pop-rock-labels \
+  --scores ./gen/scores.txt \
+  --manifest ./gen/scores.txt.manifest.json \
+  --json-out ./gen/rendered_corpus_validation.json
+```
+
+The validator pairs events through the score's manifest and checks absolute
+root and bass pitch classes, requested chord pitch classes, root omission,
+extension retention, DCT exposure, MIDI ordering, low-interval limits, and
+source hashes. It exits nonzero for a hard invariant or pairing failure. To
+validate one corpus, pass one `--labels-dir`; for a combined corpus, pass both
+label directories after the same option. `--manifest` and `--genre` are
+optional.
+
 Use `--target-events N` for a smaller or custom total. The event budget is
 split between genres, and the §08 minimums are scaled for smaller budgets:
 
 ```bash
-python chord_gen.py \
+python target_corpus_gen.py \
   --target-events 20000 \
   --target-songs 100 \
   --seed 7 \
@@ -326,12 +397,9 @@ python chord_gen.py \
 With `--out-dir`, target mode creates `jazz-labels/` and
 `pop-rock-labels/` subdirectories below the supplied path. In target mode,
 `--target-songs` controls the number of songs **per genre** and defaults to
-`--songs`. `--random-tonic` and `--random-bpm` are honored per song.
-`--random-genre` is ignored because target mode always generates both genres.
-`--random-num` is ignored because target mode must preserve the exact event
-budget and requested song count. `--target-corpus` and `--target-events` are
-mutually exclusive. Generation reports an error if a requested budget is too
-small to satisfy its scaled minimums.
+100. `--random-tonic` and `--random-bpm` are honored per song; `--debug`
+enables both. Generation reports an error if a requested budget is too small
+to provide at least one event per song.
 
 ## Chord-event data
 
@@ -421,10 +489,11 @@ MIDI sequence
 `render.py` currently produces the synchronized score text. It:
 
 - reads generated chord-event JSON files;
-- selects a piano, guitar, or synth voicer by genre;
+- selects among six genre-family voicers, prioritizing the source genre;
 - renders pad chords and bass notes;
 - preserves each chord's duration token in both tracks;
-- writes `START_SONG_N` and `END_SONG` blocks.
+- writes `START_SONG_N` and `END_SONG` blocks;
+- writes a manifest sidecar for numeric source ordering and provenance.
 
 Arpeggio mode is exposed by the interface but is not implemented yet.
 
@@ -490,10 +559,12 @@ The current responsibilities are:
 | Component | Responsibility |
 |---|---|
 | `extract_distributions.py` | Learn count tables |
-| `chord_gen.py` | Sample timed symbolic chord events |
+| `chord_gen.py` | Sample natural timed symbolic chord events |
+| `target_corpus_gen.py` | Generate the separate quota-aware target corpus |
 | `chord_module.py` | Select a voicer and render pad chord tracks |
 | `bass_module.py` | Render bass tracks |
-| `render.py` | Combine tracks into JFugue score text |
+| `render.py` | Combine tracks into JFugue score text and manifests |
+| `eda/validate_rendered_corpus.py` | Validate manifest-paired rendered corpora |
 | `voicing/` | Select and realize MIDI voicings |
 | `HumanizedMidiRenderer.java` | Convert JFugue text to humanized MIDI |
 | `old_src/` | Historical implementation and reference material |

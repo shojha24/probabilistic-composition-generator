@@ -25,7 +25,8 @@ def select_tones(chord: ChordEvent, policy, ctx: dict, rng: random.Random,
                   root_omission_gate: bool = False,
                   branch_b_requires_octave_dct: bool = False,
                   extra_doubling_targets: tuple = ("root", "5th"),
-                  gen_dir: str = None) -> SelectedTones:
+                  gen_dir: str = None,
+                  root_pc: int = None) -> SelectedTones:
     """Build the active degree set and resolve the probabilistic
     root-doubling / root-omission / 5th-thinning policy (spec 07 §4.1,
     parent §5). Extensions are NEVER dropped here -- every active extension
@@ -38,6 +39,8 @@ def select_tones(chord: ChordEvent, policy, ctx: dict, rng: random.Random,
     branch B disabled, matching the simpler pop-voicer row in parent §5.
     """
     degrees = resolve_degrees(chord)
+    if not isinstance(root_pc, int) or not 0 <= root_pc < 12:
+        raise ValueError(f"root_pc must be in 0..11, got {root_pc!r}")
 
     # --- 5th thinning (only major/minor triads carry a freely-omittable 5th)
     fifth_omitted = False
@@ -48,12 +51,23 @@ def select_tones(chord: ChordEvent, policy, ctx: dict, rng: random.Random,
             degrees = [d for d in degrees if d.role != "5th"]
 
     # --- root omission (bass-coordination policy, parent §5)
-    root_omitted, flags = resolve_root_omission(
-        chord, degrees, policy.root_omission_p, ctx, rng,
-        allow_branch_b=root_omission_gate,
-        branch_b_requires_octave_dct=branch_b_requires_octave_dct,
-        gen_dir=gen_dir,
+    omission_enabled = root_omission_gate or bool(
+        policy.extra.get("root_omission_gate")
     )
+    if omission_enabled:
+        root_omitted, flags = resolve_root_omission(
+            chord, degrees, policy.root_omission_p, ctx, rng,
+            allow_branch_b=omission_enabled,
+            branch_b_requires_octave_dct=branch_b_requires_octave_dct,
+            gen_dir=gen_dir,
+            root_pc=root_pc,
+        )
+    else:
+        root_omitted = False
+        flags = {
+            "root_omission_status": "retained",
+            "root_omission_gate_failure": "gate_disabled",
+        }
     if root_omitted:
         degrees = [d for d in degrees if d.role != "root"]
 

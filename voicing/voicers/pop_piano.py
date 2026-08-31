@@ -21,7 +21,7 @@ MAX_HAND_SPAN = 14
 
 
 def candidate_source(p: CandidateGenParams) -> list:
-    role_pcs = [(d.role, (p.chord.root_interval + d.semitone) % 12) for d in p.degrees]
+    role_pcs = [(d.role, (p.root_pc + d.semitone) % 12) for d in p.degrees]
     # `p.degrees` is the post-thinning degree set (spec 07 §4.1: a 5th can
     # be probabilistically omitted from the core voicing while remaining a
     # valid *doubling* target). Without a pc for it, doubling that role is
@@ -30,7 +30,7 @@ def candidate_source(p: CandidateGenParams) -> list:
     # candidate reaching `min_voices`. Resolve the *full*, untrimmed degree
     # set once so every doubling-eligible role always has a known pc.
     full_degrees = resolve_degrees(p.chord)
-    doubling_pcs = {d.role: (p.chord.root_interval + d.semitone) % 12 for d in full_degrees}
+    doubling_pcs = {d.role: (p.root_pc + d.semitone) % 12 for d in full_degrees}
     # Respect the engine's relaxation-ladder window widening (spec 07 §9
     # step 6): extend the outer hand bounds if the effective window is
     # wider than the nominal LH/RH windows.

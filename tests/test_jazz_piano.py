@@ -32,6 +32,15 @@ def test_triads_without_thirds_keep_a_root_and_fifth_shell():
     assert voiced.hands["lh"]
 
 
+def test_root_only_chords_use_root_octave_shell():
+    chord = ChordEvent(root_interval=0, triad="1", bass_interval=0)
+    song = Song("jazz", 0, 120, 1, (chord,))
+    voiced = _engine().run(song)[0]
+    assert set(voiced.roles) == {"root"}
+    assert len(voiced.midi) >= 3
+    assert voiced.hands["lh"]
+
+
 def test_altered_sus_shell_uses_collision_merged_third():
     chord = ChordEvent(7, "sus4", 0, "b7", "b9", "11", "13")
     voiced = _engine().run(Song("jazz", 0, 120, 1, (chord,)))[0]

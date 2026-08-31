@@ -39,6 +39,7 @@ class Shape:
     open_only: bool = False
     native_root_pc: Optional[int] = None  # required if open_only
     tags: tuple = ()
+    omitted_roles: tuple = ()
 
     def span(self) -> int:
         fretted = [f for f in self.frets if f != "x" and f != 0]

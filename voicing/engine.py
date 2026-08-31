@@ -39,6 +39,7 @@ class VoicingImpossible(Exception):
 @dataclass
 class CandidateGenParams:
     chord: ChordEvent
+    root_pc: int                 # absolute runtime root pitch class
     degrees: list                # required Degree list (post 5th/root omission)
     doubling_roles: list
     max_doublings: int
@@ -55,8 +56,8 @@ class CandidateGenParams:
     anchor_shift: int = 0
 
 
-def _role_pcs(chord: ChordEvent, degrees: list) -> list:
-    return [(d.role, (chord.root_interval + d.semitone) % 12) for d in degrees]
+def _role_pcs(root_pc: int, degrees: list) -> list:
+    return [(d.role, (root_pc + d.semitone) % 12) for d in degrees]
 
 
 def _default_dct_sample(weights: dict, rng: random.Random) -> str:
@@ -97,9 +98,15 @@ class Engine:
         self.total_count = 0
         self.extension_dropped_count = 0
         self.log = []
+        self.extension_drop_records = []
 
     # ------------------------------------------------------------------
     def run(self, song: Song) -> list[VoicedChord]:
+        if not isinstance(song.tonic_pc, int) or not 0 <= song.tonic_pc < 12:
+            raise ValueError(f"song.tonic_pc must be in 0..11, got {song.tonic_pc!r}")
+        self.ctx["_active_tonic_pc"] = song.tonic_pc
+        self.ctx["_active_genre"] = song.genre
+        self.ctx["bass_module_active"] = bool(self.ctx.get("bass_module_active", False))
         center = compute_anchor_center(song.tonic_pc, self.policy.window_lo, self.policy.window_hi)
         prev_cand = None
         prev_chord = None
@@ -134,6 +141,18 @@ class Engine:
         self.ctx["_current_t"] = t
         overrides, center, section, anchor_shift = self._effective_policy_and_center(base_center)
         policy = self.policy
+        active_tonic_pc = self.ctx.get("_active_tonic_pc")
+        if not isinstance(active_tonic_pc, int) or not 0 <= active_tonic_pc < 12:
+            raise ValueError("Engine runtime absolute root context is missing or invalid")
+        root_pc = (active_tonic_pc + chord.root_interval) % 12
+        self.ctx["_current_root_pc"] = root_pc
+        bass_active = bool(self.ctx.get("bass_module_active", False))
+        root_gate = self.root_omission_gate or (
+            self.ctx.get("_active_genre") == "jazz" and bass_active
+        )
+        branch_b_octave = self.branch_b_requires_octave_dct or (
+            root_gate and policy.voicer_id == "jazz-synth"
+        )
         # Exposed for voicer hooks (post_filter/role_penalty) that need the
         # *effective*, section-shifted anchor rather than the song-level
         # base center -- e.g. spec 03's bottom-voice octave-band anchoring,
@@ -153,8 +172,9 @@ class Engine:
 
         preferred_template_for(chord, policy, self.ctx)
         selected = select_tones(chord, eff_policy, self.ctx, self.rng,
-                                 root_omission_gate=self.root_omission_gate,
-                                 branch_b_requires_octave_dct=self.branch_b_requires_octave_dct,
+                                 root_pc=root_pc,
+                                 root_omission_gate=root_gate,
+                                 branch_b_requires_octave_dct=branch_b_octave,
                                  extra_doubling_targets=tuple(policy.extra.get(
                                      "doubling_targets", ("root", "5th"))),
                                  gen_dir=self.gen_dir)
@@ -164,7 +184,7 @@ class Engine:
         dct_role, secondary_roles = compute_dct(chord, selected.degrees, gen_dir=self.gen_dir)
         dct_pc = dct_pitch_class(chord, selected.degrees, dct_role) if dct_role else None
         if dct_pc is not None:
-            dct_pc = (chord.root_interval + dct_pc) % 12
+            dct_pc = (root_pc + dct_pc) % 12
         self.ctx["_current_dct_role"] = dct_role
         self.ctx["_current_dct_pc"] = dct_pc
 
@@ -189,6 +209,7 @@ class Engine:
 
         chosen = None
         chosen_diag = {}
+        source_cache = {}
         # spec 07 §9's ladder floor (step 8) forbids relaxing extension
         # presence at all; spec 02/05 §3.3 carve out extension-dropping as
         # a guitar-only escape hatch *beneath* that floor, strictly lower
@@ -236,15 +257,42 @@ class Engine:
                     lvl_doubling_roles.append(dct_role)
 
                 params = CandidateGenParams(
-                    chord=chord, degrees=lvl_degrees, doubling_roles=lvl_doubling_roles,
+                    chord=chord, root_pc=root_pc, degrees=lvl_degrees,
+                    doubling_roles=lvl_doubling_roles,
                     max_doublings=lvl_max_doublings, window_lo=lvl_window_lo, window_hi=lvl_window_hi,
                     anchor_center=center, prev_midi=prev_midi, rng=self.rng, ctx=self.ctx,
                     policy=policy, dct_role=dct_role, section=section, max_voices=lvl_max_voices,
                     anchor_shift=anchor_shift,
                 )
-                raw = policy.candidate_source(params)
+                source_key = (
+                    tuple(
+                        (degree.role, degree.semitone, degree.token,
+                         degree.merged_from)
+                        for degree in lvl_degrees
+                    ),
+                    tuple(lvl_doubling_roles),
+                    lvl_max_doublings,
+                    lvl_max_voices,
+                    lvl_window_lo,
+                    lvl_window_hi,
+                    center,
+                    anchor_shift,
+                    tuple(prev_midi or ()),
+                    dct_role,
+                    self.ctx.get("_template_target"),
+                )
+                if source_key not in source_cache:
+                    source_cache[source_key] = policy.candidate_source(params)
+                raw = source_cache[source_key]
                 if not allow_dropped:
                     raw = [c for c in raw if not c.meta.get("extensions_dropped")]
+                raw = [
+                    c for c in raw
+                    if self._candidate_sound_set_ok(
+                        c, chord, selected, lvl_degrees, root_pc, bass_active,
+                        allow_dropped,
+                    )
+                ]
 
                 eff_drift_tol = policy.drift_tol * (1.5 if level >= 2 else 1.0)
 
@@ -390,6 +438,52 @@ class Engine:
         for dropped_role in chosen.meta.get("extensions_dropped") or ():
             self.extension_dropped_count += 1
             self.log.append(("EXTENSION_DROPPED", t, chord, dropped_role))
+            self.extension_drop_records.append({
+                "event_index": t,
+                "chord": chord.chord_type(),
+                "shape_id": chosen.shape_id,
+                "role": dropped_role,
+                "source_file": self.ctx.get("source_file"),
+            })
+
+        active_degrees = resolve_degrees(chord)
+        active_degree_pcs = sorted({
+            (root_pc + degree.semitone) % 12 for degree in active_degrees
+        })
+        dct_exposure = None
+        if dct_role is not None:
+            dct_exposure = next(
+                (
+                    exposure_branch(p, chosen.pitches)
+                    for p, role in zip(chosen.pitches, chosen.roles)
+                    if role == dct_role and exposure_branch(p, chosen.pitches)
+                ),
+                None,
+            )
+        chosen_diag.update({
+            "absolute_root_pc": root_pc,
+            "bass_module_active": bass_active,
+            "bass_pc": ((root_pc + chord.bass_interval) % 12)
+            if bass_active else None,
+            "active_degree_pcs": active_degree_pcs,
+            "emitted_chord_pcs": sorted({p % 12 for p in chosen.pitches}),
+            "dct_role": dct_role,
+            "dct_pc": dct_pc,
+            "dct_exposure": dct_exposure,
+            "dct_branch_requested": sampled_branch,
+            "root_omitted": selected.root_omitted,
+            "chord_type": list(chord.chord_type()),
+            "shape_id": chosen.shape_id,
+            "root_omission": selected.flags.get(
+                "root_omission_status",
+                "omitted" if selected.root_omitted else "retained",
+            ),
+            "root_omission_gate_failure": selected.flags.get(
+                "root_omission_gate_failure"
+            ),
+            "omitted_roles": list(chosen.meta.get("roles_dropped") or ()),
+            "extensions_dropped": list(chosen.meta.get("extensions_dropped") or ()),
+        })
 
         centroid = centroid_of(chosen.pitches)
         vld = vl_distance(prev_midi or [], chosen.pitches, policy.unmatched_penalty) if prev_midi is not None else 0.0
@@ -417,6 +511,69 @@ class Engine:
             diagnostics=chosen_diag,
         )
         return voiced, chosen
+
+    def _candidate_sound_set_ok(self, candidate, chord: ChordEvent,
+                                selected: SelectedTones, required_degrees: list,
+                                root_pc: int, bass_active: bool,
+                                allow_dropped: bool) -> bool:
+        """Reject candidates that cannot be explained by the label.
+
+        Candidate generators are allowed to add duplicate active roles, but
+        they may not introduce a role or pitch class that the event does not
+        request.  Extension omissions are accepted only when the guitar
+        omission ladder explicitly recorded them; the DCT and root-omission
+        contract remain hard invariants.
+        """
+        pitches = list(candidate.pitches)
+        roles = list(candidate.roles)
+        if len(pitches) != len(roles) or pitches != sorted(pitches):
+            return False
+        if len(pitches) != len(set(pitches)):
+            return False
+
+        active_degrees = resolve_degrees(chord)
+        degree_by_role = {degree.role: degree for degree in active_degrees}
+        active_pcs = {
+            (root_pc + degree.semitone) % 12 for degree in active_degrees
+        }
+        emitted_roles = set(roles)
+        for pitch, role in zip(pitches, roles):
+            degree = degree_by_role.get(role)
+            if degree is None:
+                return False
+            expected_pc = (root_pc + degree.semitone) % 12
+            if pitch % 12 != expected_pc or pitch % 12 not in active_pcs:
+                return False
+
+        dropped = set(candidate.meta.get("extensions_dropped") or ())
+        extension_roles = {
+            role for role in ("7th", "9th", "11th", "13th")
+            if role in degree_by_role
+        }
+        if not dropped <= extension_roles:
+            return False
+        if dropped and not allow_dropped:
+            return False
+        if dropped & emitted_roles:
+            return False
+        dct_role = self.ctx.get("_current_dct_role")
+        if dct_role in dropped or (dct_role is not None and dct_role not in emitted_roles):
+            return False
+
+        required_roles = {degree.role for degree in required_degrees}
+        missing_required = required_roles - emitted_roles
+        if missing_required:
+            if not missing_required <= dropped:
+                return False
+
+        if selected.root_omitted and "root" in emitted_roles:
+            return False
+        if bass_active and selected.root_omitted:
+            bass_pc = (root_pc + chord.bass_interval) % 12
+            if bass_pc != root_pc:
+                return False
+
+        return True
 
     # ------------------------------------------------------------------
     def _cluster_ok(self, candidate, min_gap: int, cluster_cap: int | None = None) -> bool:

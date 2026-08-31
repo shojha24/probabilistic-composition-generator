@@ -404,7 +404,17 @@ def beam_octave_assignment(role_pcs: list[tuple], window_lo: int, window_hi: int
                 # extension immediately instead of paying for it all the
                 # way through doubling-variant expansion only to filter it
                 # out afterward with nothing to show for it.
-                if placed and not low_interval_limit_ok(placed + [p]):
+                valid_low_interval = True
+                for previous in placed:
+                    lower = min(previous, p)
+                    interval = abs(previous - p)
+                    if (
+                        (lower < 48 and interval < 7)
+                        or (48 <= lower < 55 and interval < 4)
+                    ):
+                        valid_low_interval = False
+                        break
+                if not valid_low_interval:
                     continue
                 extra = abs(p - anchor_center) * 0.5
                 # Keep structural roles in idiomatic register bands while
@@ -721,11 +731,11 @@ def _clash_aware_free_candidates(role_pcs: list[tuple], role_pc_lookup: dict,
             continue  # some role has no legal pc inside its designated register
 
         for _ in range(max_variants):
-            placed = [(r, _weighted_octave_choice(list(lo_opts[r]), anchor_center, rng))
+            placed = [(r, _weighted_octave_choice(lo_opts[r], anchor_center, rng))
                       for r in lo_roles]
-            placed += [(r, _weighted_octave_choice(list(hi_opts[r]), anchor_center, rng))
+            placed += [(r, _weighted_octave_choice(hi_opts[r], anchor_center, rng))
                        for r in hi_roles]
-            placed += [(r, _weighted_octave_choice(list(free_opts[r]), anchor_center, rng))
+            placed += [(r, _weighted_octave_choice(free_opts[r], anchor_center, rng))
                        for r in free_roles]
             pitches = [p for _, p in placed]
             roles = [r for r, _ in placed]
@@ -1015,9 +1025,9 @@ def _clash_aware_direct_candidates(role_pcs: list[tuple], role_pc_lookup: dict,
             continue  # this role simply has no legal pc inside its designated hand's window
 
         for _ in range(max_variants):
-            lh_placed = [(r, _weighted_octave_choice(list(lh_opts[r]), anchor_center, rng))
+            lh_placed = [(r, _weighted_octave_choice(lh_opts[r], anchor_center, rng))
                          for r in lh_roles]
-            rh_placed = [(r, _weighted_octave_choice(list(rh_opts[r]), anchor_center, rng))
+            rh_placed = [(r, _weighted_octave_choice(rh_opts[r], anchor_center, rng))
                          for r in rh_roles]
             lh_pitches = [p for _, p in lh_placed]
             rh_pitches = [p for _, p in rh_placed]
@@ -1078,10 +1088,14 @@ def hand_split_free_placement(role_pcs: list[tuple], lh_window: tuple, rh_window
     out = []
     any_clash_clean = False
     for assignment in assignments:
+        remaining = max_candidates - len(out)
+        if remaining <= 0:
+            break
         for variant in apply_doubling_variants(assignment, doubling_roles, role_pc_lookup,
                                                 window_lo, window_hi, max_doublings, rng,
                                                 anchor_center=anchor_center,
-                                                anchor_shift=anchor_shift):
+                                                anchor_shift=anchor_shift,
+                                                max_variants=min(40, remaining)):
             sorted_variant = sorted(variant, key=lambda rp: rp[1])
             n = len(sorted_variant)
             lh_target = min(lh_max_voices, n - 1) if n > 1 else n

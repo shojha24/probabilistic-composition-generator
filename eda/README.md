@@ -178,6 +178,38 @@ python eda/combine_labs.py ./labels --recursive --mode per-file \
 This script is a file-format helper. It is not part of the JAMS
 normalization-to-distribution path.
 
+### `validate_rendered_corpus.py`
+
+Validates rendered JFugue score text against the manifest and source label
+files. The default invocation checks both target corpora:
+
+```bash
+python3 eda/validate_rendered_corpus.py \
+  --json-out ./gen/rendered_corpus_validation.json
+```
+
+The validator pairs `START_SONG_N` blocks with manifest ordinals, verifies
+source SHA-256 values and metadata, computes expected pitch classes from the
+song tonic plus `root_interval`, and checks the chord and bass tracks
+separately. It reports root retention, extension retention, DCT exposure,
+permitted omissions, bass correctness, unrequested pitch classes, MIDI
+ordering, low-interval violations, and mapping errors by genre, voicer
+family, chord type, tonic, and relaxation level. It prints the source file,
+score ordinal, event index, label, rendered MIDI, and failure category for
+each violation, and exits nonzero when any hard invariant fails.
+
+To validate one rendered corpus, provide the labels and score paths:
+
+```bash
+python3 eda/validate_rendered_corpus.py \
+  --labels-dir ./gen/target-jazz-labels \
+  --scores ./gen/jazz_scores.txt \
+  --genre jazz
+```
+
+The score's sidecar manifest is inferred as
+`<score>.manifest.json`; use `--manifest` to select another path.
+
 ## CSV artifacts
 
 These files are analysis outputs or intermediate snapshots:

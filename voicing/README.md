@@ -71,6 +71,27 @@ Example:
 Code that checks shell integrity must check `merged_from`. It must not check
 only the visible role name.
 
+## Pitch-coordinate contract
+
+`ChordEvent.root_interval` is relative to the active song tonic. The engine
+converts it once per event:
+
+```text
+absolute_root_pc = (song.tonic_pc + chord.root_interval) % 12
+bass_pc = (absolute_root_pc + chord.bass_interval) % 12
+```
+
+The absolute root is stored in the engine context and passed to every
+candidate generator through `CandidateGenParams.root_pc`. Piano, synth, and
+guitar candidates, doubling, DCT conversion, and emitted-pitch validation
+must use that value. Human-readable `root`, `bass`, and `harte` fields are
+diagnostic only. Root-relative intervals remain valid for harmonic state and
+root-invariant chord-type calculations.
+
+The engine raises a clear error when the song tonic or runtime absolute root
+context is missing or outside `0..11`; it never treats `root_interval` as an
+absolute pitch class.
+
 ## Shared hard rules
 
 These rules apply to all voicers.
@@ -194,6 +215,10 @@ Root omission requires all three conditions:
    another root.
 
 If a condition fails, the engine must not use ordinary root omission.
+The score renderer passes `bass_module_active=True` whenever it emits the
+bass track, including pad-collapse renders. Chord-only callers may leave it
+false. Voicing diagnostics record retained roots, omitted roots, and the gate
+failure reason when applicable.
 
 ## Voicer policies
 
@@ -231,6 +256,14 @@ The library contains:
 
 The candidate must be playable on the configured tuning. The engine checks
 fret range, fret span, muted strings, register, spacing, and DCT hazards.
+
+The library keeps a coarse `(triad, seventh)` index for lookup, then performs
+exact post-realization validation. Every sounding role must be active (or
+explicitly allowed by the omission ladder), every realized pitch class must
+belong to the requested chord, duplicate MIDI values are rejected before
+deduplication, and inactive extensions cannot be hidden by a coarse shape
+match. Selected extension drops are recorded in `extensions_dropped`; the DCT
+can never be dropped.
 
 Extension drops are allowed only in the guitar library omission path. Each
 selected drop is recorded as `EXTENSION_DROPPED`. The drop tracker supports
@@ -398,6 +431,11 @@ Each result is a `VoicedChord` with:
 - `centroid`;
 - `diagnostics`.
 
+Diagnostics include the absolute root, active degree pitch classes, emitted
+pitch classes, bass context, root-omission status, DCT exposure, relaxation
+level, omitted roles, and any selected guitar extension drops. Directory
+renders persist compact summaries of these diagnostics in the score manifest.
+
 ## Validation
 
 Run the complete automated suite:
@@ -423,6 +461,19 @@ For additional corpus checks, use the corpus files in
 
 Do not call a voicer complete from corpus generation alone. Calibration,
 diversity, drift, and cross-voicer results need separate measurement.
+
+For the target rendered corpora, use the manifest-paired validator:
+
+```bash
+python3 eda/validate_rendered_corpus.py \
+  --json-out gen/rendered_corpus_validation.json
+```
+
+It reads `gen/target-jazz-labels/` and `gen/target-pop-rock-labels/`, uses
+the manifest rather than filename assumptions, and reports metrics by genre,
+voicer family, chord type, tonic, and relaxation level. It exits nonzero for
+source-pairing, pitch-set, bass, DCT, extension, ordering, or spacing
+violations.
 
 ## Known limits
 

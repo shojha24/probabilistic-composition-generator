@@ -364,7 +364,7 @@ SHAPES_BY_KEY = {k: tuple(v) for k, v in SHAPES_BY_KEY.items()}
 from ..types import ChordEvent as _ChordEvent, resolve_degrees as _resolve_degrees, \
     TRIAD_THIRD_FIFTH as _TRIAD_THIRD_FIFTH, EXT_SEMI as _EXT_SEMI  # noqa: E402
 from ..dct import compute_dct as _compute_dct  # noqa: E402
-from .library import find_matching_shapes as _find_matching_shapes  # noqa: E402
+from .library import find_exact_shape_matches as _find_exact_shape_matches  # noqa: E402
 
 _ALL_SEVENTH_TOKENS = ("N",) + tuple(_EXT_SEMI["seventh"].keys())
 _ALL_NINTH_TOKENS = ("N",) + tuple(_EXT_SEMI["ninth"].keys())
@@ -383,13 +383,16 @@ def _close_completeness_gaps():
                                              seventh=seventh, ninth=ninth, eleventh=eleventh,
                                              thirteenth=thirteenth)
                         degs = _resolve_degrees(dummy)
-                        required = frozenset(d.role for d in degs)
-                        role_semi = {d.role: d.semitone for d in degs}
                         dct_role, _ = _compute_dct(dummy, degs)
                         key = (triad, seventh)
-                        matches = _find_matching_shapes(
-                            key, SHAPES_BY_KEY, required, role_semi, dct_role, True)
-                        if matches:
+                        exact_matches = tuple(
+                            _find_exact_shape_matches(
+                                dummy, SHAPES_BY_KEY, root_pc, max_fret=15,
+                                dct_role=dct_role, require_extensions=True,
+                            )
+                            for root_pc in range(12)
+                        )
+                        if any(exact_matches):
                             continue
                         # Genuine gap: derive a shape for this exact combo.
                         # A sus4+11 stores its quality-bearing fourth under

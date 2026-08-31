@@ -47,11 +47,11 @@ def candidate_source(p: CandidateGenParams) -> list[Candidate]:
             and not any(d.role == "root" for d in degrees)):
         degrees.insert(0, next(d for d in resolve_degrees(p.chord)
                                if d.role == "root"))
-    role_pcs = [(d.role, (p.chord.root_interval + d.semitone) % 12)
+    role_pcs = [(d.role, (p.root_pc + d.semitone) % 12)
                 for d in degrees]
     full_degrees = resolve_degrees(p.chord)
     doubling_pcs = {
-        d.role: (p.chord.root_interval + d.semitone) % 12
+        d.role: (p.root_pc + d.semitone) % 12
         for d in full_degrees
     }
     lh_window = (min(LH_WINDOW[0], p.window_lo), LH_WINDOW[1])
@@ -120,7 +120,8 @@ def post_filter(candidate: Candidate, prev, ctx: dict, policy: VoicerPolicy) -> 
             return False
     elif "3rd" not in {d.role for d in degrees} and not any(
             "3rd" in d.merged_from for d in degrees):
-        if not {"root", "5th"}.issubset(lh_roles):
+        required_shell = {"root"} if chord.triad == "1" else {"root", "5th"}
+        if not required_shell.issubset(lh_roles):
             return False
     elif third_role not in lh_roles or not ({"5th", "root"} & lh_roles):
         return False

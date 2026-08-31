@@ -199,13 +199,13 @@ def _matches_spread(pitches: list[int], spread: str) -> bool:
 
 
 def candidate_source(p: CandidateGenParams) -> list:
-    role_pcs = [(d.role, (p.chord.root_interval + d.semitone) % 12) for d in p.degrees]
+    role_pcs = [(d.role, (p.root_pc + d.semitone) % 12) for d in p.degrees]
     # See pop_piano.candidate_source's identical comment: doubling-eligible
     # roles thinned out of the core degree set (a probabilistically
     # omitted 5th) still need a resolvable pc or doubling them is a
     # silent no-op.
     full_degrees = resolve_degrees(p.chord)
-    doubling_pcs = {d.role: (p.chord.root_interval + d.semitone) % 12 for d in full_degrees}
+    doubling_pcs = {d.role: (p.root_pc + d.semitone) % 12 for d in full_degrees}
     window_lo = min(WINDOW_LO, p.window_lo)
     window_hi = max(WINDOW_HI, p.window_hi)
     profiles = template_profiles_for(p.chord, p.policy)

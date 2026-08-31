@@ -247,6 +247,7 @@ def derive_shape(chord_type: tuple, root_string: int, shape_id: str,
                         chord_types=(chord_type,), barre=True, open_only=False,
                         native_root_pc=root_pc,
                         tags=("drop2_derived",) if _has_extension(chord_type) else ("derived",),
+                        omitted_roles=tuple(dropped),
                     )
                     return shape, dropped
                 # A clash exists at this ladder level -- remember the
@@ -285,6 +286,7 @@ def derive_shape(chord_type: tuple, root_string: int, shape_id: str,
                     chord_types=(chord_type,), barre=True, open_only=False,
                     native_root_pc=root_pc,
                     tags=("drop2_derived",) if _has_extension(chord_type) else ("derived",),
+                    omitted_roles=tuple(dropped_snapshot),
                 )
                 return shape, dropped_snapshot
             return None

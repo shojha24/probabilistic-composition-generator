@@ -9,6 +9,8 @@ from functools import lru_cache
 from typing import Optional
 
 from ..candidates import Candidate
+from ..types import DEGREE_RANK, EXT_SLOTS, SLOT_TO_ROLE, resolve_degrees
+from .derive import derive_shape
 from .model import Shape, realize, shape_distance
 
 # spec 02 §3.3 / inherited by spec 05: most-omittable first.
@@ -26,6 +28,60 @@ def _matches(shape: Shape, required_roles: frozenset, role_semi: dict) -> bool:
         if role not in rs or rs[role] != role_semi[role]:
             return False
     return True
+
+
+def validate_realization(chord, realized: dict, root_pc: int,
+                         allowed_dropped=()) -> tuple[bool, tuple[str, ...]]:
+    """Validate a realized guitar shape against the exact active sound set.
+
+    The coarse ``(triad, seventh)`` index is deliberately retained for
+    performance, but it is not an admission check: an indexed shape can
+    still carry an inactive extension or a stale hand-authored role.  This
+    validator runs after fret realization, before MIDI deduplication, so
+    duplicate pitches and role/pitch mismatches cannot be hidden.
+
+    Returns ``(is_valid, missing_extension_roles)``.  Missing roles are only
+    legal when explicitly supplied by the current omission ladder (or by a
+    derived shape's recorded omission metadata); the DCT exclusion is
+    enforced by the caller because it depends on the current corpus
+    vocabulary.
+    """
+    if not 0 <= root_pc < 12:
+        raise ValueError(f"root_pc must be in 0..11, got {root_pc!r}")
+    pitches = list(realized.get("pitches", ()))
+    roles = list(realized.get("roles", ()))
+    if len(pitches) != len(roles) or len(pitches) != len(set(pitches)):
+        return False, ()
+
+    degrees = resolve_degrees(chord)
+    degree_by_role = {degree.role: degree for degree in degrees}
+    active_pcs = {
+        (root_pc + degree.semitone) % 12
+        for degree in degrees
+    }
+    for pitch, role in zip(pitches, roles):
+        degree = degree_by_role.get(role)
+        if degree is None:
+            return False, ()
+        if pitch % 12 not in active_pcs:
+            return False, ()
+        if pitch % 12 != (root_pc + degree.semitone) % 12:
+            return False, ()
+
+    emitted_roles = set(roles)
+    allowed = set(allowed_dropped)
+    missing_roles = set(degree_by_role) - emitted_roles
+    if missing_roles - allowed:
+        return False, ()
+    extension_roles = {
+        SLOT_TO_ROLE[slot] for slot in EXT_SLOTS
+        if getattr(chord, slot) != "N"
+    }
+    missing_extensions = tuple(
+        role for role in sorted(extension_roles, key=DEGREE_RANK.get)
+        if role in missing_roles
+    )
+    return True, missing_extensions
 
 
 def find_matching_shapes(chord_triad_seventh_key, shapes_by_key: dict, required_roles: frozenset,
@@ -83,6 +139,61 @@ def find_matching_shapes(chord_triad_seventh_key, shapes_by_key: dict, required_
             break
         if not advanced:
             return out  # ladder exhausted
+
+
+def find_exact_shape_matches(chord, shapes_by_key: dict, root_pc: int,
+                             max_fret: int, dct_role: Optional[str] = None,
+                             require_extensions: bool = False) -> tuple:
+    """Return coarse-index matches that also pass exact post-realization
+    sound-set validation for one concrete root pitch class.  When
+    ``require_extensions`` is true, only candidates retaining every active
+    extension are returned; this is used by the shape-completeness audit
+    before allowing omission-ladder fallbacks to stand in for coverage."""
+    degrees = resolve_degrees(chord)
+    required_roles = frozenset(d.role for d in degrees)
+    role_semi = {d.role: d.semitone % 12 for d in degrees}
+    if dct_role is None:
+        from ..dct import compute_dct
+        dct_role, _ = compute_dct(chord, degrees)
+    coarse = find_matching_shapes(
+        (chord.triad, chord.seventh), shapes_by_key, required_roles,
+        role_semi, dct_role, True,
+    )
+    out = []
+    for shape, dropped in coarse:
+        realized = realize(shape, root_pc, max_fret=max_fret)
+        if realized is None:
+            continue
+        declared_omissions = (
+            getattr(shape, "omitted_roles", ())
+            if chord.chord_type() in shape.chord_types else ()
+        )
+        allowed_dropped = tuple(dict.fromkeys((*dropped, *declared_omissions)))
+        valid, missing_extensions = validate_realization(
+            chord, realized, root_pc, allowed_dropped
+        )
+        if valid and dct_role not in missing_extensions \
+                and (not require_extensions or not missing_extensions):
+            out.append((shape, dropped))
+    return tuple(out)
+
+
+@lru_cache(maxsize=None)
+def _derive_rootless_shapes(chord_type: tuple) -> tuple[Shape, ...]:
+    """Build rootless movable shapes for jazz seventh chords when the
+    coarse shared library has no exact rootless realization."""
+    out = []
+    for root_string in (6, 5, 4):
+        result = derive_shape(
+            chord_type, root_string,
+            f"rootless-{chord_type}-{root_string}",
+            bass_module_active=True,
+            initial_dropped=("root",),
+            prefer_low_interval_safe=True,
+        )
+        if result is not None:
+            out.append(result[0])
+    return tuple(out)
 
 
 class ExtensionDropTracker:
@@ -154,11 +265,23 @@ def make_shape_library_source(shapes: list, shapes_by_key: dict, max_fret: int,
         required_roles = frozenset(d.role for d in params.degrees)
         role_semi = {d.role: d.semitone % 12 for d in params.degrees}
         bass_active = bool(params.ctx.get("bass_module_active"))
-        matches = find_matching_shapes(key, shapes_by_key, required_roles,
-                                        role_semi, params.dct_role, bass_active)
+        matches = list(find_matching_shapes(
+            key, shapes_by_key, required_roles, role_semi,
+            params.dct_role, bass_active,
+        ))
+        if bass_active and "root" not in required_roles:
+            known_ids = {shape.id for shape, _ in matches}
+            for shape in _derive_rootless_shapes(chord.chord_type()):
+                if shape.id not in known_ids:
+                    matches.append((shape, tuple(shape.omitted_roles)))
         if not matches:
             return []
-        root_pc = chord.root_interval % 12
+        root_pc = params.root_pc
+        full_degrees = resolve_degrees(chord)
+        selection_dropped = tuple(
+            degree.role for degree in full_degrees
+            if degree.role not in required_roles
+        )
         out = []
         for shape, dropped in matches:
             fret_span = shape.span()
@@ -167,6 +290,18 @@ def make_shape_library_source(shapes: list, shapes_by_key: dict, max_fret: int,
             realized = realize(shape, root_pc, max_fret=max_fret)
             if realized is None:
                 continue
+            declared_omissions = (
+                getattr(shape, "omitted_roles", ())
+                if chord.chord_type() in shape.chord_types else ()
+            )
+            allowed_dropped = tuple(dict.fromkeys(
+                (*dropped, *declared_omissions, *selection_dropped)
+            ))
+            valid, missing_extensions = validate_realization(
+                chord, realized, root_pc, allowed_dropped
+            )
+            if not valid or (params.dct_role in missing_extensions):
+                continue
             template = shape.tags[0] if shape.tags else shape.id
             cand = Candidate(
                 pitches=realized["pitches"], roles=realized["roles"], shape_id=shape.id,
@@ -174,7 +309,12 @@ def make_shape_library_source(shapes: list, shapes_by_key: dict, max_fret: int,
                     "root_fret": realized["root_fret"], "muted": realized["muted"],
                     "strings": realized["strings"], "root_string": shape.root_string,
                     "family": template, "voicing_template": template,
-                    "fret_span": fret_span, "extensions_dropped": list(dropped),
+                    "fret_span": fret_span,
+                    "extensions_dropped": list(missing_extensions),
+                    "roles_dropped": [
+                        degree.role for degree in full_degrees
+                        if degree.role not in set(realized["roles"])
+                    ],
                     "signature_extra": (shape.root_string, template),
                 },
             ).dedup_sorted()
