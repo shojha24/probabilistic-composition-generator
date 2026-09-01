@@ -31,7 +31,7 @@ class Shape:
     string ("root"/"3rd"/"5th"/"7th"/"9th"/"11th"/"13th").
     """
     id: str
-    root_string: int             # 6 | 5 | 4 (which string the root's home position is on)
+    root_string: int             # 6 | 5 | 4 (shape family / anchor string)
     frets: tuple                 # 6-tuple of int | "x"
     degrees: tuple                # 6-tuple of Optional[str]
     chord_types: tuple           # tuple of (triad, seventh, ninth, eleventh, thirteenth)
@@ -40,6 +40,7 @@ class Shape:
     native_root_pc: Optional[int] = None  # required if open_only
     tags: tuple = ()
     omitted_roles: tuple = ()
+    retained_root_string: Optional[int] = None
 
     def span(self) -> int:
         fretted = [f for f in self.frets if f != "x" and f != 0]
@@ -85,7 +86,8 @@ class Shape:
     def native_root_fret(self) -> int:
         """The fret on `root_string` in this shape's stored (unshifted)
         pattern that sounds the root."""
-        s_idx = STRING_NUMS.index(self.root_string)
+        root_string = self.retained_root_string or self.root_string
+        s_idx = STRING_NUMS.index(root_string)
         f = self.frets[s_idx]
         if f == "x":
             raise ValueError(f"shape {self.id}: root_string is muted")
@@ -131,14 +133,18 @@ def realize(shape: Shape, chord_root_pc: int, max_fret: int = 12,
             "pitches": [pitches[i] for i in order],
             "roles": [roles[i] for i in order],
             "strings": [strings[i] for i in order],
-            "root_fret": shape.frets[STRING_NUMS.index(shape.root_string)],
+            "root_fret": shape.frets[STRING_NUMS.index(
+                shape.retained_root_string or shape.root_string
+            )],
             "muted": shape.muted_strings(),
         }
 
+    s_idx_root = STRING_NUMS.index(
+        shape.retained_root_string or shape.root_string
+    )
     if shape.native_root_pc is not None:
         native_root_pc = shape.native_root_pc % 12
     else:
-        s_idx_root = STRING_NUMS.index(shape.root_string)
         if shape.frets[s_idx_root] == "x":
             raise ValueError(f"shape {shape.id}: root_string muted and no native_root_pc set")
         native_root_pc = (OPEN_STRINGS[s_idx_root] + shape.frets[s_idx_root]) % 12
@@ -164,7 +170,9 @@ def realize(shape: Shape, chord_root_pc: int, max_fret: int = 12,
         "pitches": [pitches[i] for i in order],
         "roles": [roles[i] for i in order],
         "strings": [strings[i] for i in order],
-        "root_fret": shift,
+        "root_fret": (
+            frets[s_idx_root] if frets[s_idx_root] != "x" else shift
+        ),
         "muted": shape.muted_strings(),
     }
 

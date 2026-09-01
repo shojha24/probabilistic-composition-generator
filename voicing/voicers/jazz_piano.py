@@ -75,6 +75,7 @@ def candidate_source(p: CandidateGenParams) -> list[Candidate]:
         p.max_doublings, p.rng, anchor_shift=p.anchor_shift,
         doubling_pcs=doubling_pcs,
         cluster_min_gap=p.policy.extra.get("cluster_min_gap", 13),
+        forced_dct_role=getattr(p, "forced_dct_role", None),
         templates=profiles,
         preferred_template=(
             p.ctx.get("_template_target")

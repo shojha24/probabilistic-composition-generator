@@ -19,8 +19,10 @@ from .vl import vl_distance, normalize_vl, transformation_bonus
 from .anchor import anchor_center as compute_anchor_center, drift_penalty, window_ok, drift_ok, centroid_of
 from .spacing import policy_spacing_penalty, spacing_hard_ok, spacing_penalty, low_interval_limit_ok
 from .candidates import (
+    Candidate,
     dct_expose_repair,
-    post_filter_repair,
+    dense_hand_layout,
+    post_filter_repairs,
     preferred_template_for,
     template_selection_penalty,
 )
@@ -54,6 +56,8 @@ class CandidateGenParams:
     section: Optional[str]
     max_voices: int
     anchor_shift: int = 0
+    forced_dct_role: Optional[str] = None
+    source_phase: str = "normal"
 
 
 def _role_pcs(root_pc: int, degrees: list) -> list:
@@ -134,6 +138,87 @@ class Engine:
     def _param(self, overrides: dict, name: str, default):
         return overrides.get(name, default)
 
+    @staticmethod
+    def _candidate_key(candidate) -> tuple:
+        hands = tuple(
+            (name, tuple(values))
+            for name, values in sorted((candidate.hands or {}).items())
+        )
+        return (
+            tuple(candidate.pitches), tuple(candidate.roles),
+            candidate.shape_id, hands,
+        )
+
+    @staticmethod
+    def _copy_candidate(candidate, **updates):
+        meta = dict(candidate.meta)
+        meta.update(updates)
+        return Candidate(
+            list(candidate.pitches), list(candidate.roles),
+            candidate.shape_id, candidate.hands, meta,
+        )
+
+    def _annotate_source_candidates(self, candidates, policy, phase: str):
+        """Add stable provenance defaults without changing source ordering."""
+        source_name = "shape_library" if policy.instrument == "guitar" else "free_placement"
+        annotated = []
+        for rank, candidate in enumerate(candidates):
+            base_shape_id = candidate.meta.get("base_shape_id")
+            shape_id = candidate.shape_id
+            if base_shape_id is None and shape_id and "@oct" in shape_id:
+                base_shape_id = shape_id.split("@oct", 1)[0]
+            annotated.append(self._copy_candidate(
+                candidate,
+                candidate_source=candidate.meta.get("candidate_source", source_name),
+                generation_phase=candidate.meta.get("generation_phase", phase),
+                source_rank=rank,
+                dct_repair=bool(candidate.meta.get("dct_repair", False)),
+                forced_dct_copy=bool(candidate.meta.get("forced_dct_copy", False)),
+                base_shape_id=base_shape_id,
+                octave_offset=int(candidate.meta.get("octave_offset", 0)),
+                extensions_dropped=tuple(
+                    candidate.meta.get("extensions_dropped") or ()
+                ),
+            ))
+        return annotated
+
+    @staticmethod
+    def _degree_signature(degrees) -> tuple:
+        return tuple(
+            (degree.role, degree.semitone, degree.token, degree.merged_from)
+            for degree in degrees
+        )
+
+    def _hard_clean_ok(self, candidate, chord, selected, required_degrees,
+                       root_pc, bass_active, allow_dropped,
+                       min_voices, max_voices, window_lo, window_hi,
+                       center, drift_tol, min_gap, cluster_cap) -> bool:
+        if not self._candidate_sound_set_ok(
+                candidate, chord, selected, required_degrees, root_pc,
+                bass_active, allow_dropped):
+            return False
+        if len(candidate.pitches) < min_voices or len(candidate.pitches) > max_voices:
+            return False
+        if not window_ok(candidate.pitches, window_lo, window_hi):
+            return False
+        if not low_interval_limit_ok(candidate.pitches):
+            return False
+        if not self._cluster_ok(candidate, min_gap, cluster_cap):
+            return False
+        return drift_ok(centroid_of(candidate.pitches), center, drift_tol)
+
+    def _dct_and_post_filter_ok(self, candidate, dct_role, dct_pc,
+                                secondary_roles, sampled_branch,
+                                relax_any_branch, prev_cand, policy) -> bool:
+        if not self._dct_filter(
+                candidate, dct_role, dct_pc, secondary_roles,
+                sampled_branch, relax_any_branch=relax_any_branch,
+        ):
+            return False
+        return policy.post_filter is None or policy.post_filter(
+            candidate, prev_cand, self.ctx, policy
+        )
+
     # ------------------------------------------------------------------
     def step(self, t: int, chord: ChordEvent, prev_cand, prev_chord, base_center: int):
         self.total_count += 1
@@ -203,6 +288,8 @@ class Engine:
         elif dct_role is not None:
             sampled_branch = _default_dct_sample(policy.dct_mode_weights, self.rng)
 
+        forced_dct_role = dct_role if sampled_branch == "octave" else None
+        self.ctx["_current_forced_dct_role"] = forced_dct_role
         window_lo, window_hi = policy.window_lo, policy.window_hi
         max_doublings = policy.max_doublings
         window_relaxed = False
@@ -210,6 +297,17 @@ class Engine:
         chosen = None
         chosen_diag = {}
         source_cache = {}
+        retention_limit = max(
+            0, int(policy.extra.get("max_retained_hard_clean", 256))
+        )
+        retained_by_level = {}
+        retained_keys = set()
+        retained_used = 0
+        repair_diagnostics = {
+            "repair_inputs": 0,
+            "repair_generated": 0,
+            "repair_accepted": 0,
+        }
         # spec 07 §9's ladder floor (step 8) forbids relaxing extension
         # presence at all; spec 02/05 §3.3 carve out extension-dropping as
         # a guitar-only escape hatch *beneath* that floor, strictly lower
@@ -226,8 +324,13 @@ class Engine:
         # once considering only non-dropped candidates, and only if that
         # exhausts every level with nothing, a second pass that allows
         # dropped candidates too.
+        source_phases = (
+            ("normal", "guitar_octave")
+            if policy.instrument == "guitar" else ("normal",)
+        )
         for allow_dropped in (False, True):
-            for level in range(0, 8):
+            for source_phase in source_phases:
+              for level in range(0, 8):
                 lvl_max_doublings = max_doublings + (1 if level >= 3 else 0)
                 lvl_max_voices = max_voices + (1 if (level >= 4 and not policy.extra.get("fixed_voice_count")) else 0)
                 lvl_window_lo, lvl_window_hi = window_lo, window_hi
@@ -248,13 +351,14 @@ class Engine:
                 if level >= 5 and chord.triad in ("major", "minor"):
                     lvl_degrees = [d for d in lvl_degrees if d.role != "5th"]
 
-                # The octave-exposure branch (§5.2c) requires the DCT itself to
-                # be an available doubling target -- otherwise predicate (c)
-                # can never be satisfied, since the generic root/5th doubling
-                # targets never touch the DCT's pitch class.
                 lvl_doubling_roles = list(selected.doubling_roles)
-                if sampled_branch == "octave" and dct_role and dct_role not in lvl_doubling_roles:
-                    lvl_doubling_roles.append(dct_role)
+                # Step 7 relaxes the sampled DCT branch. Do not keep asking
+                # the source for an octave copy once any valid exposure
+                # branch is allowed, or the forced-copy topology can starve
+                # otherwise legal top/isolated candidates.
+                lvl_forced_dct_role = (
+                    forced_dct_role if level < 7 else None
+                )
 
                 params = CandidateGenParams(
                     chord=chord, root_pc=root_pc, degrees=lvl_degrees,
@@ -263,6 +367,8 @@ class Engine:
                     anchor_center=center, prev_midi=prev_midi, rng=self.rng, ctx=self.ctx,
                     policy=policy, dct_role=dct_role, section=section, max_voices=lvl_max_voices,
                     anchor_shift=anchor_shift,
+                    forced_dct_role=lvl_forced_dct_role,
+                    source_phase=source_phase,
                 )
                 source_key = (
                     tuple(
@@ -280,47 +386,69 @@ class Engine:
                     tuple(prev_midi or ()),
                     dct_role,
                     self.ctx.get("_template_target"),
+                    lvl_forced_dct_role,
+                    source_phase,
                 )
                 if source_key not in source_cache:
-                    source_cache[source_key] = policy.candidate_source(params)
+                    source_cache[source_key] = self._annotate_source_candidates(
+                        policy.candidate_source(params), policy, source_phase
+                    )
                 raw = source_cache[source_key]
                 if not allow_dropped:
                     raw = [c for c in raw if not c.meta.get("extensions_dropped")]
-                raw = [
-                    c for c in raw
-                    if self._candidate_sound_set_ok(
-                        c, chord, selected, lvl_degrees, root_pc, bass_active,
-                        allow_dropped,
-                    )
-                ]
 
                 eff_drift_tol = policy.drift_tol * (1.5 if level >= 2 else 1.0)
 
                 filtered = []
                 spacing_survivors = []
                 dct_clean_survivors = []
+                min_gap = policy.extra.get("cluster_min_gap", 13)
+                cluster_cap = policy.extra.get("cluster_cap")
                 for c in raw:
-                    if len(c.pitches) < policy.min_voices or len(c.pitches) > lvl_max_voices:
-                        continue
-                    if not window_ok(c.pitches, lvl_window_lo, lvl_window_hi):
-                        continue
-                    if not low_interval_limit_ok(c.pitches):
-                        continue
-                    min_gap = policy.extra.get("cluster_min_gap", 13)
-                    if not self._cluster_ok(c, min_gap, policy.extra.get("cluster_cap")):
-                        continue
-                    centroid = centroid_of(c.pitches)
-                    if not drift_ok(centroid, center, eff_drift_tol):
+                    if not self._hard_clean_ok(
+                            c, chord, selected, lvl_degrees, root_pc, bass_active,
+                            allow_dropped, policy.min_voices, lvl_max_voices,
+                            lvl_window_lo, lvl_window_hi, center, eff_drift_tol,
+                            min_gap, cluster_cap):
                         continue
                     spacing_survivors.append(c)
-                    if not self._dct_filter(c, dct_role, dct_pc, secondary_roles, sampled_branch,
-                                             relax_any_branch=(level >= 7)):
+                    degree_signature = self._degree_signature(lvl_degrees)
+                    retention_key = (
+                        source_phase, degree_signature,
+                        bool(selected.root_omitted), bool(selected.fifth_omitted),
+                        tuple(c.meta.get("extensions_dropped") or ()),
+                        self._candidate_key(c),
+                    )
+                    level_pool = retained_by_level.setdefault(level, [])
+                    if (retention_limit and len(level_pool) < retention_limit
+                            and retention_key not in retained_keys):
+                        level_pool.append({
+                            "level": level,
+                            "source_phase": source_phase,
+                            "degree_signature": degree_signature,
+                            "root_omitted": bool(selected.root_omitted),
+                            "fifth_omitted": bool(selected.fifth_omitted),
+                            "window": (lvl_window_lo, lvl_window_hi),
+                            "max_voices": lvl_max_voices,
+                            "cluster_cap": cluster_cap,
+                            "drift_tol": eff_drift_tol,
+                            "candidate": c,
+                        })
+                        retained_keys.add(retention_key)
+                    dct_ok = self._dct_filter(
+                        c, dct_role, dct_pc, secondary_roles, sampled_branch,
+                        relax_any_branch=level >= 7,
+                    )
+                    if not dct_ok:
                         continue
+                    # Keep DCT-valid candidates available to the separate
+                    # post-filter repair path. Combining these checks here
+                    # would discard exactly the candidates that can be
+                    # repaired by moving their lowest voice.
                     dct_clean_survivors.append(c)
-                    if policy.post_filter is not None:
-                        ok = policy.post_filter(c, prev_cand, self.ctx, policy)
-                        if not ok:
-                            continue
+                    if (policy.post_filter is not None and
+                            not policy.post_filter(c, prev_cand, self.ctx, policy)):
+                        continue
                     filtered.append(c)
 
                 # Lazy DCT-exposure repair (spec 07 §5.2/§5.3): the beam
@@ -349,28 +477,46 @@ class Engine:
                 # unconditionally to every voicer.
                 if (not filtered and spacing_survivors and dct_role is not None
                         and policy.extra.get("dct_repair_ok")):
-                    min_gap = policy.extra.get("cluster_min_gap", 13)
-                    for c in spacing_survivors[:8]:
-                        found = None
-                        for repaired in dct_expose_repair(c, dct_role, secondary_roles,
-                                                           sampled_branch, lvl_window_lo,
-                                                           lvl_window_hi, center):
-                            wok = window_ok(repaired.pitches, lvl_window_lo, lvl_window_hi)
-                            lil = low_interval_limit_ok(repaired.pitches)
-                            clu = self._cluster_ok(repaired, min_gap, policy.extra.get("cluster_cap"))
-                            drf = drift_ok(centroid_of(repaired.pitches), center, eff_drift_tol)
-                            if not (wok and lil and clu and drf):
+                    repair_inputs = int(policy.extra.get("max_repair_inputs", 64))
+                    repair_variants = int(policy.extra.get("max_repair_variants", 256))
+                    secondary_assignments = int(
+                        policy.extra.get("max_secondary_assignments", 32)
+                    )
+                    repair_diagnostics["repair_inputs"] += min(
+                        len(spacing_survivors), max(0, repair_inputs)
+                    )
+                    generated = 0
+                    for c in spacing_survivors[:max(0, repair_inputs)]:
+                        for repaired in dct_expose_repair(
+                                c, dct_role, secondary_roles, sampled_branch,
+                                lvl_window_lo, lvl_window_hi, center,
+                                max_variants=max(0, repair_variants - generated),
+                                max_secondary_assignments=secondary_assignments,
+                                max_voices=lvl_max_voices,
+                                max_doublings=lvl_max_doublings):
+                            generated += 1
+                            repair_diagnostics["repair_generated"] += 1
+                            if not self._hard_clean_ok(
+                                    repaired, chord, selected, lvl_degrees, root_pc,
+                                    bass_active, allow_dropped, policy.min_voices,
+                                    lvl_max_voices, lvl_window_lo, lvl_window_hi,
+                                    center, eff_drift_tol, min_gap, cluster_cap):
                                 continue
-                            if not self._dct_filter(repaired, dct_role, dct_pc, secondary_roles,
-                                                     sampled_branch, relax_any_branch=(level >= 7)):
+                            if not self._dct_filter(
+                                    repaired, dct_role, dct_pc, secondary_roles,
+                                    sampled_branch, relax_any_branch=level >= 7):
                                 continue
-                            if policy.post_filter is not None and not policy.post_filter(
-                                    repaired, prev_cand, self.ctx, policy):
+                            if (policy.post_filter is not None and
+                                    not policy.post_filter(
+                                        repaired, prev_cand, self.ctx, policy
+                                    )):
+                                dct_clean_survivors.append(repaired)
                                 continue
-                            found = repaired
-                            break
-                        if found is not None:
-                            filtered.append(found)
+                            filtered.append(repaired)
+                            repair_diagnostics["repair_accepted"] += 1
+                            if generated >= repair_variants:
+                                break
+                        if generated >= repair_variants:
                             break
 
                 # Lazy post_filter repair (opt-in, same flag): a voicer's
@@ -385,29 +531,146 @@ class Engine:
                 # survivor at this level failed post_filter specifically.
                 if (not filtered and dct_clean_survivors and policy.post_filter is not None
                         and policy.extra.get("dct_repair_ok")):
-                    min_gap = policy.extra.get("cluster_min_gap", 13)
-                    for c in dct_clean_survivors[:8]:
-                        repaired = post_filter_repair(c, lvl_window_lo, lvl_window_hi, center,
-                                                        min_gap, policy.post_filter, prev_cand,
-                                                        self.ctx, policy)
-                        if repaired is None:
+                    repair_inputs = int(policy.extra.get("max_repair_inputs", 64))
+                    repair_variants = int(policy.extra.get("max_repair_variants", 256))
+                    repair_diagnostics["repair_inputs"] += min(
+                        len(dct_clean_survivors), max(0, repair_inputs)
+                    )
+                    generated = 0
+                    for c in dct_clean_survivors[:max(0, repair_inputs)]:
+                        for repaired in post_filter_repairs(
+                                c, lvl_window_lo, lvl_window_hi, center, min_gap,
+                                policy.post_filter, prev_cand, self.ctx, policy,
+                                max_variants=max(0, repair_variants - generated)):
+                            generated += 1
+                            repair_diagnostics["repair_generated"] += 1
+                            if not self._hard_clean_ok(
+                                    repaired, chord, selected, lvl_degrees, root_pc,
+                                    bass_active, allow_dropped, policy.min_voices,
+                                    lvl_max_voices, lvl_window_lo, lvl_window_hi,
+                                    center, eff_drift_tol, min_gap, cluster_cap):
+                                continue
+                            if not self._dct_and_post_filter_ok(
+                                    repaired, dct_role, dct_pc, secondary_roles,
+                                    sampled_branch, level >= 7, prev_cand, policy):
+                                continue
+                            filtered.append(repaired)
+                            repair_diagnostics["repair_accepted"] += 1
+                            if generated >= repair_variants:
+                                break
+                        if generated >= repair_variants:
+                            break
+
+                # Piano hand topology is intentionally kept out of the flat
+                # synth repair path. This source is fallback-only and is
+                # consulted only after the ordinary source and any guarded
+                # repair have produced no valid candidate.
+                if (not filtered and source_phase == "normal"
+                        and policy.voicer_id == "pop-piano"
+                        and policy.extra.get("dense_layout_fallback")):
+                    dense_role_pcs = [
+                        (degree.role, (root_pc + degree.semitone) % 12)
+                        for degree in lvl_degrees
+                    ]
+                    dense_lh = tuple(policy.extra.get("dense_lh_window", (43, 60)))
+                    dense_rh = tuple(policy.extra.get("dense_rh_window", (55, 88)))
+                    dense_raw = dense_hand_layout(
+                        dense_role_pcs, dense_lh, dense_rh,
+                        int(policy.extra.get("dense_lh_max_voices", 3)),
+                        int(policy.extra.get("dense_rh_max_voices", 4)),
+                        int(policy.extra.get("dense_max_hand_span", 14)),
+                        center, lvl_max_voices,
+                        max_candidates=int(policy.extra.get(
+                            "max_dense_layout_candidates", 512)),
+                        forced_dct_role=lvl_forced_dct_role,
+                        max_doublings=lvl_max_doublings,
+                    )
+                    dense_raw = self._annotate_source_candidates(
+                        dense_raw, policy, "dense_hand"
+                    )
+                    for dense_candidate in dense_raw:
+                        if not self._hard_clean_ok(
+                                dense_candidate, chord, selected, lvl_degrees,
+                                root_pc, bass_active, allow_dropped,
+                                policy.min_voices, lvl_max_voices,
+                                lvl_window_lo, lvl_window_hi, center,
+                                eff_drift_tol, min_gap, cluster_cap):
                             continue
-                        if not (window_ok(repaired.pitches, lvl_window_lo, lvl_window_hi) and
-                                 low_interval_limit_ok(repaired.pitches) and
-                                 self._cluster_ok(repaired, min_gap, policy.extra.get("cluster_cap")) and
-                                 drift_ok(centroid_of(repaired.pitches), center, eff_drift_tol)):
+                        if not self._dct_and_post_filter_ok(
+                                dense_candidate, dct_role, dct_pc, secondary_roles,
+                                sampled_branch, level >= 7, prev_cand, policy):
                             continue
-                        if not self._dct_filter(repaired, dct_role, dct_pc, secondary_roles,
-                                                 sampled_branch, relax_any_branch=(level >= 7)):
+                        filtered.append(dense_candidate)
+
+                # Earlier hard-clean candidates are a search-completeness
+                # fallback, never a replacement for the current source.
+                if not filtered and retention_limit:
+                    current_degree_signature = self._degree_signature(lvl_degrees)
+                    retained_candidates = []
+                    prior_records = [
+                        record
+                        for record_level in sorted(retained_by_level)
+                        if record_level < level
+                        for record in retained_by_level[record_level]
+                    ]
+                    prior_records.sort(key=lambda record: (
+                        record["level"],
+                        record["candidate"].meta.get("source_rank", 0),
+                        self._candidate_key(record["candidate"]),
+                    ))
+                    for record in prior_records:
+                        if record["source_phase"] != source_phase:
                             continue
-                        filtered.append(repaired)
-                        break
+                        if record["degree_signature"] != current_degree_signature:
+                            continue
+                        if record["root_omitted"] != bool(selected.root_omitted):
+                            continue
+                        if record["fifth_omitted"] != bool(selected.fifth_omitted):
+                            continue
+                        retained_candidate = self._copy_candidate(
+                            record["candidate"],
+                            generation_phase="retained",
+                            retained=True,
+                            retained_from_level=record["level"],
+                        )
+                        if not self._hard_clean_ok(
+                                retained_candidate, chord, selected, lvl_degrees,
+                                root_pc, bass_active, allow_dropped,
+                                policy.min_voices, lvl_max_voices,
+                                lvl_window_lo, lvl_window_hi, center,
+                                eff_drift_tol, min_gap, cluster_cap):
+                            continue
+                        if not self._dct_and_post_filter_ok(
+                                retained_candidate, dct_role, dct_pc,
+                                secondary_roles, sampled_branch,
+                                level >= 7, prev_cand, policy):
+                            continue
+                        retained_candidates.append(retained_candidate)
+                    if retained_candidates:
+                        retained_used = len(retained_candidates)
+                        filtered = retained_candidates
+                if filtered:
+                    # Stable physical deduplication is important when a
+                    # repair or retained source reaches the same realization
+                    # as the current source.
+                    unique_filtered = []
+                    seen_filtered = set()
+                    for candidate in filtered:
+                        key = self._candidate_key(candidate)
+                        if key in seen_filtered:
+                            continue
+                        seen_filtered.add(key)
+                        unique_filtered.append(candidate)
+                    filtered = unique_filtered
 
                 if filtered:
                     chosen_diag = {
                         "candidates": len(filtered),
                         "tau": policy.tau,
                         "level": level,
+                        "source_phase": source_phase,
+                        "retained_candidates": retained_used,
+                        **repair_diagnostics,
                         "register_mapping": {
                             "bass": "root/bass",
                             "mid": "3rd/7th/essential",
@@ -474,6 +737,16 @@ class Engine:
             "root_omitted": selected.root_omitted,
             "chord_type": list(chord.chord_type()),
             "shape_id": chosen.shape_id,
+            "base_shape_id": chosen.meta.get("base_shape_id"),
+            "octave_offset": int(chosen.meta.get("octave_offset", 0)),
+            "root_fret": chosen.meta.get("root_fret"),
+            "muted_strings": sorted(chosen.meta.get("muted", ())),
+            "sounding_strings": list(chosen.meta.get("strings", ())),
+            "retained_root_string": chosen.meta.get("retained_root_string"),
+            "candidate_source": chosen.meta.get("candidate_source"),
+            "generation_phase": chosen.meta.get("generation_phase"),
+            "dct_repair": bool(chosen.meta.get("dct_repair", False)),
+            "forced_dct_copy": bool(chosen.meta.get("forced_dct_copy", False)),
             "root_omission": selected.flags.get(
                 "root_omission_status",
                 "omitted" if selected.root_omitted else "retained",
@@ -484,6 +757,16 @@ class Engine:
             "omitted_roles": list(chosen.meta.get("roles_dropped") or ()),
             "extensions_dropped": list(chosen.meta.get("extensions_dropped") or ()),
         })
+        if policy.instrument == "guitar" and prev_cand is not None:
+            from .guitar.model import shape_distance
+            chosen_diag["shape_distance"] = shape_distance(
+                prev_cand.meta.get("root_fret", 0),
+                prev_cand.shape_id or "",
+                frozenset(prev_cand.meta.get("muted", ())),
+                chosen.meta.get("root_fret", 0),
+                chosen.shape_id or "",
+                frozenset(chosen.meta.get("muted", ())),
+            )
 
         centroid = centroid_of(chosen.pitches)
         vld = vl_distance(prev_midi or [], chosen.pitches, policy.unmatched_penalty) if prev_midi is not None else 0.0
@@ -580,20 +863,23 @@ class Engine:
         from .spacing import semitone_cluster_ok
         exempt = candidate.meta.get("cluster_exempt_pairs")
         if not exempt:
-            return semitone_cluster_ok(candidate.pitches, min_gap)
-        # voicer-declared exemptions (jazz synth §4.1): re-check with the
-        # exempted pair(s) removed from consideration, at the relaxed gap.
-        relaxed_gap = candidate.meta.get("cluster_exempt_gap", min_gap)
-        s = sorted(candidate.pitches)
-        for i in range(len(s)):
-            for j in range(i + 1, len(s)):
-                pc_gap = (s[j] - s[i]) % 12
-                if pc_gap in (1, 11):
-                    gap = s[j] - s[i]
-                    pair_exempt = (s[i], s[j]) in exempt or (s[j], s[i]) in exempt
-                    limit = relaxed_gap if pair_exempt else min_gap
-                    if gap < limit:
-                        return False
+            if not semitone_cluster_ok(candidate.pitches, min_gap):
+                return False
+        else:
+            # voicer-declared exemptions (jazz synth §4.1): re-check with
+            # the exempted pair(s) removed from consideration, at the
+            # relaxed gap.
+            relaxed_gap = candidate.meta.get("cluster_exempt_gap", min_gap)
+            s = sorted(candidate.pitches)
+            for i in range(len(s)):
+                for j in range(i + 1, len(s)):
+                    pc_gap = (s[j] - s[i]) % 12
+                    if pc_gap in (1, 11):
+                        gap = s[j] - s[i]
+                        pair_exempt = (s[i], s[j]) in exempt or (s[j], s[i]) in exempt
+                        limit = relaxed_gap if pair_exempt else min_gap
+                        if gap < limit:
+                            return False
         if cluster_cap is not None:
             pitches = sorted(candidate.pitches)
             for start, low in enumerate(pitches):

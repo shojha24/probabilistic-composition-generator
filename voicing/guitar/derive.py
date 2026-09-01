@@ -33,6 +33,7 @@ one shape exists") can never fail because of a hand-authored coverage gap.
 from __future__ import annotations
 
 from itertools import product
+from functools import lru_cache
 from typing import Optional
 
 from ..types import ChordEvent, resolve_degrees, DEGREE_ORDER
@@ -61,13 +62,23 @@ def _has_extension(chord_type: tuple) -> bool:
     return ninth != "N" or eleventh != "N" or thirteenth != "N"
 
 
+@lru_cache(maxsize=4096)
+def _dct_for_chord_type(chord_type: tuple, gen_dir: Optional[str]):
+    """Cache the vocabulary-backed DCT lookup used by build-time derivation."""
+    chord = _dummy_chord(chord_type)
+    return compute_dct(chord, resolve_degrees(chord), gen_dir=gen_dir)
+
+
 def _try_assignment(cur_required: list, role_semi: dict, string_nums: tuple, root_pc: int,
                      cluster_min_gap: int = 10, max_fret_span: int = 6,
-                     prefer_low_interval_safe: bool = False):
-    """Place `cur_required` roles onto `string_nums` (root claims the
-    first/lowest string if present, remaining roles fill upward in
-    `DEGREE_ORDER` priority -- the "close stack redistributed across
-    strings" that gives this module's `drop2_derived` tag its name), then
+                     prefer_low_interval_safe: bool = False,
+                     retained_root_string: Optional[int] = None):
+    """Place `cur_required` roles onto `string_nums` (the default root
+    assignment claims the first/lowest string; an explicit
+    ``retained_root_string`` selects a bounded alternate), remaining roles
+    fill upward in `DEGREE_ORDER` priority -- the "close stack redistributed
+    across strings" that gives this module's `drop2_derived` tag its name),
+    then
     brute-force the per-string open/+12 fret choice.
 
     Which *string* each non-root role lands on also matters a lot for
@@ -119,15 +130,23 @@ def _try_assignment(cur_required: list, role_semi: dict, string_nums: tuple, roo
         return None, None, None
     has_root = "root" in ordered
     non_root_roles = [r for r in ordered if r != "root"]
-    non_root_string_idxs = list(range(1, n)) if has_root else list(range(n))
-    root_idx = 0 if has_root else None
+    if has_root:
+        if retained_root_string is None:
+            root_indices = (0,)
+        else:
+            try:
+                root_indices = (string_nums.index(retained_root_string),)
+            except ValueError:
+                return None, None, None
+    else:
+        root_indices = (None,)
 
     def fret_choices(s_idx, role):
-        if role == "root":
-            return [0]
         target_pc = (root_pc + role_semi[role]) % 12
         open_pc = OPEN_STRINGS[STRING_NUMS.index(string_nums[s_idx])] % 12
         f0 = (target_pc - open_pc) % 12
+        if role == "root":
+            return [f0]
         return [f0, f0 + 12]
 
     def cluster_violations(assignment, combo):
@@ -146,37 +165,42 @@ def _try_assignment(cur_required: list, role_semi: dict, string_nums: tuple, roo
 
     best_capped = None   # span <= max_fret_span: (violations, lil_bad, max_fret, span, frets, roles_out)
     best_any = None      # fallback with no span cap, same key
-    for string_subset in combinations(non_root_string_idxs, len(non_root_roles)):
-        for perm in permutations(non_root_roles):
-            assignment = list(zip(string_subset, perm))
-            if root_idx is not None:
-                assignment.append((root_idx, "root"))
-            choice_lists = [fret_choices(i, r) for i, r in assignment]
-            for combo in product(*choice_lists):
-                span = max(combo) - min(combo)
-                violations = cluster_violations(assignment, combo)
-                frets = ["x"] * n
-                roles_out = [None] * n
-                for (i, r), f in zip(assignment, combo):
-                    frets[i] = f
-                    roles_out[i] = r
-                abs_pitches = [
-                    OPEN_STRINGS[STRING_NUMS.index(string_nums[i])] + f
-                    for (i, _r), f in zip(assignment, combo)
-                ]
-                lil_bad = not low_interval_limit_ok(abs_pitches)
-                key = (violations, lil_bad if prefer_low_interval_safe else False,
-                       max(combo), span)
-                entry = (violations, lil_bad, max(combo), span,
-                         tuple(frets), tuple(roles_out))
-                if best_any is None or key < (
-                        best_any[0], best_any[1], best_any[2], best_any[3]):
-                    best_any = entry
-                if span <= max_fret_span and (
-                        best_capped is None or key < (
-                            best_capped[0], best_capped[1],
-                            best_capped[2], best_capped[3])):
-                    best_capped = entry
+    for root_idx in root_indices:
+        non_root_string_idxs = (
+            [i for i in range(n) if i != root_idx]
+            if root_idx is not None else list(range(n))
+        )
+        for string_subset in combinations(non_root_string_idxs, len(non_root_roles)):
+            for perm in permutations(non_root_roles):
+                assignment = list(zip(string_subset, perm))
+                if root_idx is not None:
+                    assignment.append((root_idx, "root"))
+                choice_lists = [fret_choices(i, r) for i, r in assignment]
+                for combo in product(*choice_lists):
+                    span = max(combo) - min(combo)
+                    violations = cluster_violations(assignment, combo)
+                    frets = ["x"] * n
+                    roles_out = [None] * n
+                    for (i, r), f in zip(assignment, combo):
+                        frets[i] = f
+                        roles_out[i] = r
+                    abs_pitches = [
+                        OPEN_STRINGS[STRING_NUMS.index(string_nums[i])] + f
+                        for (i, _r), f in zip(assignment, combo)
+                    ]
+                    lil_bad = not low_interval_limit_ok(abs_pitches)
+                    key = (violations, lil_bad if prefer_low_interval_safe else False,
+                           max(combo), span)
+                    entry = (violations, lil_bad, max(combo), span,
+                             tuple(frets), tuple(roles_out))
+                    if best_any is None or key < (
+                            best_any[0], best_any[1], best_any[2], best_any[3]):
+                        best_any = entry
+                    if span <= max_fret_span and (
+                            best_capped is None or key < (
+                                best_capped[0], best_capped[1],
+                                best_capped[2], best_capped[3])):
+                        best_capped = entry
     best = best_capped if best_capped is not None else best_any
     if best is None:
         return None, None, None, None
@@ -188,7 +212,8 @@ def derive_shape(chord_type: tuple, root_string: int, shape_id: str,
                   max_fret_span: int = 6, bass_module_active: bool = True,
                   gen_dir: Optional[str] = None, cluster_min_gap: int = 10,
                   initial_dropped: tuple = (),
-                  prefer_low_interval_safe: bool = False) -> Optional[tuple]:
+                  prefer_low_interval_safe: bool = False,
+                  retained_root_string: Optional[int] = None) -> Optional[tuple]:
     """Derive one movable shape for `chord_type` rooted on `root_string`.
     Returns `(Shape, dropped_roles)`, or `None` if infeasible even after
     the full §3.3 omission ladder (a genuine coverage gap the caller
@@ -209,13 +234,16 @@ def derive_shape(chord_type: tuple, root_string: int, shape_id: str,
     function stops at the first violation-free fit, so without seeding
     it never explores that thinner option on its own.
 
+    `retained_root_string` requests an alternate eligible sounding string for
+    the root; rootless derivations leave it unset.
+
     `prefer_low_interval_safe` is reserved for completeness-gap shapes whose
     default lowest-fret assignment would fail the shared low-register
     interval gate after transposition. It changes only the tie-break among
     clash-free assignments; it does not relax any guitar or spacing rule."""
     chord = _dummy_chord(chord_type)
     degrees = resolve_degrees(chord)
-    dct_role, _ = compute_dct(chord, degrees, gen_dir=gen_dir)
+    dct_role, _ = _dct_for_chord_type(chord_type, gen_dir)
     role_semi = {d.role: d.semitone for d in degrees}
     required = [d.role for d in degrees]
 
@@ -224,6 +252,15 @@ def derive_shape(chord_type: tuple, root_string: int, shape_id: str,
     root_pc = OPEN_STRINGS[STRING_NUMS.index(root_string)] % 12
 
     dropped: list = [r for r in initial_dropped if r != dct_role]
+    def alternate_tags(active_retained_root: Optional[int]) -> tuple:
+        if active_retained_root is None:
+            return ()
+        derivation_rank = string_nums.index(active_retained_root)
+        return (
+            "alternate_root",
+            f"retained_root_{active_retained_root}",
+            f"derivation_rank_{derivation_rank}",
+        )
     idx = 0
     clash_fallback = None  # (shape_frets, shape_degs, dropped_snapshot) -- see below
     while True:
@@ -232,9 +269,13 @@ def derive_shape(chord_type: tuple, root_string: int, shape_id: str,
             frets, degs, span, violations = _try_assignment(
                 cur_required, role_semi, string_nums, root_pc,
                 cluster_min_gap=cluster_min_gap, max_fret_span=max_fret_span,
-                prefer_low_interval_safe=prefer_low_interval_safe)
+                prefer_low_interval_safe=prefer_low_interval_safe,
+                retained_root_string=retained_root_string)
             if frets is not None and span <= max_fret_span:
                 if violations == 0:
+                    active_retained_root = (
+                        retained_root_string if "root" in cur_required else None
+                    )
                     full_frets = ["x"] * 6
                     full_degs = [None] * 6
                     for i, s_num in enumerate(string_nums):
@@ -246,8 +287,11 @@ def derive_shape(chord_type: tuple, root_string: int, shape_id: str,
                         frets=tuple(full_frets), degrees=tuple(full_degs),
                         chord_types=(chord_type,), barre=True, open_only=False,
                         native_root_pc=root_pc,
-                        tags=("drop2_derived",) if _has_extension(chord_type) else ("derived",),
+                        tags=(("drop2_derived",) if _has_extension(chord_type)
+                              else ("derived",)) +
+                        alternate_tags(active_retained_root),
                         omitted_roles=tuple(dropped),
+                        retained_root_string=active_retained_root,
                     )
                     return shape, dropped
                 # A clash exists at this ladder level -- remember the
@@ -280,13 +324,20 @@ def derive_shape(chord_type: tuple, root_string: int, shape_id: str,
         if not advanced:
             if clash_fallback is not None:
                 full_frets, full_degs, dropped_snapshot = clash_fallback
+                active_retained_root = (
+                    retained_root_string
+                    if "root" not in dropped_snapshot else None
+                )
                 shape = Shape(
                     id=shape_id, root_string=root_string,
                     frets=full_frets, degrees=full_degs,
                     chord_types=(chord_type,), barre=True, open_only=False,
                     native_root_pc=root_pc,
-                    tags=("drop2_derived",) if _has_extension(chord_type) else ("derived",),
+                    tags=(("drop2_derived",) if _has_extension(chord_type)
+                          else ("derived",)) +
+                    alternate_tags(active_retained_root),
                     omitted_roles=tuple(dropped_snapshot),
+                    retained_root_string=active_retained_root,
                 )
                 return shape, dropped_snapshot
             return None

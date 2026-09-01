@@ -261,6 +261,9 @@ def make_shape_library_source(shapes: list, shapes_by_key: dict, max_fret: int,
 
     def candidate_source(params) -> list:
         chord = params.chord
+        source_phase = getattr(params, "source_phase", "normal")
+        if source_phase not in ("normal", "guitar_octave"):
+            raise ValueError(f"unknown guitar source phase: {source_phase!r}")
         key = (chord.triad, chord.seventh)
         required_roles = frozenset(d.role for d in params.degrees)
         role_semi = {d.role: d.semitone % 12 for d in params.degrees}
@@ -283,42 +286,65 @@ def make_shape_library_source(shapes: list, shapes_by_key: dict, max_fret: int,
             if degree.role not in required_roles
         )
         out = []
+        octave_offsets = (0,) if source_phase == "normal" else (-12, 12)
         for shape, dropped in matches:
             fret_span = shape.span()
             if fret_span > max_fret_span + 1:
                 continue
-            realized = realize(shape, root_pc, max_fret=max_fret)
-            if realized is None:
-                continue
-            declared_omissions = (
-                getattr(shape, "omitted_roles", ())
-                if chord.chord_type() in shape.chord_types else ()
-            )
-            allowed_dropped = tuple(dict.fromkeys(
-                (*dropped, *declared_omissions, *selection_dropped)
-            ))
-            valid, missing_extensions = validate_realization(
-                chord, realized, root_pc, allowed_dropped
-            )
-            if not valid or (params.dct_role in missing_extensions):
-                continue
-            template = shape.tags[0] if shape.tags else shape.id
-            cand = Candidate(
-                pitches=realized["pitches"], roles=realized["roles"], shape_id=shape.id,
-                meta={
-                    "root_fret": realized["root_fret"], "muted": realized["muted"],
-                    "strings": realized["strings"], "root_string": shape.root_string,
-                    "family": template, "voicing_template": template,
-                    "fret_span": fret_span,
-                    "extensions_dropped": list(missing_extensions),
-                    "roles_dropped": [
-                        degree.role for degree in full_degrees
-                        if degree.role not in set(realized["roles"])
-                    ],
-                    "signature_extra": (shape.root_string, template),
-                },
-            ).dedup_sorted()
-            out.append(cand)
+            for octave_offset in octave_offsets:
+                realized = realize(
+                    shape, root_pc, max_fret=max_fret,
+                    octave_offset=octave_offset,
+                )
+                if realized is None:
+                    continue
+                declared_omissions = (
+                    getattr(shape, "omitted_roles", ())
+                    if chord.chord_type() in shape.chord_types else ()
+                )
+                allowed_dropped = tuple(dict.fromkeys(
+                    (*dropped, *declared_omissions, *selection_dropped)
+                ))
+                valid, missing_extensions = validate_realization(
+                    chord, realized, root_pc, allowed_dropped
+                )
+                if not valid or (params.dct_role in missing_extensions):
+                    continue
+                template = shape.tags[0] if shape.tags else shape.id
+                public_shape_id = (
+                    shape.id if octave_offset == 0
+                    else f"{shape.id}@oct{octave_offset:+d}"
+                )
+                retained_root_string = getattr(
+                    shape, "retained_root_string", None
+                )
+                cand = Candidate(
+                    pitches=realized["pitches"], roles=realized["roles"],
+                    shape_id=public_shape_id,
+                    meta={
+                        "root_fret": realized["root_fret"],
+                        "muted": realized["muted"],
+                        "strings": realized["strings"],
+                        "root_string": shape.root_string,
+                        "retained_root_string": retained_root_string,
+                        "family": template, "voicing_template": template,
+                        "fret_span": fret_span,
+                        "extensions_dropped": list(missing_extensions),
+                        "roles_dropped": [
+                            degree.role for degree in full_degrees
+                            if degree.role not in set(realized["roles"])
+                        ],
+                        "base_shape_id": shape.id,
+                        "octave_offset": octave_offset,
+                        "generation_phase": source_phase,
+                        "candidate_source": "shape_library",
+                        "signature_extra": (
+                            shape.root_string, retained_root_string,
+                            template, octave_offset,
+                        ),
+                    },
+                ).dedup_sorted()
+                out.append(cand)
         return out
 
     return candidate_source

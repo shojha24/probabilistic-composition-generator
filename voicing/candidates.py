@@ -43,7 +43,10 @@ class Candidate:
 
 def dct_expose_repair(candidate: "Candidate", dct_role: str, secondary_roles: list,
                        sampled_branch: Optional[str], window_lo: int, window_hi: int,
-                       anchor_center: int, max_variants: int = 24):
+                       anchor_center: int, max_variants: int = 256,
+                       max_secondary_assignments: int = 32,
+                       max_voices: Optional[int] = None,
+                       max_doublings: Optional[int] = None):
     """Last-resort, lazily-triggered repair for spec 07 §5.2/§5.3 DCT
     exposure: `beam_octave_assignment` minimizes anchor-distance per role
     with zero awareness of *which* role is the DCT, so for role
@@ -71,6 +74,11 @@ def dct_expose_repair(candidate: "Candidate", dct_role: str, secondary_roles: li
     still create a *new* LIL/cluster violation against an untouched
     role -- the caller must re-validate every hard gate on each yielded
     variant and only needs to try the next one if that happens.
+
+    Secondary differentiators are enumerated as bounded combinations rather
+    than greedily taking the first placement for each role. The octave
+    branch adds exactly one DCT copy at an available +/-12 position; it never
+    treats the DCT as an ordinary doubling target.
     """
     base_pitches = list(candidate.pitches)
     roles = list(candidate.roles)
@@ -86,13 +94,17 @@ def dct_expose_repair(candidate: "Candidate", dct_role: str, secondary_roles: li
         pc = pitches[idx] % 12
         others = [p for j, p in enumerate(pitches) if j != idx]
         opts = [p for p in range(window_lo, window_hi + 1) if p % 12 == pc]
-        opts.sort(key=lambda p: abs(p - anchor_center))
-        return [p for p in opts if _isolated_against(p, others)]
+        opts.sort(key=lambda p: (abs(p - anchor_center), p))
+        return [
+            p for p in opts
+            if p not in others and _isolated_against(p, others)
+        ]
 
     dct_idx = next((i for i, r in enumerate(roles) if r == dct_role), None)
     if dct_idx is None:
         return  # DCT dropped -- never allowed, caller must reject anyway
 
+    dct_placements = []
     if sampled_branch == "top":
         # Trivially satisfies predicate_top (and usually predicate_isolated
         # too, given the resulting gap) by placing the DCT's pc strictly
@@ -101,15 +113,35 @@ def dct_expose_repair(candidate: "Candidate", dct_role: str, secondary_roles: li
         current_max = max(p for j, p in enumerate(base_pitches) if j != dct_idx)
         dct_options = [p for p in range(window_lo, window_hi + 1)
                        if p % 12 == pc and p > current_max]
-        dct_options.sort(key=lambda p: abs(p - anchor_center))
+        dct_options.sort(key=lambda p: (abs(p - anchor_center), p))
+        dct_placements = [(p, None) for p in dct_options]
+    elif sampled_branch == "octave":
+        # Repositioning the existing DCT is not an octave exposure. Add one
+        # explicit copy exactly an octave away and let the shared validator
+        # decide whether the lower copy is exposed and all other hard gates
+        # still hold.
+        dct_pitch = base_pitches[dct_idx]
+        forced_options = [
+            p for p in range(window_lo, window_hi + 1)
+            if p % 12 == dct_pitch % 12
+            and abs(p - dct_pitch) == 12
+            and p not in base_pitches
+        ]
+        forced_options.sort(key=lambda p: (abs(p - anchor_center), p))
+        base_doublings = len(base_pitches) - len(set(roles))
+        if (max_voices is not None and len(base_pitches) >= max_voices) or \
+                (max_doublings is not None and (
+                    max_doublings <= 0 or base_doublings >= max_doublings
+                )):
+            forced_options = []
+        dct_placements = [(dct_pitch, p) for p in forced_options]
     else:
-        # "isolated" and "octave" branches: "isolated" is what this helper
-        # can directly guarantee; an "octave"-branch candidate that instead
-        # ends up isolated still passes spec 07 §9 step 7's branch
-        # relaxation once the ladder reaches it, so this is a reasonable
-        # best-effort even when the originally sampled branch was "octave".
+        # The isolated branch enumerates every legal instance in the current
+        # window rather than only the first nearest-to-anchor option.
         dct_options = _options_for(dct_idx, base_pitches)
-    if not dct_options:
+        dct_options.sort(key=lambda p: (abs(p - anchor_center), p))
+        dct_placements = [(p, None) for p in dct_options]
+    if not dct_placements:
         return
 
     sec_idxs = [next((i for i, r in enumerate(roles) if r == sr), None)
@@ -117,34 +149,66 @@ def dct_expose_repair(candidate: "Candidate", dct_role: str, secondary_roles: li
     if any(i is None for i in sec_idxs):
         return
 
-    count = 0
-    for dp in dct_options:
+    generated = 0
+    secondary_limit = max(1, int(max_secondary_assignments))
+    for dp, forced_copy in dct_placements:
         trial = list(base_pitches)
         trial[dct_idx] = dp
-        # Secondary roles are repositioned against the trial pitches
-        # (including the just-moved DCT), one at a time; if any has no
-        # isolated option left, this dct_option is unusable.
-        ok = True
-        for sidx in sec_idxs:
-            sopts = _options_for(sidx, trial)
-            if not sopts:
-                ok = False
-                break
-            trial[sidx] = sopts[0]
-        if not ok:
+        trial_roles = list(roles)
+        if forced_copy is not None:
+            trial.append(forced_copy)
+            trial_roles.append(dct_role)
+        if len(trial) != len(set(trial)):
             continue
-        yield Candidate(trial, roles, candidate.shape_id, candidate.hands,
-                         dict(candidate.meta)).dedup_sorted()
-        count += 1
-        if count >= max_variants:
-            return
+
+        assignments = []
+
+        def enumerate_secondary(position: int, current: list[int]) -> None:
+            if len(assignments) >= secondary_limit:
+                return
+            if position == len(sec_idxs):
+                assignments.append(list(current))
+                return
+            sidx = sec_idxs[position]
+            for option in _options_for(sidx, current):
+                next_pitches = list(current)
+                next_pitches[sidx] = option
+                if len(next_pitches) != len(set(next_pitches)):
+                    continue
+                enumerate_secondary(position + 1, next_pitches)
+                if len(assignments) >= secondary_limit:
+                    return
+
+        enumerate_secondary(0, trial)
+        if not sec_idxs:
+            assignments = [trial]
+        for assignment in assignments:
+            if generated >= max_variants:
+                return
+            if len(assignment) != len(set(assignment)):
+                continue
+            meta = dict(candidate.meta)
+            meta.update({
+                "generation_phase": "dct_repair",
+                "dct_repair": True,
+                "forced_dct_copy": forced_copy is not None,
+            })
+            repaired = Candidate(
+                assignment, trial_roles, candidate.shape_id, candidate.hands, meta
+            ).dedup_sorted()
+            # A repair may not hide a required role behind a pitch collision.
+            if len(repaired.pitches) != len(assignment):
+                continue
+            yield repaired
+            generated += 1
 
 
 
 
-def post_filter_repair(candidate: "Candidate", window_lo: int, window_hi: int,
-                        anchor_center: int, min_gap: int,
-                        post_filter_fn, prev, ctx: dict, policy) -> Optional["Candidate"]:
+def post_filter_repairs(candidate: "Candidate", window_lo: int, window_hi: int,
+                         anchor_center: int, min_gap: int,
+                         post_filter_fn, prev, ctx: dict, policy,
+                         max_variants: int = 256):
     """Generic last-resort repair for a voicer-specific hard `post_filter`
     (e.g. spec 03's bottom-voice octave-band anchoring): among several
     otherwise-equal-cost register placements for the *lowest* currently
@@ -165,14 +229,17 @@ def post_filter_repair(candidate: "Candidate", window_lo: int, window_hi: int,
     pitches = list(candidate.pitches)
     roles = list(candidate.roles)
     if not pitches:
-        return None
+        return
     bottom_idx = min(range(len(pitches)), key=lambda i: pitches[i])
     pc = pitches[bottom_idx] % 12
     others = [p for j, p in enumerate(pitches) if j != bottom_idx]
     options = [p for p in range(window_lo, window_hi + 1) if p % 12 == pc]
-    options.sort(key=lambda p: abs(p - anchor_center))
+    options.sort(key=lambda p: (abs(p - anchor_center), p))
+    generated = 0
     for p in options:
         if p == pitches[bottom_idx]:
+            continue
+        if p in others:
             continue
         # avoid reintroducing a semitone-cluster clash against any other
         # already-placed pitch at the new position.
@@ -180,11 +247,39 @@ def post_filter_repair(candidate: "Candidate", window_lo: int, window_hi: int,
             continue
         trial_pitches = list(pitches)
         trial_pitches[bottom_idx] = p
-        trial = Candidate(trial_pitches, roles, candidate.shape_id, candidate.hands,
-                           dict(candidate.meta)).dedup_sorted()
+        meta = dict(candidate.meta)
+        meta.update({
+            "generation_phase": "dct_repair",
+            "dct_repair": True,
+            "repair_kind": "post_filter",
+            "forced_dct_copy": False,
+        })
+        trial = Candidate(
+            trial_pitches, roles, candidate.shape_id, candidate.hands, meta
+        ).dedup_sorted()
+        if len(trial.pitches) != len(trial_pitches):
+            continue
         if post_filter_fn(trial, prev, ctx, policy):
-            return trial
-    return None
+            yield trial
+            generated += 1
+            if generated >= max_variants:
+                return
+
+
+def post_filter_repair(candidate: "Candidate", window_lo: int, window_hi: int,
+                        anchor_center: int, min_gap: int,
+                        post_filter_fn, prev, ctx: dict, policy,
+                        max_variants: int = 256) -> Optional["Candidate"]:
+    """Return the first bounded post-filter repair.
+
+    ``post_filter_repairs`` is exposed separately so the engine can inspect
+    the complete bounded repair pool while preserving the original helper's
+    single-result API for existing callers.
+    """
+    return next(post_filter_repairs(
+        candidate, window_lo, window_hi, anchor_center, min_gap,
+        post_filter_fn, prev, ctx, policy, max_variants=max_variants,
+    ), None)
 
 
 @lru_cache(maxsize=4096)
@@ -506,7 +601,8 @@ def apply_doubling_variants(assignment: list[tuple], doubling_roles: list[str],
                              role_pc_lookup: dict, window_lo: int, window_hi: int,
                              max_doublings: int, rng: random.Random,
                              anchor_center: int = 0, anchor_shift: int = 0,
-                             max_variants: int = 40) -> list[list[tuple]]:
+                             max_variants: int = 40,
+                             forced_dct_role: Optional[str] = None) -> list[list[tuple]]:
     """Given a base (undoubled) assignment, produce variants with 0..
     max_doublings extra octave copies of the requested doubling-target
     roles. Always includes the undoubled assignment itself. Explores up to
@@ -518,69 +614,77 @@ def apply_doubling_variants(assignment: list[tuple], doubling_roles: list[str],
     direction-biased toward `anchor_shift`'s sign when a section profile
     is actively shifting the anchor."""
     variants = [list(assignment)]
-    valid_roles = [r for r in doubling_roles if r in role_pc_lookup]
-    if max_doublings <= 0 or not valid_roles:
+    valid_roles = [
+        r for r in doubling_roles
+        if r in role_pc_lookup and r != forced_dct_role
+    ]
+    if max_doublings <= 0:
         return variants
+    ordinary_budget = max_doublings - (1 if forced_dct_role else 0)
+    if ordinary_budget < 0:
+        ordinary_budget = 0
+    if ordinary_budget == 0 or not valid_roles:
+        ordinary_variants = [list(assignment)]
+    else:
+        ordinary_variants = None
 
     # Precompute each role's full (cached) octave-option tuple once; the
-    # per-attempt `used`-set filtering below is cheap, but re-deriving the
-    # option list itself on every attempt (as before) was the single
-    # largest hotspot in profiling (~3.8M redundant calls in a 3-song run).
-    role_options = {role: role_octave_options(role_pc_lookup[role], window_lo, window_hi)
-                    for role in valid_roles}
-
-    seen_keys = {frozenset(p for _, p in assignment)}
-    available_pitches = set().union(*role_options.values()) - {
-        p for _, p in assignment
+    # per-attempt `used`-set filtering below is cheap.
+    role_options = {
+        role: role_octave_options(role_pc_lookup[role], window_lo, window_hi)
+        for role in valid_roles
     }
-    # This is an upper bound because it ignores role eligibility and counts
-    # every subset of available pitches as reachable. That makes it safe:
-    # once this many distinct pitch sets have been emitted, no future
-    # random attempt can produce a new key. In the usual multi-role case
-    # the bound is much larger than `max_variants`, so RNG behavior and the
-    # existing attempt budget are untouched. It matters for low-cardinality
-    # chords, where repeated attempts can keep drawing the same small set of
-    # octave placements after the reachable space is exhausted.
-    max_reachable = 1 + sum(
-        comb(len(available_pitches), n)
-        for n in range(1, min(max_doublings, len(available_pitches)) + 1)
-    )
-    target_variants = min(max_variants, max_reachable)
-    attempts = 0
-    # A generous-but-bounded search budget: the deterministic fallback below
-    # guarantees at least one feasible maximally-doubled variant regardless,
-    # so this only needs to be "enough for good diversity," not "enough to
-    # guarantee success."
-    max_attempts = max_variants * 3
-    while len(variants) < target_variants and attempts < max_attempts:
-        attempts += 1
-        n_doublings = rng.randint(1, max_doublings)
-        current = list(assignment)
-        used = {p for _, p in current}
-        for _ in range(n_doublings):
-            eligible_roles = [
-                candidate_role for candidate_role in valid_roles
-                if candidate_role != "3rd"
-                and not (
-                    candidate_role in {"7th", "9th", "11th", "13th"}
-                    and sum(1 for existing_role, _ in current
-                            if existing_role == candidate_role) >= 1
+
+    if ordinary_variants is None:
+        seen_keys = {frozenset(p for _, p in assignment)}
+        available_pitches = set().union(*role_options.values()) - {
+            p for _, p in assignment
+        }
+        max_reachable = 1 + sum(
+            comb(len(available_pitches), n)
+            for n in range(1, min(ordinary_budget, len(available_pitches)) + 1)
+        )
+        target_variants = min(max_variants, max_reachable)
+        attempts = 0
+        max_attempts = max_variants * 3
+        variants = ordinary_variants = [list(assignment)]
+        while len(variants) < target_variants and attempts < max_attempts:
+            attempts += 1
+            n_doublings = rng.randint(1, ordinary_budget)
+            current = list(assignment)
+            used = {p for _, p in current}
+            for _ in range(n_doublings):
+                eligible_roles = [
+                    candidate_role for candidate_role in valid_roles
+                    if candidate_role != "3rd"
+                    and not (
+                        candidate_role in {"7th", "9th", "11th", "13th"}
+                        and sum(1 for existing_role, _ in current
+                                if existing_role == candidate_role) >= 1
+                    )
+                ]
+                if not eligible_roles:
+                    break
+                role = rng.choice(eligible_roles)
+                options = [p for p in role_options[role] if p not in used]
+                if not options:
+                    continue
+                p = _weighted_octave_choice(
+                    options, anchor_center, rng, direction_bias=anchor_shift
                 )
-            ]
-            if not eligible_roles:
-                break
-            role = rng.choice(eligible_roles)
-            options = [p for p in role_options[role] if p not in used]
-            if not options:
+                current.append((role, p))
+                used.add(p)
+            key = frozenset(used)
+            if key in seen_keys:
                 continue
-            p = _weighted_octave_choice(options, anchor_center, rng, direction_bias=anchor_shift)
-            current.append((role, p))
-            used.add(p)
-        key = frozenset(used)
-        if key in seen_keys:
-            continue
-        seen_keys.add(key)
-        variants.append(current)
+            seen_keys.add(key)
+            variants.append(current)
+    else:
+        variants = ordinary_variants
+        seen_keys = {
+            tuple(sorted(p for _, p in variant))
+            for variant in variants
+        }
 
     # Deterministic fallback: greedily add as many distinct octave copies
     # (nearest-to-anchor first, tie-broken toward the shift's direction)
@@ -605,9 +709,14 @@ def apply_doubling_variants(assignment: list[tuple], doubling_roles: list[str],
     used = {p for _, p in current}
     added = 0
     for _, role, p in all_options:
-        if added >= max_doublings:
+        if added >= ordinary_budget:
             break
         if p in used:
+            continue
+        if role == "3rd":
+            continue
+        if role in {"7th", "9th", "11th", "13th"} and any(
+                existing_role == role for existing_role, _ in current):
             continue
         current.append((role, p))
         used.add(p)
@@ -616,7 +725,45 @@ def apply_doubling_variants(assignment: list[tuple], doubling_roles: list[str],
     if key not in seen_keys:
         variants.append(current)
 
-    return variants[:max(max_variants, len(variants))]
+    if forced_dct_role and forced_dct_role in role_pc_lookup:
+        # Add exactly one octave copy of the requested DCT. The ordinary
+        # doubling budget above reserved one slot for this copy, and the
+        # copy is kept near the front so a bounded pool cannot hide it behind
+        # unrelated density variants.
+        forced_options = role_octave_options(
+            role_pc_lookup[forced_dct_role], window_lo, window_hi
+        )
+        forced_variants = []
+        for current in variants:
+            dct_pitches = [
+                p for role, p in current if role == forced_dct_role
+            ]
+            if not dct_pitches:
+                continue
+            used = {p for _, p in current}
+            options = [
+                p for p in forced_options
+                if p not in used and abs(p - dct_pitches[0]) == 12
+            ]
+            options.sort(key=lambda p: (abs(p - anchor_center), p))
+            if options:
+                forced_variants.append(
+                    current + [(forced_dct_role, options[0])]
+                )
+        # In the forced branch, keep a valid copy ahead of ordinary density
+        # variants so a bounded caller cannot truncate the required DCT copy.
+        ordered = list(forced_variants)
+        ordered.extend(variants)
+        variants = []
+        seen = set()
+        for variant in ordered:
+            key = tuple(sorted(p for _, p in variant))
+            if key in seen:
+                continue
+            seen.add(key)
+            variants.append(variant)
+
+    return variants[:max_variants]
 
 
 _MAX_BASE_ASSIGNMENTS_FOR_DOUBLING = 120
@@ -629,7 +776,8 @@ def free_placement(role_pcs: list[tuple], window_lo: int, window_hi: int,
                     max_candidates: int = 400, anchor_shift: int = 0,
                     doubling_pcs: Optional[dict] = None,
                     cluster_min_gap: int = 13,
-                    template: str = "balanced") -> list[Candidate]:
+                    template: str = "balanced",
+                    forced_dct_role: Optional[str] = None) -> list[Candidate]:
     """Generic free-placement candidate generator: beam-search octave
     assignment + doubling variants. `role_pcs` is the list of (role, pc)
     pairs for the *required* (non-doubled) degrees only.
@@ -670,11 +818,24 @@ def free_placement(role_pcs: list[tuple], window_lo: int, window_hi: int,
                                                 window_lo, window_hi, max_doublings, rng,
                                                 anchor_center=anchor_center,
                                                 anchor_shift=anchor_shift,
-                                                max_variants=min(40, remaining)):
+                                                max_variants=min(40, remaining),
+                                                forced_dct_role=forced_dct_role):
             pitches = [p for _, p in variant]
             roles = [r for r, _ in variant]
+            forced_copy = (
+                forced_dct_role is not None
+                and sum(r == forced_dct_role for r in roles)
+                > sum(r == forced_dct_role for r, _ in assignment)
+            )
             cand = Candidate(
-                pitches, roles, meta={"voicing_template": template}
+                pitches, roles, meta={
+                    "voicing_template": template,
+                    "candidate_source": "free_placement",
+                    "generation_phase": "normal",
+                    "dct_repair": False,
+                    "forced_dct_copy": forced_copy,
+                    "octave_offset": 0,
+                }
             ).dedup_sorted()
             out.append(cand)
             if clash_edges and _candidate_clash_ok(cand, clash_edges, cluster_min_gap):
@@ -682,15 +843,34 @@ def free_placement(role_pcs: list[tuple], window_lo: int, window_hi: int,
         if len(out) >= max_candidates:
             break
 
-    # Same lazy trigger as `hand_split_free_placement`: only pay for the
-    # (RNG-consuming) direct-construction fallback when nothing the beam
-    # search found is actually clash-clean.
-    if clash_color is not None and not any_clash_clean:
+    # Same lazy trigger as `hand_split_free_placement`: use the direct
+    # construction when nothing the beam search found is clash-clean.
+    #
+    # Dense candidate pools also reserve a small direct slice when the beam
+    # has a clash-clean result. A beam result can still be unusable after a
+    # voicer-specific post-filter (for example, a bottom-register band), and
+    # discarding every topology-aware alternative in that case recreates the
+    # same coverage gap while the bounded pool is truncated.
+    if clash_color is not None:
         direct = _clash_aware_free_candidates(
             role_pcs, role_pc_lookup, clash_color, window_lo, window_hi,
             anchor_center, rng, min_gap=cluster_min_gap, template=template,
+            forced_dct_role=(
+                forced_dct_role if max_doublings > 0 else None
+            ),
         )
-        return out[:max_candidates] + direct
+        if not any_clash_clean:
+            # The direct pool exists specifically because the beam exhausted
+            # the available candidate budget without producing a clash-clean
+            # realization. Keep it ahead of that beam so the bounded return
+            # does not truncate the only topology-aware alternatives.
+            combined = direct + out
+        elif len(role_pcs) >= 6 and direct:
+            reserve = min(len(direct), max(1, max_candidates // 8))
+            combined = out[:max_candidates - reserve] + direct[:reserve]
+        else:
+            combined = out
+        return combined[:max_candidates]
     return out[:max_candidates]
 
 
@@ -698,21 +878,32 @@ def _clash_aware_free_candidates(role_pcs: list[tuple], role_pc_lookup: dict,
                                   clash_color: dict, window_lo: int, window_hi: int,
                                   anchor_center: int, rng: random.Random,
                                   min_gap: int = 13, max_variants: int = 24,
-                                  template: str = "balanced") -> list[Candidate]:
-    """`_clash_aware_direct_candidates`'s counterpart for hand-less voicers
-    (pads/synths via plain `free_placement`): places every clash-colored
-    role in one of two registers -- strictly below `anchor_center` or at
-    /above `anchor_center + min_gap` -- which guarantees >= `min_gap`
-    separation between any two roles on opposite sides by construction,
-    rather than relying on the anchor-nearness-only beam search to
-    accidentally spread them apart (see `free_placement`'s comment on why
-    it doesn't)."""
+                                  template: str = "balanced",
+                                  forced_dct_role: Optional[str] = None) -> list[Candidate]:
+    """Generate bounded clash-safe register splits for hand-less voicers.
+
+    Only roles that participate in a semitone-clash edge need to be forced
+    onto opposite sides of the anchor. Keeping non-clashing roles free lets
+    them occupy the intervening register without making the direct fallback
+    unnecessarily rigid (and without creating low-register interval
+    violations by packing every core role below the anchor).
+    """
+    if forced_dct_role is not None and forced_dct_role not in role_pc_lookup:
+        return []
     required_roles = [r for r, _ in role_pcs]
+    clash_edges = _clash_edges(list(role_pc_lookup.items()))
+    clash_roles = {role for edge in clash_edges for role in edge}
     out = []
     for lo_color in (0, 1):
-        lo_roles = [r for r in required_roles if clash_color.get(r) == lo_color]
-        hi_roles = [r for r in required_roles if clash_color.get(r) == (1 - lo_color)]
-        free_roles = [r for r in required_roles if r not in clash_color]
+        lo_roles = [
+            r for r in required_roles
+            if r in clash_roles and clash_color.get(r) == lo_color
+        ]
+        hi_roles = [
+            r for r in required_roles
+            if r in clash_roles and clash_color.get(r) == (1 - lo_color)
+        ]
+        free_roles = [r for r in required_roles if r not in clash_roles]
 
         lo_hi_bound = anchor_center - 1
         hi_lo_bound = anchor_center + min_gap
@@ -730,17 +921,68 @@ def _clash_aware_free_candidates(role_pcs: list[tuple], role_pc_lookup: dict,
                 any(not opts for opts in free_opts.values())):
             continue  # some role has no legal pc inside its designated register
 
-        for _ in range(max_variants):
-            placed = [(r, _weighted_octave_choice(lo_opts[r], anchor_center, rng))
-                      for r in lo_roles]
-            placed += [(r, _weighted_octave_choice(hi_opts[r], anchor_center, rng))
-                       for r in hi_roles]
-            placed += [(r, _weighted_octave_choice(free_opts[r], anchor_center, rng))
-                       for r in free_roles]
+        for variant_index in range(max_variants):
+            def stable_choice(options, role_index):
+                ordered = sorted(
+                    options, key=lambda p: (abs(p - anchor_center), p)
+                )
+                # Keep the first fallback variant as the all-nearest
+                # register split. Applying the role offset to variant zero
+                # can select a distant option for every other role, which
+                # defeats the fallback's purpose when a post-filter also
+                # constrains the bottom register.
+                choice_index = (
+                    variant_index
+                    if variant_index == 0
+                    else variant_index + role_index
+                )
+                return ordered[choice_index % len(ordered)]
+
+            placed = [
+                (r, stable_choice(lo_opts[r], role_index))
+                for role_index, r in enumerate(lo_roles)
+            ]
+            placed += [
+                (r, stable_choice(hi_opts[r], role_index + len(lo_roles)))
+                for role_index, r in enumerate(hi_roles)
+            ]
+            placed += [
+                (r, stable_choice(
+                    free_opts[r], role_index + len(lo_roles) + len(hi_roles)
+                ))
+                for role_index, r in enumerate(free_roles)
+            ]
+            forced_copy = False
+            if forced_dct_role is not None:
+                dct_pitches = [
+                    p for r, p in placed if r == forced_dct_role
+                ]
+                if not dct_pitches:
+                    continue
+                forced_options = [
+                    p for p in role_octave_options(
+                         role_pc_lookup[forced_dct_role], window_lo, window_hi
+                    )
+                    if p not in {pitch for _, pitch in placed}
+                    and abs(p - dct_pitches[0]) == 12
+                ]
+                if not forced_options:
+                    continue
+                placed.append((forced_dct_role, min(
+                    forced_options, key=lambda p: (abs(p - anchor_center), p)
+                )))
+                forced_copy = True
             pitches = [p for _, p in placed]
             roles = [r for r, _ in placed]
             out.append(Candidate(
-                pitches, roles, meta={"voicing_template": template}
+                pitches, roles, meta={
+                    "voicing_template": template,
+                    "candidate_source": "free_placement",
+                    "generation_phase": "normal",
+                    "dct_repair": False,
+                    "forced_dct_copy": forced_copy,
+                    "octave_offset": 0,
+                }
             ).dedup_sorted())
     return out
 
@@ -982,7 +1224,9 @@ def _clash_aware_direct_candidates(role_pcs: list[tuple], role_pc_lookup: dict,
                                     lh_max_voices: int, rh_max_voices: int,
                                     anchor_center: int, rng: random.Random,
                                     max_hand_span: int, max_variants: int = 24,
-                                    template: str = "balanced") -> list[Candidate]:
+                                    template: str = "balanced",
+                                    forced_dct_role: Optional[str] = None,
+                                    max_voices: Optional[int] = None) -> list[Candidate]:
     """Direct (not beam-search-derived) fallback candidate construction for
     when the shared octave-assignment beam search + contiguous-by-pitch
     hand split finds *no* valid partition at all (see `_clash_bipartition`).
@@ -997,6 +1241,8 @@ def _clash_aware_direct_candidates(role_pcs: list[tuple], role_pc_lookup: dict,
     dominant). This instead places each clash-colored role's octave
     *directly* within its designated hand's window from the start, so the
     window constraint is satisfied by construction rather than by luck."""
+    if forced_dct_role is not None and forced_dct_role not in role_pc_lookup:
+        return []
     required_roles = [r for r, _ in role_pcs]
     out = []
     for lh_color in (0, 1):
@@ -1024,11 +1270,50 @@ def _clash_aware_direct_candidates(role_pcs: list[tuple], role_pc_lookup: dict,
         if any(not opts for opts in lh_opts.values()) or any(not opts for opts in rh_opts.values()):
             continue  # this role simply has no legal pc inside its designated hand's window
 
-        for _ in range(max_variants):
-            lh_placed = [(r, _weighted_octave_choice(lh_opts[r], anchor_center, rng))
-                         for r in lh_roles]
-            rh_placed = [(r, _weighted_octave_choice(rh_opts[r], anchor_center, rng))
-                         for r in rh_roles]
+        for variant_index in range(max_variants):
+            def stable_choice(options, role_index):
+                ordered = sorted(
+                    options, key=lambda p: (abs(p - anchor_center), p)
+                )
+                return ordered[(variant_index + role_index) % len(ordered)]
+
+            lh_placed = [
+                (r, stable_choice(lh_opts[r], role_index))
+                for role_index, r in enumerate(lh_roles)
+            ]
+            rh_placed = [
+                (r, stable_choice(rh_opts[r], role_index + len(lh_roles)))
+                for role_index, r in enumerate(rh_roles)
+            ]
+            forced_copy = None
+            if forced_dct_role is not None:
+                dct_pitches = [
+                    p for r, p in lh_placed + rh_placed
+                    if r == forced_dct_role
+                ]
+                if not dct_pitches:
+                    continue
+                used = set(dct_pitches)
+                for hand_name, hand_window in (
+                        ("lh", lh_window), ("rh", rh_window)):
+                    for option in role_octave_options(
+                            role_pc_lookup[forced_dct_role],
+                            hand_window[0], hand_window[1]):
+                        if abs(option - dct_pitches[0]) != 12 or option in used:
+                            continue
+                        forced_copy = (hand_name, option)
+                        break
+                    if forced_copy is not None:
+                        break
+                if forced_copy is None:
+                    continue
+                if max_voices is not None and \
+                        len(lh_placed) + len(rh_placed) >= max_voices:
+                    continue
+                if forced_copy[0] == "lh":
+                    lh_placed.append((forced_dct_role, forced_copy[1]))
+                else:
+                    rh_placed.append((forced_dct_role, forced_copy[1]))
             lh_pitches = [p for _, p in lh_placed]
             rh_pitches = [p for _, p in rh_placed]
             if lh_pitches and (max(lh_pitches) - min(lh_pitches)) > max_hand_span:
@@ -1039,7 +1324,10 @@ def _clash_aware_direct_candidates(role_pcs: list[tuple], role_pc_lookup: dict,
             roles = [r for r, _ in lh_placed] + [r for r, _ in rh_placed]
             out.append(Candidate(pitches, roles,
                                   hands={"lh": lh_pitches, "rh": rh_pitches},
-                                  meta={"voicing_template": template}).dedup_sorted())
+                                  meta={
+                                      "voicing_template": template,
+                                      "forced_dct_copy": forced_copy is not None,
+                                  }).dedup_sorted())
     return out
 
 
@@ -1052,7 +1340,8 @@ def hand_split_free_placement(role_pcs: list[tuple], lh_window: tuple, rh_window
                                doubling_pcs: Optional[dict] = None,
                                cluster_min_gap: int = 13,
                                template: str = "balanced",
-                               role_windows: Optional[dict] = None) -> list[Candidate]:
+                               role_windows: Optional[dict] = None,
+                               forced_dct_role: Optional[str] = None) -> list[Candidate]:
     """Piano hand-split candidate generator (specs 01, 04): beam-search over
     the combined window, then greedily partition into LH (lowest voices) /
     RH (remaining), rejecting partitions that violate voice caps or hand
@@ -1095,7 +1384,8 @@ def hand_split_free_placement(role_pcs: list[tuple], lh_window: tuple, rh_window
                                                 window_lo, window_hi, max_doublings, rng,
                                                 anchor_center=anchor_center,
                                                 anchor_shift=anchor_shift,
-                                                max_variants=min(40, remaining)):
+                                                max_variants=min(40, remaining),
+                                                forced_dct_role=forced_dct_role):
             sorted_variant = sorted(variant, key=lambda rp: rp[1])
             n = len(sorted_variant)
             lh_target = min(lh_max_voices, n - 1) if n > 1 else n
@@ -1120,9 +1410,21 @@ def hand_split_free_placement(role_pcs: list[tuple], lh_window: tuple, rh_window
                     continue
                 pitches = lh_pitches + rh_pitches
                 roles = [r for r, _ in lh_part] + [r for r, _ in rh_part]
+                forced_copy = (
+                    forced_dct_role is not None
+                    and sum(r == forced_dct_role for r in roles)
+                    > sum(r == forced_dct_role for r, _ in assignment)
+                )
                 cand = Candidate(pitches, roles,
                                   hands={"lh": lh_pitches, "rh": rh_pitches},
-                                  meta={"voicing_template": template}).dedup_sorted()
+                                  meta={
+                                      "voicing_template": template,
+                                      "candidate_source": "free_placement",
+                                      "generation_phase": "normal",
+                                      "dct_repair": False,
+                                      "forced_dct_copy": forced_copy,
+                                      "octave_offset": 0,
+                                  }).dedup_sorted()
                 out.append(cand)
                 if clash_edges and _candidate_clash_ok(cand, clash_edges, cluster_min_gap):
                     any_clash_clean = True
@@ -1145,9 +1447,191 @@ def hand_split_free_placement(role_pcs: list[tuple], lh_window: tuple, rh_window
             role_pcs, role_pc_lookup, clash_color, lh_window, rh_window,
             lh_max_voices, rh_max_voices, anchor_center, rng, max_hand_span,
             template=template,
+            forced_dct_role=(
+                forced_dct_role if max_doublings > 0 else None
+            ),
+            max_voices=lh_max_voices + rh_max_voices,
         )
-        return out[:max_candidates] + direct
+        combined = (direct + out) if forced_dct_role is not None else (out + direct)
+        return combined[:max_candidates]
     return out[:max_candidates]
+
+
+def dense_hand_layout(role_pcs: list[tuple], lh_window: tuple, rh_window: tuple,
+                      lh_max_voices: int, rh_max_voices: int,
+                      max_hand_span: int, anchor_center: int,
+                      max_voices: int, max_candidates: int = 512,
+                      template: str = "dense_hand",
+                      role_windows: Optional[dict] = None,
+                      forced_dct_role: Optional[str] = None,
+                      max_doublings: Optional[int] = None) -> list[Candidate]:
+    """Enumerate bounded, role-aware piano hand layouts.
+
+    Unlike the normal source, this intentionally does not require the sorted
+    pitch order to determine the hand partition. It is a deterministic
+    fallback for topology-starved dense chords; the engine still applies all
+    sound-set, spacing, DCT, drift, and post-filter gates before selection.
+    """
+    roles = list(role_pcs)
+    if not roles or len(roles) > max_voices:
+        return []
+    if len(roles) > lh_max_voices + rh_max_voices:
+        return []
+
+    core_roles = {"root", "3rd", "5th", "7th"}
+    partitions = []
+    for mask in range(1, (1 << len(roles)) - 1):
+        lh_roles = [role for index, (role, _pc) in enumerate(roles)
+                    if mask & (1 << index)]
+        rh_roles = [role for index, (role, _pc) in enumerate(roles)
+                    if not mask & (1 << index)]
+        if not lh_roles or not rh_roles:
+            continue
+        if len(lh_roles) > lh_max_voices or len(rh_roles) > rh_max_voices:
+            continue
+        # Core tones in the LH and differentiating tensions in the RH are a
+        # preference only; every feasible non-contiguous assignment remains
+        # eligible.
+        preference = sum(
+            0 if ((role in core_roles) == (role in lh_roles))
+            else 1
+            for role, _pc in roles
+        )
+        partitions.append((preference, mask, lh_roles, rh_roles))
+    partitions.sort(key=lambda item: (item[0], item[1]))
+
+    out = []
+    for _preference, _mask, lh_roles, rh_roles in partitions:
+        lh_set = set(lh_roles)
+        windows = {}
+        for role, pc in roles:
+            hand_window = lh_window if role in lh_set else rh_window
+            if role_windows and role in role_windows:
+                hand_window = role_windows[role]
+            options = tuple(
+                p for p in range(hand_window[0], hand_window[1] + 1)
+                if p % 12 == pc % 12
+            )
+            if not options:
+                break
+            target = (hand_window[0] + hand_window[1]) / 2
+            windows[role] = tuple(sorted(options, key=lambda p: (abs(p - target), p)))
+        else:
+            # Assign the most constrained roles first, while retaining the
+            # original degree order as a stable tie-breaker.
+            ordered_roles = sorted(
+                roles,
+                key=lambda item: (len(windows[item[0]]),
+                                  next(i for i, pair in enumerate(roles)
+                                       if pair[0] == item[0]))
+            )
+
+            def visit(position: int, chosen: dict[str, int]) -> None:
+                if len(out) >= max_candidates:
+                    return
+                if position == len(ordered_roles):
+                    lh = sorted(chosen[role] for role in lh_roles)
+                    rh = sorted(chosen[role] for role in rh_roles)
+
+                    def emit(extra=None) -> None:
+                        entries = list(chosen.items())
+                        forced_copy = extra is not None
+                        if extra is not None:
+                            extra_role, extra_pitch, extra_hand = extra
+                            entries.append((extra_role, extra_pitch))
+                        candidate_lh = list(lh)
+                        candidate_rh = list(rh)
+                        if extra is not None:
+                            if extra_hand == "lh":
+                                candidate_lh.append(extra_pitch)
+                                candidate_lh.sort()
+                            else:
+                                candidate_rh.append(extra_pitch)
+                                candidate_rh.sort()
+                        if len(entries) > max_voices or \
+                                len(candidate_lh) > lh_max_voices or \
+                                len(candidate_rh) > rh_max_voices:
+                            return
+                        if (candidate_lh and
+                                candidate_lh[-1] - candidate_lh[0] > max_hand_span) or \
+                                (candidate_rh and
+                                 candidate_rh[-1] - candidate_rh[0] > max_hand_span):
+                            return
+                        pitches = candidate_lh + candidate_rh
+                        if len(pitches) != len(set(pitches)) or \
+                                not low_interval_limit_ok(pitches):
+                            return
+                        ordered = sorted(
+                            ((pitch, role) for role, pitch in entries),
+                            key=lambda pair: (pair[0], pair[1])
+                        )
+                        out.append(Candidate(
+                            [pitch for pitch, _role in ordered],
+                            [role for _pitch, role in ordered],
+                            hands={"lh": candidate_lh, "rh": candidate_rh},
+                            meta={
+                                "candidate_source": "dense_hand",
+                                "generation_phase": "dense_hand",
+                                "dct_repair": False,
+                                "forced_dct_copy": forced_copy,
+                                "octave_offset": 0,
+                                "voicing_template": template,
+                            },
+                        ))
+
+                    # The forced branch is the only case where an added DCT
+                    # copy is required; put those variants first so the
+                    # bounded fallback cannot hide them behind base layouts.
+                    forced_variants = []
+                    if (forced_dct_role is not None
+                            and forced_dct_role in chosen
+                            and (max_doublings is None or max_doublings > 0)):
+                        dct_pitch = chosen[forced_dct_role]
+                        used = set(chosen.values())
+                        for hand_name, hand_window in (
+                                ("lh", lh_window), ("rh", rh_window)):
+                            copy_window = hand_window
+                            if role_windows and forced_dct_role in role_windows:
+                                role_window = role_windows[forced_dct_role]
+                                copy_window = (
+                                    max(copy_window[0], role_window[0]),
+                                    min(copy_window[1], role_window[1]),
+                                )
+                            dct_pc = next(
+                                pc for role, pc in roles
+                                if role == forced_dct_role
+                            )
+                            for copy_pitch in sorted(
+                                    role_octave_options(
+                                        dct_pc, copy_window[0], copy_window[1]
+                                    ),
+                                    key=lambda pitch: (
+                                        abs(pitch - anchor_center), pitch
+                                    )):
+                                if copy_pitch in used or \
+                                        abs(copy_pitch - dct_pitch) != 12:
+                                    continue
+                                forced_variants.append(
+                                    (forced_dct_role, copy_pitch, hand_name)
+                                )
+                    for extra in forced_variants:
+                        emit(extra)
+                        if len(out) >= max_candidates:
+                            return
+                    emit()
+                    return
+                role, _pc = ordered_roles[position]
+                for pitch in windows[role]:
+                    if pitch in chosen.values():
+                        continue
+                    chosen[role] = pitch
+                    visit(position + 1, chosen)
+                    del chosen[role]
+                    if len(out) >= max_candidates:
+                        return
+
+            visit(0, {})
+    return out
 
 
 def hand_split_free_placement_templates(*args, templates=("balanced",),

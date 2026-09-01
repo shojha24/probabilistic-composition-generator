@@ -2,10 +2,9 @@
 Spec 07 §13 items 6-9 (property tests) + spec 03 §9 (voicer-specific tests)
 for the pop-synth (pad) voicer.
 
-Run over a configurable sample of gen/pop-rock-labels songs (default: all
-100, matching spec 07 §13's "over all 100 songs x 2 genres").
+Run over a configurable sample of gen/pop-rock-labels songs (or the available
+gen/target-pop-rock-labels counterpart) (default: all 100).
 """
-import glob
 import json
 import math
 import os
@@ -14,18 +13,18 @@ import sys
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from voicing.types import Song
 from voicing.engine import Engine, VoicingImpossible
 from voicing.diversity import DiversityCounter
 from voicing.anchor import anchor_center as compute_anchor_center
 from voicing.voicers import pop_synth
+from corpus_paths import corpus_files
 
-GEN_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "gen")
 
-
-def _songs(genre_dir="pop-rock-labels", limit=None):
-    paths = sorted(glob.glob(os.path.join(GEN_DIR, genre_dir, "*.json")))
+def _songs(genre_dir="pop-rock-labels", limit=None, voicer_family=None):
+    paths = corpus_files(genre_dir, voicer_family=voicer_family)
     if limit:
         paths = paths[:limit]
     out = []
@@ -54,7 +53,7 @@ def default_run():
     """See test_pop_piano.py's identical fixture docstring: `_run_all` with
     default params is deterministic, so every test asserting against the
     plain verse-section, default-seed corpus shares one engine run."""
-    return _run_all(_songs(limit=N))
+    return _run_all(_songs(limit=N, voicer_family="synth"))
 
 
 def test_no_pitch_outside_window(default_run):
@@ -130,7 +129,7 @@ def test_section_coherence(default_run):
     centroids within a song; the song-wide centroid range still
     <= 2 * drift_tol."""
     diversity = DiversityCounter()
-    songs = _songs(limit=min(N, 10))
+    songs = _songs(limit=min(N, 10), voicer_family="synth")
     verse_centroids = []
     chorus_centroids = []
     for i, song in enumerate(songs):
@@ -212,7 +211,7 @@ def test_spread_distribution_gate(default_run):
     never actually converge across "the dataset" as §8 describes."""
     diversity = DiversityCounter()
     shared_tally = {"wide": 0, "open": 0, "sparse": 0}
-    songs = _songs(limit=min(N, 10))
+    songs = _songs(limit=min(N, 10), voicer_family="synth")
     counts = {"wide": 0, "open": 0, "sparse": 0}
     for section in ("verse", "prechorus", "chorus", "bridge", "outro"):
         for i, song in enumerate(songs):
@@ -257,7 +256,7 @@ def test_voice_count_variety_entropy():
     `test_spread_distribution_gate`. Sampling across all 5 sections (whose
     max_voices ranges from 5 to 8) is required for the full 3-8 range to
     even be reachable, let alone entropy-diverse."""
-    songs = _songs(limit=min(N, 10))
+    songs = _songs(limit=min(N, 10), voicer_family="synth")
     diversity = DiversityCounter()
     counts = {}
     for section in ("verse", "prechorus", "chorus", "bridge", "outro"):

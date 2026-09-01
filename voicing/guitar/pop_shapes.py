@@ -21,7 +21,7 @@ shapes); `frets`/`degrees` tuples are always given low-to-high across all
 from __future__ import annotations
 
 from .model import Shape
-from .derive import derive_shape
+from .derive import ROOT_STRING_LAYOUT, derive_shape
 
 X = "x"
 
@@ -262,14 +262,28 @@ _EXTENDED_CHORD_TYPES_11_13 = [
 _DERIVED_SHAPES = []
 
 
+def _append_derived_variants(chord_type, root_string, shape_id, **kwargs):
+    res = derive_shape(chord_type, root_string, shape_id, **kwargs)
+    if res is not None:
+        shape, _dropped = res
+        _DERIVED_SHAPES.append(shape)
+    for retained_root_string in ROOT_STRING_LAYOUT[root_string][1:]:
+        alternate = derive_shape(
+            chord_type, root_string,
+            f"{shape_id}-root{retained_root_string}",
+            retained_root_string=retained_root_string,
+            **kwargs,
+        )
+        if alternate is not None:
+            shape, _dropped = alternate
+            _DERIVED_SHAPES.append(shape)
+
+
 def _derive_all(chord_types, root_strings):
     for ct in chord_types:
         for rs in root_strings:
             shape_id = f"derived-{ct}-{rs}"
-            res = derive_shape(ct, rs, shape_id)
-            if res is not None:
-                shape, _dropped = res
-                _DERIVED_SHAPES.append(shape)
+            _append_derived_variants(ct, rs, shape_id)
 
 
 def _derive_thin_variants(chord_types, root_strings):
@@ -286,10 +300,9 @@ def _derive_thin_variants(chord_types, root_strings):
     for ct in chord_types:
         for rs in root_strings:
             shape_id = f"derived-{ct}-{rs}-thin"
-            res = derive_shape(ct, rs, shape_id, initial_dropped=("root", "5th"))
-            if res is not None:
-                shape, _dropped = res
-                _DERIVED_SHAPES.append(shape)
+            _append_derived_variants(
+                ct, rs, shape_id, initial_dropped=("root", "5th")
+            )
 
 
 # >=3 shapes each for the 9th family (E, A, D roots).
@@ -322,10 +335,7 @@ for _triad in _ALL_TRIADS:
             continue
         _ct = (_triad, _seventh, "N", "N", "N")
         for _rs in (6, 5, 4):
-            _res = derive_shape(_ct, _rs, f"derived-{_ct}-{_rs}")
-            if _res is not None:
-                _shp, _ = _res
-                _DERIVED_SHAPES.append(_shp)
+            _append_derived_variants(_ct, _rs, f"derived-{_ct}-{_rs}")
 
 ALL_SHAPES = _HAND_SHAPES + _DERIVED_SHAPES
 
@@ -406,16 +416,18 @@ def _close_completeness_gaps():
                         prefer_low_interval_safe = ct == (
                             "sus4", "b7", "9", "11", "13")
                         for rs in (6, 5, 4):
-                            res = derive_shape(ct, rs, f"gapfill-{ct}-{rs}",
-                                                bass_module_active=True,
-                                                prefer_low_interval_safe=prefer_low_interval_safe)
-                            if res is not None:
-                                shape, _ = res
-                                bucket = list(SHAPES_BY_KEY.get(key, ()))
-                                bucket.append(shape)
-                                SHAPES_BY_KEY[key] = tuple(bucket)
-                                ALL_SHAPES.append(shape)
-                                _DERIVED_SHAPES.append(shape)
+                            res = derive_shape(
+                                ct, rs, f"gapfill-{ct}-{rs}",
+                                bass_module_active=True,
+                                prefer_low_interval_safe=prefer_low_interval_safe,
+                            )
+                            if res is None:
+                                continue
+                            shape, _ = res
+                            bucket = list(SHAPES_BY_KEY.get(key, ()))
+                            bucket.append(shape)
+                            SHAPES_BY_KEY[key] = tuple(bucket)
+                            ALL_SHAPES.append(shape)
 
 
 _close_completeness_gaps()

@@ -14,22 +14,22 @@ slot has no candidate differentiators at all.
 """
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import Optional
 
 from .types import ChordEvent, Degree, DEGREE_RANK, EXT_SLOTS, SLOT_TO_ROLE
 from .corpus import is_vocabulary_member
 
 
-def compute_dct(chord: ChordEvent, degrees: list[Degree],
-                 gen_dir: str = None) -> tuple[Optional[str], list[str]]:
-    """Returns (dct_role, secondary_differentiator_roles).
-
-    dct_role is the highest-numbered differentiator's role (e.g. "7th",
-    "9th"), or None if the chord has no differentiators (bare triads, or
-    an extension whose removal never lands on a vocabulary member).
-    secondary_differentiator_roles are the OTHER differentiators found,
-    which must satisfy the weaker predicate (b) alone (§5.3).
-    """
+@lru_cache(maxsize=4096)
+def _compute_dct_for_type(chord_type: tuple, gen_dir: Optional[str]):
+    """Cache vocabulary membership checks shared by build-time derivation."""
+    triad, seventh, ninth, eleventh, thirteenth = chord_type
+    chord = ChordEvent(
+        root_interval=0, triad=triad, bass_interval=0,
+        seventh=seventh, ninth=ninth, eleventh=eleventh,
+        thirteenth=thirteenth,
+    )
     kwargs = {} if gen_dir is None else {"gen_dir": gen_dir}
     active_slots = [s for s in EXT_SLOTS if getattr(chord, s) != "N"]
     differentiators = []
@@ -46,12 +46,24 @@ def compute_dct(chord: ChordEvent, degrees: list[Degree],
             differentiators.append(SLOT_TO_ROLE[slot])
 
     if not differentiators:
-        return None, []
+        return None, ()
 
     differentiators.sort(key=lambda r: DEGREE_RANK[r])
-    dct_role = differentiators[-1]
-    secondary = differentiators[:-1]
-    return dct_role, secondary
+    return differentiators[-1], tuple(differentiators[:-1])
+
+
+def compute_dct(chord: ChordEvent, degrees: list[Degree],
+                 gen_dir: str = None) -> tuple[Optional[str], list[str]]:
+    """Returns (dct_role, secondary_differentiator_roles).
+
+    dct_role is the highest-numbered differentiator's role (e.g. "7th",
+    "9th"), or None if the chord has no differentiators (bare triads, or
+    an extension whose removal never lands on a vocabulary member).
+    secondary_differentiator_roles are the OTHER differentiators found,
+    which must satisfy the weaker predicate (b) alone (§5.3).
+    """
+    dct_role, secondary = _compute_dct_for_type(chord.chord_type(), gen_dir)
+    return dct_role, list(secondary)
 
 
 def dct_pitch_class(chord: ChordEvent, degrees: list[Degree], dct_role: str) -> Optional[int]:

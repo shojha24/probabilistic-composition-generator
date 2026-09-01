@@ -2,10 +2,9 @@
 Spec 07 §13 items 6-9 (property tests) + spec 01 §10 (voicer-specific tests)
 for the pop-piano voicer.
 
-Run over a configurable sample of gen/pop-rock-labels songs (default: all
-100, matching spec 07 §13's "over all 100 songs x 2 genres").
+Run over a configurable sample of gen/pop-rock-labels songs (or the available
+gen/target-pop-rock-labels counterpart) (default: all 100).
 """
-import glob
 import json
 import os
 import sys
@@ -13,17 +12,17 @@ import sys
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from voicing.types import Song
 from voicing.engine import Engine, VoicingImpossible
 from voicing.diversity import DiversityCounter
 from voicing.voicers import pop_piano
+from corpus_paths import corpus_files
 
-GEN_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "gen")
 
-
-def _songs(genre_dir="pop-rock-labels", limit=None):
-    paths = sorted(glob.glob(os.path.join(GEN_DIR, genre_dir, "*.json")))
+def _songs(genre_dir="pop-rock-labels", limit=None, voicer_family=None):
+    paths = corpus_files(genre_dir, voicer_family=voicer_family)
     if limit:
         paths = paths[:limit]
     out = []
@@ -58,7 +57,7 @@ def default_run():
     output across repeated calls), so caching it once per test module and
     sharing it across all default-param tests changes nothing about what's
     asserted -- only how many times the engine actually runs."""
-    return _run_all(_songs(limit=N))
+    return _run_all(_songs(limit=N, voicer_family="piano"))
 
 
 def test_no_pitch_outside_window(default_run):
@@ -177,7 +176,7 @@ def test_maj7_root_masking_zero_violations(default_run):
 def test_section_lift_and_drift_bound():
     """§10 item 4."""
     diversity = DiversityCounter()
-    songs = _songs(limit=min(N, 10))
+    songs = _songs(limit=min(N, 10), voicer_family="piano")
     verse_centroids = []
     chorus_centroids = []
     for i, song in enumerate(songs):

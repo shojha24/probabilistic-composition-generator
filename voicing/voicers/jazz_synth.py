@@ -35,6 +35,7 @@ def candidate_source(p: CandidateGenParams) -> list[Candidate]:
         p.anchor_center, p.prev_midi, p.doubling_roles, p.max_doublings,
         p.rng, anchor_shift=p.anchor_shift, doubling_pcs=doubling_pcs,
         cluster_min_gap=p.policy.extra.get("cluster_min_gap", 3),
+        forced_dct_role=getattr(p, "forced_dct_role", None),
         max_candidates=1000,
         templates=profiles,
         preferred_template=(
@@ -119,6 +120,9 @@ POLICY = VoicerPolicy(
            "spacing_exception_tensions": 2, "spacing_exception_voices": 6,
            "spacing_exception_max_gaps": 1,
            "voice_excess_penalty": 0.6, "voice_excess_growth": 1.8,
+           "dct_repair_ok": True, "max_repair_inputs": 64,
+           "max_secondary_assignments": 32, "max_repair_variants": 256,
+           "max_retained_hard_clean": 256,
            "template_profiles": ("balanced", "open", "shell_spread", "tension_top", "wide"),
            "rare_template_profiles": ("rare_feature", "root_spread"),
            "template_mismatch_penalty": 1.5,

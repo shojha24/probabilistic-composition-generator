@@ -1,4 +1,5 @@
 """Spec 07 §13 items 1-5: unit tests for the shared engine."""
+import dataclasses
 import itertools
 import random
 import sys
@@ -6,14 +7,27 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from voicing.types import ChordEvent, resolve_degrees, TRIAD_THIRD_FIFTH, EXT_SEMI
+from voicing.types import (
+    ChordEvent, Song, resolve_degrees, TRIAD_THIRD_FIFTH, EXT_SEMI,
+)
 from voicing.dct import compute_dct, predicate_top, predicate_isolated, predicate_octave
+from voicing.engine import Engine
 from voicing.vl import vl_distance
-from voicing.candidates import free_placement_templates, preferred_template_for
-from voicing.voicers import pop_piano
+from voicing.candidates import (
+    Candidate,
+    _clash_aware_free_candidates,
+    _clash_bipartition,
+    apply_doubling_variants,
+    dense_hand_layout,
+    dct_expose_repair,
+    free_placement_templates,
+    preferred_template_for,
+)
+from voicing.voicers import pop_piano, pop_synth
 from voicing.guitar.derive import derive_shape
-from voicing.guitar.model import realize
-from voicing.spacing import low_interval_limit_ok
+from voicing.guitar.library import make_shape_library_source
+from voicing.guitar.model import Shape, realize
+from voicing.spacing import low_interval_limit_ok, semitone_cluster_ok
 
 
 def test_degree_resolution_all_triads_and_tokens():
@@ -170,6 +184,153 @@ def test_derived_guitar_shape_prefers_low_register_safe_fingering():
     realized = realize(shape, chord_root_pc=10, max_fret=12)
     assert realized is not None
     assert low_interval_limit_ok(realized["pitches"])
+
+
+def test_forced_dct_copy_survives_single_variant_budget():
+    variants = apply_doubling_variants(
+        [("root", 60), ("7th", 71)],
+        ["root"],
+        {"root": 0, "7th": 11},
+        48, 84, 1, random.Random(1),
+        anchor_center=60, max_variants=1, forced_dct_role="7th",
+    )
+    assert len(variants) == 1
+    assert sum(role == "7th" for role, _pitch in variants[0]) == 2
+    assert abs(variants[0][-1][1] - 71) == 12
+
+
+def test_dct_repair_forced_copy_respects_existing_doublings():
+    candidate = Candidate([60, 71, 72], ["root", "7th", "root"])
+    repairs = list(dct_expose_repair(
+        candidate, "7th", [], "octave", 48, 84, 60,
+        max_voices=4, max_doublings=1,
+    ))
+    assert not any(repair.meta["forced_dct_copy"] for repair in repairs)
+
+
+def test_dense_layout_fallback_can_use_noncontiguous_hand_partition():
+    layouts = dense_hand_layout(
+        [("root", 0), ("3rd", 4), ("5th", 7), ("7th", 11)],
+        (48, 60), (55, 71), 3, 2, 14, 60, 4,
+        max_candidates=512,
+    )
+    assert layouts
+    assert any(
+        {role for pitch, role in zip(candidate.pitches, candidate.roles)
+         if pitch in candidate.hands["lh"]} == {"root", "5th"}
+        for candidate in layouts
+    )
+
+
+def test_dense_layout_forced_dct_respects_doubling_budget():
+    layouts = dense_hand_layout(
+        [("root", 0), ("3rd", 4), ("5th", 7), ("7th", 11)],
+        (48, 60), (55, 71), 3, 2, 14, 60, 5,
+        max_candidates=512, forced_dct_role="7th", max_doublings=0,
+    )
+    assert layouts
+    assert all(not candidate.meta["forced_dct_copy"] for candidate in layouts)
+
+
+def test_clash_fallback_keeps_non_clashing_roles_out_of_low_register_pack():
+    role_pcs = [
+        ("root", 4), ("3rd", 7), ("7th", 2),
+        ("9th", 6), ("11th", 9), ("13th", 1),
+    ]
+    role_pc_lookup = dict(role_pcs)
+    role_pc_lookup["5th"] = 11
+    colors = _clash_bipartition(list(role_pc_lookup.items()), 13)
+    candidates = _clash_aware_free_candidates(
+        role_pcs, role_pc_lookup, colors, 36, 96, 62, random.Random(1),
+        min_gap=13,
+    )
+
+    expected = [50, 55, 57, 64, 78, 85]
+    assert any(candidate.pitches == expected for candidate in candidates)
+    assert low_interval_limit_ok(expected)
+    assert semitone_cluster_ok(expected, 13)
+
+
+def test_post_filter_repair_can_use_dct_clean_candidate():
+    chord = ChordEvent(
+        root_interval=9, triad="minor", bass_interval=0,
+        seventh="b7", ninth="9", eleventh="11", thirteenth="13",
+    )
+    source_candidate = Candidate(
+        [38, 57, 59, 64, 80, 85],
+        ["3rd", "7th", "root", "11th", "13th", "9th"],
+    )
+    policy = dataclasses.replace(
+        pop_synth.POLICY,
+        candidate_source=lambda _params: [source_candidate],
+        dct_mode_weights={"top": 0.0, "isolated": 1.0, "octave": 0.0},
+    )
+    song = Song("pop_rock", 2, 120, 1, (chord,))
+
+    voiced = Engine(
+        policy,
+        {"bass_module_active": True, "section": "bridge", "seed": 1},
+        signature_bands=pop_synth.SIGNATURE_BANDS,
+    ).run(song)[0]
+
+    assert voiced.diagnostics["dct_repair"] is True
+    assert voiced.midi == [50, 57, 59, 64, 80, 85]
+
+
+def test_guitar_octave_source_phase_keeps_offset_metadata():
+    shape = Shape(
+        "E-dom7", 6, (0, 2, 0, 1, 0, 0),
+        ("root", "5th", "7th", "3rd", "5th", "root"),
+        (("major", "b7", "N", "N", "N"),), barre=True,
+    )
+    source = make_shape_library_source(
+        [shape], {("major", "b7"): (shape,)}, max_fret=15, max_fret_span=4,
+    )
+    chord = ChordEvent(
+        root_interval=0, triad="major", bass_interval=0, seventh="b7",
+    )
+    params = dict(
+        chord=chord, root_pc=4, degrees=resolve_degrees(chord),
+        dct_role="7th", ctx={"bass_module_active": True},
+    )
+    normal = source(type("Params", (), {**params, "source_phase": "normal"})())
+    offset = source(type("Params", (), {
+        **params, "source_phase": "guitar_octave",
+    })())
+    assert normal and all(candidate.meta["octave_offset"] == 0 for candidate in normal)
+    assert offset and all(
+        candidate.shape_id == "E-dom7@oct+12"
+        and candidate.meta["base_shape_id"] == "E-dom7"
+        and candidate.meta["octave_offset"] == 12
+        for candidate in offset
+    )
+
+
+def test_alternate_guitar_root_assignment_is_tagged_and_realizable():
+    result = derive_shape(
+        ("major", "b7", "9", "N", "N"), 6, "alternate-dom9",
+        retained_root_string=5,
+    )
+    assert result is not None
+    shape, _dropped = result
+    root_index = ("6", "5", "4", "3", "2", "1").index(str(5))
+    assert shape.retained_root_string == 5
+    assert shape.degrees[root_index] == "root"
+    assert "alternate_root" in shape.tags
+    realized = realize(shape, chord_root_pc=7, max_fret=15)
+    assert realized is not None
+    assert realized["root_fret"] >= shape.frets[root_index]
+
+
+def test_rootless_derivation_does_not_retain_an_alternate_root():
+    result = derive_shape(
+        ("major", "b7", "9", "N", "N"), 6, "rootless-dom9",
+        initial_dropped=("root",), retained_root_string=5,
+    )
+    assert result is not None
+    shape, _dropped = result
+    assert shape.retained_root_string is None
+    assert "alternate_root" not in shape.tags
 
 
 if __name__ == "__main__":

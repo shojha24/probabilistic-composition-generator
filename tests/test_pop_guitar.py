@@ -3,10 +3,10 @@ Spec 07 §13 items 6-9 (property tests, adapted for guitar's fretting model)
 plus spec 02 §9 (guitar-specific validation) for the pop-guitar voicer.
 
 Run over a configurable sample of gen/pop-rock-labels + gen/jazz-labels songs
-(default: 20 each via VOICING_TEST_N; scripts/validate.py runs the full
-100 x 2 corpus for the exact dataset-wide gates).
+(or the available target counterparts) (default: 20 each via
+VOICING_TEST_N; scripts/validate.py runs the full 100 x 2 corpus for the
+exact dataset-wide gates).
 """
-import glob
 import json
 import os
 import sys
@@ -15,6 +15,7 @@ from collections import Counter, defaultdict
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from voicing.types import Song, resolve_degrees, EXT_SLOTS, SLOT_TO_ROLE
 from voicing.engine import Engine, VoicingImpossible
@@ -23,23 +24,26 @@ from voicing.voicers import pop_guitar
 from voicing.guitar.model import realize, OPEN_STRINGS, STRING_NUMS
 from voicing.guitar.library import find_matching_shapes
 from voicing.dct import compute_dct
+from corpus_paths import corpus_files
 
-GEN_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "gen")
 N = int(os.environ.get("VOICING_TEST_N", "20"))
 
 
-def _songs(genre_dir="pop-rock-labels", limit=None):
-    paths = sorted(glob.glob(os.path.join(GEN_DIR, genre_dir, "*.json")))
+def _songs(genre_dir="pop-rock-labels", limit=None, voicer_family=None):
+    paths = corpus_files(genre_dir, voicer_family=voicer_family)
     if limit:
         paths = paths[:limit]
     return [Song.from_dict(json.load(open(p))) for p in paths]
 
 
-def _all_songs(limit=None):
-    return _songs("pop-rock-labels", limit) + _songs("jazz-labels", limit)
+def _all_songs(limit=None, voicer_family=None):
+    return (
+        _songs("pop-rock-labels", limit, voicer_family)
+        + _songs("jazz-labels", limit, voicer_family)
+    )
 
 
-def _shape_and_offset(shape_id):
+def _shape_and_offset(shape_id, chord_type=None):
     """Split an emitted shape_id like 'foo@oct+12' into (base_shape, offset)."""
     if "@oct" in shape_id:
         base_id, suffix = shape_id.split("@oct")
@@ -47,6 +51,12 @@ def _shape_and_offset(shape_id):
     else:
         base_id, offset = shape_id, 0
     shape = next((s for s in pop_guitar.ALL_SHAPES if s.id == base_id), None)
+    if shape is None and base_id.startswith("rootless-") and chord_type is not None:
+        from voicing.guitar.library import _derive_rootless_shapes
+        shape = next(
+            (s for s in _derive_rootless_shapes(chord_type) if s.id == base_id),
+            None,
+        )
     return shape, offset
 
 
@@ -68,14 +78,14 @@ def default_run():
     and a fresh `DiversityCounter` per call, per test_pop_piano.py's
     verification); caching it once per module avoids re-voicing the same
     corpus six times."""
-    return _run_all(_all_songs(limit=N))
+    return _run_all(_all_songs(limit=N, voicer_family="guitar"))
 
 
 @pytest.fixture(scope="module")
 def full_corpus_run():
     """Three tests below share this exact `_run_all(_all_songs())` (no
     limit) full-corpus run for the same reason as `default_run`."""
-    return _run_all(_all_songs())
+    return _run_all(_all_songs(voicer_family="guitar"))
 
 
 # ---------------------------------------------------------------------------
@@ -154,10 +164,10 @@ def test_playability_round_trip(default_run):
         for chord, v in zip(song.chords, out):
             assert v.shape_id is not None
             assert len(v.midi) <= 6
-            shape, offset = _shape_and_offset(v.shape_id)
+            shape, offset = _shape_and_offset(v.shape_id, chord.chord_type())
             assert shape is not None, f"no library shape for emitted shape_id {v.shape_id}"
             assert shape.span() <= 5
-            root_pc = chord.root_interval % 12
+            root_pc = (song.tonic_pc + chord.root_interval) % 12
             realized = realize(shape, root_pc, max_fret=pop_guitar.MAX_FRET, octave_offset=offset)
             assert realized is not None
             assert sorted(realized["pitches"]) == sorted(v.midi)
@@ -169,9 +179,9 @@ def test_string_legality(default_run):
     share a string."""
     for song, out, eng in default_run:
         for chord, v in zip(song.chords, out):
-            shape, offset = _shape_and_offset(v.shape_id)
+            shape, offset = _shape_and_offset(v.shape_id, chord.chord_type())
             assert shape is not None
-            root_pc = chord.root_interval % 12
+            root_pc = (song.tonic_pc + chord.root_interval) % 12
             realized = realize(shape, root_pc, max_fret=pop_guitar.MAX_FRET, octave_offset=offset)
             assert realized is not None
             strings = realized["strings"]
@@ -261,8 +271,9 @@ def test_no_fretboard_drift(full_corpus_run):
     for song, out, eng in full_corpus_run:
         root_frets = []
         for chord, v in zip(song.chords, out):
-            shape, offset = _shape_and_offset(v.shape_id)
-            realized = realize(shape, chord.root_interval % 12, max_fret=pop_guitar.MAX_FRET, octave_offset=offset)
+            shape, offset = _shape_and_offset(v.shape_id, chord.chord_type())
+            root_pc = (song.tonic_pc + chord.root_interval) % 12
+            realized = realize(shape, root_pc, max_fret=pop_guitar.MAX_FRET, octave_offset=offset)
             root_frets.append(realized["root_fret"])
         if len(root_frets) < 16:
             continue
