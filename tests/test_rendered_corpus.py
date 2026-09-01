@@ -63,7 +63,7 @@ def test_manifest_hash_and_score_pairing(tmp_path):
     score_path = tmp_path / "scores.txt"
     score_path.write_text(
         "START_SONG_0\n"
-        "T120 V0 I0 C4w+E4w+G4w  V1 I32 C3w\n"
+        "T120 V0 I0 C4w+E4w+G4w  V1 I32 C3w  V9 Rs\n"
         "END_SONG\n"
     )
     manifest_path = tmp_path / "scores.txt.manifest.json"
@@ -82,7 +82,7 @@ def test_manifest_hash_and_score_pairing(tmp_path):
     }))
 
     assert parse_score_blocks(score_path) == {
-        0: "T120 V0 I0 C4w+E4w+G4w  V1 I32 C3w"
+        0: "T120 V0 I0 C4w+E4w+G4w  V1 I32 C3w  V9 Rs"
     }
     report = validate_corpus(tmp_path, score_path, manifest_path, "pop_rock")
     assert report["pairing_errors"] == 0

@@ -11,7 +11,8 @@ The current pipeline has these Python stages:
    genre-specific durations.
 3. `chord_module.py` selects a genre-compatible voicer and renders pad chords.
 4. `bass_module.py` renders the generated bass notes.
-5. `render.py` combines the tracks into synchronized JFugue score text.
+5. `percussion_module.py` renders an optional synchronized percussion groove.
+6. `render.py` combines the tracks into synchronized JFugue score text.
 
 The voicing stage is documented in [`voicing/README.md`](voicing/README.md).
 It converts chord events into MIDI pitches after chord generation.
@@ -40,7 +41,7 @@ chord_gen.py
         +--> chord-event JSON files with durations
         |
         v
-chord_module.py + bass_module.py
+chord_module.py + bass_module.py + percussion_module.py
         |
         +--> synchronized JFugue score tracks
         |
@@ -219,14 +220,21 @@ sorted by numeric ID before rendering, so `song_10.json` follows
 Malformed filenames, duplicate numeric IDs within one directory, and
 duplicate input directories fail the render.
 
-`render.py` combines two tracks for each song:
+`render.py` combines three tracks for each song:
 
 - `chord_module.py` tries the renderer's six-voicer order, prioritizing the
   song's genre, and renders voiced block chords;
 - `bass_module.py` renders the generated bass pitch in a low register.
+- `percussion_module.py` repeats a seeded kick, snare, and cymbal groove on
+  voice `V9` (the General MIDI percussion channel). Each song has a 70%
+  chance of audible percussion; the remaining 30% retain a synchronized
+  silent `V9` track. When percussion is audible, songs at 60–120 BPM have a
+  20% chance of a cut-time (double-time) feel, while songs at 121–180 BPM have
+  a 20% chance of a half-time feel. The selected feel is recorded in the
+  manifest.
 
-The output uses `START_SONG_N` and `END_SONG` markers. Both tracks use the
-chord duration tokens, so they remain synchronized. `--mode arpeggios` is
+The output uses `START_SONG_N` and `END_SONG` markers. All three tracks use
+the chord duration timeline, so they remain synchronized. `--mode arpeggios` is
 part of the interface, but currently reports that arpeggio rendering is not
 implemented.
 
@@ -563,6 +571,7 @@ The current responsibilities are:
 | `target_corpus_gen.py` | Generate the separate quota-aware target corpus |
 | `chord_module.py` | Select a voicer and render pad chord tracks |
 | `bass_module.py` | Render bass tracks |
+| `percussion_module.py` | Render optional voice-9 percussion tracks |
 | `render.py` | Combine tracks into JFugue score text and manifests |
 | `eda/validate_rendered_corpus.py` | Validate manifest-paired rendered corpora |
 | `voicing/` | Select and realize MIDI voicings |

@@ -36,6 +36,7 @@ _NOTE_PC = {
     "A#": 10,
     "B": 11,
 }
+_VOICE = re.compile(r"^V\d+$")
 
 
 def _parse_note(token: str) -> int | None:
@@ -75,7 +76,17 @@ def parse_score_line(line: str) -> tuple[list[list[int]], list[list[int]]]:
         raise ValueError("score line must contain V0 and V1 tracks") from error
     if v1 <= v0:
         raise ValueError("V1 must follow V0 in a score line")
-    return _parse_track(tokens[v0 + 1:v1]), _parse_track(tokens[v1 + 1:])
+    next_voice = next(
+        (
+            index for index in range(v1 + 1, len(tokens))
+            if _VOICE.fullmatch(tokens[index])
+        ),
+        len(tokens),
+    )
+    return (
+        _parse_track(tokens[v0 + 1:v1]),
+        _parse_track(tokens[v1 + 1:next_voice]),
+    )
 
 
 def parse_score_blocks(path: str | Path) -> dict[int, str]:

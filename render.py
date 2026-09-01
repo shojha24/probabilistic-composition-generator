@@ -16,6 +16,7 @@ from pathlib import Path
 
 from bass_module import BassModule
 from chord_module import ChordModule, POLICIES
+from percussion_module import PercussionModule
 
 
 _SONG_FILENAME = re.compile(r"^song_(\d+)\.json$")
@@ -112,6 +113,7 @@ def _generator_revision() -> tuple[str, bool]:
             [
                 "git", "status", "--porcelain", "--untracked-files=normal",
                 "--", "chord_module.py", "render.py", "voicing", "eda",
+                "percussion_module.py",
             ],
             cwd=repo_root,
             check=True,
@@ -289,9 +291,14 @@ def _render_source(args: tuple) -> dict:
         pad_mode=mode == "pads",
         chord_midis=chord_module.last_voiced_midis,
     )
+    percussion_module = PercussionModule(seed=seed + index)
+    percussion_track = percussion_module.render(progression)
     return {
         "chord_track": chord_track,
         "bass_track": bass_track,
+        "percussion_track": percussion_track,
+        "percussion_included": percussion_module.last_included,
+        "percussion_feel": percussion_module.last_feel,
         "voicer": chord_module.last_voicer or "unknown",
         "voicer_genre": chord_module.last_voicer_genre,
         "voicer_family": chord_module.last_voicer_family,
@@ -311,7 +318,8 @@ def render_song(progression: dict, seed: int | None = None, mode: str = "pads") 
         bass_module_active=True,
     )
     bass = BassModule(seed=seed).render(progression)
-    return f"{chords}  {bass}"
+    percussion = PercussionModule(seed=seed).render(progression)
+    return "  ".join((chords, bass, percussion))
 
 
 def render_directory(
@@ -379,8 +387,11 @@ def render_directory(
                         )[result["voicer_family"]] += 1
                         chord_track = result["chord_track"]
                         bass_track = result["bass_track"]
+                        percussion_track = result["percussion_track"]
                         out.write(f"START_SONG_{index}\n")
-                        out.write(f"{chord_track}  {bass_track}\n")
+                        out.write(
+                            f"{chord_track}  {bass_track}  {percussion_track}\n"
+                        )
                         out.write("END_SONG\n")
                         manifest_records.append({
                             "ordinal": index,
@@ -402,6 +413,8 @@ def render_directory(
                             "voicer": voicer,
                             "voicer_genre": result["voicer_genre"],
                             "voicer_family": result["voicer_family"],
+                            "percussion_included": result["percussion_included"],
+                            "percussion_feel": result["percussion_feel"],
                             "seed": seed + index,
                             "voicing_summary": result["voicing_summary"],
                         })
@@ -412,6 +425,7 @@ def render_directory(
                             f"bass={result['bass_instrument']} "
                             f"[I{result['bass_program']}]"
                             f"{' (pad collapse)' if result['pad_collapse'] else ''}, {mode})"
+                            f", percussion={'on' if result['percussion_included'] else 'off'}"
                         )
 
         manifest = {
