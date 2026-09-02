@@ -9,7 +9,8 @@ The current pipeline has these Python stages:
 1. `extract_distributions.py` learns count tables from normalized JAMS files.
 2. `chord_gen.py` samples chord-event sequences from those tables and assigns
    genre-specific durations.
-3. `chord_module.py` selects a genre-compatible voicer and renders pad chords.
+3. `chord_module.py` selects a genre-compatible voicer and renders pad or
+   instrument-aware arpeggiated chords.
 4. `bass_module.py` renders the generated bass notes.
 5. `percussion_module.py` renders an optional synchronized percussion groove.
 6. `render.py` combines the tracks into synchronized JFugue score text.
@@ -213,6 +214,27 @@ python render.py \
   --seed 7
 ```
 
+Render a deterministic percentage mix across the input songs:
+
+```bash
+python render.py \
+  --in-dir ./gen/target-jazz-labels \
+  --in-dir ./gen/target-pop-rock-labels \
+  --out ./gen/mixed_scores.txt \
+  --mode mixed \
+  --arpeggio-percent 30 \
+  --pad-percent 70 \
+  --seed 7
+```
+
+Mixed mode selects the rendering mode once per source song using the supplied
+seed and allocates the nearest whole-song count to each percentage. The
+percentages must sum to 100; either percentage may be omitted and is inferred
+as the complement. The per-song `render_mode` values and aggregate
+`render_mode_counts`, `render_mode_percentages`, and `render_mode_targets`
+are recorded in the manifest. Existing `pads` and `arpeggios` modes remain
+single-mode renders.
+
 Directory rendering requires an explicit integer `--seed` and accepts one or
 more `--in-dir` values. Each directory's source files are validated and
 sorted by numeric ID before rendering, so `song_10.json` follows
@@ -223,7 +245,8 @@ duplicate input directories fail the render.
 `render.py` combines three tracks for each song:
 
 - `chord_module.py` tries the renderer's six-voicer order, prioritizing the
-  song's genre, and renders voiced block chords;
+  song's genre, and renders either voiced block chords or profile-driven
+  arpeggios from those same selected voicings;
 - `bass_module.py` renders the generated bass pitch in a low register.
 - `percussion_module.py` repeats a seeded kick, snare, and cymbal groove on
   voice `V9` (the General MIDI percussion channel). Each song has a 70%
@@ -234,9 +257,25 @@ duplicate input directories fail the render.
   manifest.
 
 The output uses `START_SONG_N` and `END_SONG` markers. All three tracks use
-the chord duration timeline, so they remain synchronized. `--mode arpeggios` is
-part of the interface, but currently reports that arpeggio rendering is not
-implemented.
+the chord duration timeline, so they remain synchronized. In arpeggio mode,
+each playable source event emits every selected V0 pitch exactly once on a
+profile-selected sixteenth or eighth-note grid. A pair of adjacent pitches may
+share an onset, and every arpeggiated note ends at the source-event boundary
+with at least an eighth note of sustain. If a source event cannot fit the
+complete pass while preserving that sustain tail, it is rendered as a
+simultaneous pad chord instead. No-chord events remain duration-sized rests.
+The manifest records the performance profile, timing, pair/onset counts,
+per-event pad fallbacks, pattern provenance, source voicings, and guitar
+string metadata. Timed V0 scores also carry `#ARPEVENT<n>` marker metadata at
+source boundaries so the Java humanizer can preserve those limits; the
+markers do not produce notes.
+
+Built-in profiles use a 35% chance of an eligible eighth-note pass when the
+profile's fast-tempo preference does not already select eighths, and a 25%
+chance of pairing each available adjacent pitch pair. Pairs are forced when
+they are required to fit the complete voicing and its eighth-note sustain tail
+in the selected chord duration. Events too short even with forced pairs use
+the simultaneous pad fallback.
 
 The chord track is written to JFugue voice `V0` and the bass track to `V1`.
 Each note in a block chord receives the duration token. This keeps all chord
@@ -249,7 +288,10 @@ source directory, source SHA-256, genre, tonic, BPM, chord count, selected
 voicer, per-song seed, render command, and generator revision. The manifest is
 the authoritative pairing between source labels and `START_SONG_N` score
 blocks. It also records the six-voicer preference order and aggregate
-`voicer_counts`.
+`voicer_counts`. Arpeggio records additionally include the selected
+performance profile, fixed 4/4 meter, per-event subdivision/onset/attack/pair
+counts, pattern and motif provenance, sustain-to-event-end behavior, source
+voicing MIDI lists, and guitar string metadata when applicable.
 Each failed fallback voicer is logged with its policy and failing chord before
 the next voicer is tried. If every policy fails, the raised error repeats the
 complete per-voicer failure list. A voicing failure stops the render; events
@@ -498,12 +540,21 @@ MIDI sequence
 
 - reads generated chord-event JSON files;
 - selects among six genre-family voicers, prioritizing the source genre;
-- renders pad chords and bass notes;
+- renders pad or instrument-aware timed arpeggios and bass notes;
 - preserves each chord's duration token in both tracks;
 - writes `START_SONG_N` and `END_SONG` blocks;
 - writes a manifest sidecar for numeric source ordering and provenance.
 
-Arpeggio mode is exposed by the interface but is not implemented yet.
+Arpeggio mode schedules one attack for each note in the selected voicing
+without changing the voicing, bass, or percussion decisions. Keyboard and
+synth profiles use ascending pitch order; guitar profiles use the voicing
+engine's physical string order. Attacks are normally sixteenth notes, with a
+probabilistic eighth-note choice when the source chord is long enough for the
+complete pass and its minimum eighth-note sustain tail. Adjacent notes may
+also share an onset according to the profile's pair probability. Every
+arpeggiated attack uses an absolute-time numeric JFugue duration that carries
+it to the end of its source chord. If neither grid can satisfy the sustain
+requirement, the event uses a simultaneous pad-style chord token instead.
 
 `HumanizedMidiRenderer.java` provides the next, Java-based conversion step. It:
 
@@ -569,7 +620,7 @@ The current responsibilities are:
 | `extract_distributions.py` | Learn count tables |
 | `chord_gen.py` | Sample natural timed symbolic chord events |
 | `target_corpus_gen.py` | Generate the separate quota-aware target corpus |
-| `chord_module.py` | Select a voicer and render pad chord tracks |
+| `chord_module.py` | Select a voicer and render pad or arpeggio chord tracks |
 | `bass_module.py` | Render bass tracks |
 | `percussion_module.py` | Render optional voice-9 percussion tracks |
 | `render.py` | Combine tracks into JFugue score text and manifests |
@@ -606,7 +657,6 @@ The project has these known limits:
 - NO_CHORD events are not currently generated.
 - The Java renderer remains a proof of concept and is not invoked by
   `render.py`.
-- Arpeggio rendering is not implemented.
 - Melody tracks are yet to be generated.
 - Statistical distribution targets need larger calibration reports.
 - Extended guitar shapes use an explicit programmatic derivation because

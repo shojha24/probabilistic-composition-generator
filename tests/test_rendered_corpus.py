@@ -4,6 +4,7 @@ import logging
 import os
 import random
 import sys
+from collections import Counter
 from types import SimpleNamespace
 
 import pytest
@@ -12,7 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import chord_module
 from eda.validate_rendered_corpus import parse_score_blocks, validate_corpus
-from render import _source_files
+from render import _render_mode_plan, _source_files, render_directory
 from voicing.dct import compute_dct
 from voicing.engine import Engine, VoicingImpossible
 from voicing.types import ChordEvent, Song, resolve_degrees
@@ -54,6 +55,82 @@ def test_numeric_source_order_and_filename_validation(tmp_path):
     (tmp_path / "song_bad.json").write_text(json.dumps(_label()))
     with pytest.raises(ValueError, match="Malformed song filename"):
         _source_files(str(tmp_path))
+
+
+def test_mixed_render_mode_plan_is_seeded_and_exact():
+    modes, effective_mode, targets = _render_mode_plan(
+        "mixed", 10, 7, arpeggio_percent=30, pad_percent=70
+    )
+    assert effective_mode == "mixed"
+    assert modes.count("arpeggios") == 3
+    assert modes.count("pads") == 7
+    assert targets == {"arpeggios": 30.0, "pads": 70.0}
+    repeated, _, _ = _render_mode_plan(
+        "mixed", 10, 7, arpeggio_percent=30, pad_percent=70
+    )
+    assert repeated == modes
+
+    inferred, _, inferred_targets = _render_mode_plan(
+        "pads", 10, 7, arpeggio_percent=30
+    )
+    assert inferred.count("arpeggios") == 3
+    assert inferred_targets == {"arpeggios": 30.0, "pads": 70.0}
+
+    with pytest.raises(ValueError, match="sum to 100"):
+        _render_mode_plan(
+            "mixed", 10, 7, arpeggio_percent=30, pad_percent=60
+        )
+    with pytest.raises(ValueError, match="requires"):
+        _render_mode_plan("mixed", 10, 7)
+
+
+def test_mixed_render_directory_records_each_mode(tmp_path):
+    for index in range(4):
+        progression = _label()
+        progression["chords"][0]["duration_token"] = "q"
+        (tmp_path / f"song_{index}.json").write_text(
+            json.dumps(progression)
+        )
+
+    output = tmp_path / "mixed-scores.txt"
+    render_directory(
+        tmp_path,
+        str(output),
+        seed=7,
+        mode="mixed",
+        arpeggio_percent=50,
+        pad_percent=50,
+    )
+    manifest = json.loads(
+        output.with_name(output.name + ".manifest.json").read_text()
+    )
+    report = validate_corpus(
+        tmp_path,
+        output,
+        output.with_name(output.name + ".manifest.json"),
+        expected_genre="pop_rock",
+    )
+
+    assert manifest["render_mode"] == "mixed"
+    assert manifest["render_mode_counts"] == {
+        "arpeggios": 2,
+        "pads": 2,
+    }
+    assert manifest["render_mode_percentages"] == {
+        "arpeggios": 50.0,
+        "pads": 50.0,
+    }
+    assert manifest["render_mode_targets"] == {
+        "arpeggios": 50.0,
+        "pads": 50.0,
+    }
+    assert Counter(
+        record["render_mode"] for record in manifest["records"]
+    ) == Counter({"arpeggios": 2, "pads": 2})
+    assert "--mode mixed" in manifest["command"]
+    assert len(parse_score_blocks(output)) == 4
+    assert report["pairing_errors"] == 0
+    assert report["hard_failure_count"] == 0
 
 
 def test_manifest_hash_and_score_pairing(tmp_path):

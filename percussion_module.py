@@ -79,9 +79,9 @@ class PercussionModule:
 
     @staticmethod
     def _event_duration_token(event: object) -> str:
-        if not isinstance(event, dict):
-            return "w"
-        return event.get("duration_token", "w")
+        if isinstance(event, dict):
+            return event.get("duration_token", "w")
+        return getattr(event, "duration_token", "w")
 
     @classmethod
     def _slot_count(cls, event: object) -> int:

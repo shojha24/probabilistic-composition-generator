@@ -28,10 +28,14 @@ class BassModule:
         if not 0.0 <= self.pad_collapse_probability <= 1.0:
             raise ValueError("pad_collapse_probability must be between 0 and 1")
         rng = random.Random(self.seed)
+        collapse_draw = (
+            rng.random() if pad_instrument is not None else None
+        )
         self.collapsed_to_pad = (
             pad_mode
             and pad_instrument is not None
-            and rng.random() < self.pad_collapse_probability
+            and collapse_draw is not None
+            and collapse_draw < self.pad_collapse_probability
         )
         if self.collapsed_to_pad:
             self.last_instrument = pad_instrument

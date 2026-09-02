@@ -33,13 +33,19 @@ def _load_all_events(gen_dir: str = _DEFAULT_GEN_DIR) -> tuple:
 def chord_type_vocabulary(gen_dir: str = _DEFAULT_GEN_DIR) -> frozenset:
     """The set of (triad, seventh, ninth, eleventh, thirteenth) tuples
     observed anywhere in the corpus (root-invariant, spec 07 §2.4/§8.2)."""
-    return frozenset(e.chord_type() for e in _load_all_events(gen_dir))
+    return frozenset(
+        e.chord_type()
+        for e in _load_all_events(gen_dir)
+        if not e.is_no_chord
+    )
 
 
 @lru_cache(maxsize=1)
 def chord_type_counts(gen_dir: str = _DEFAULT_GEN_DIR) -> dict:
     counts: dict = {}
     for e in _load_all_events(gen_dir):
+        if e.is_no_chord:
+            continue
         ct = e.chord_type()
         counts[ct] = counts.get(ct, 0) + 1
     return counts

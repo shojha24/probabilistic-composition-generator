@@ -5,7 +5,9 @@ import argparse
 from concurrent.futures import ProcessPoolExecutor
 import hashlib
 import json
+import math
 import os
+import random
 import re
 import shlex
 import subprocess
@@ -16,10 +18,12 @@ from pathlib import Path
 
 from bass_module import BassModule
 from chord_module import ChordModule, POLICIES
+from instruments import ARPEGGIO_PROFILES
 from percussion_module import PercussionModule
 
 
 _SONG_FILENAME = re.compile(r"^song_(\d+)\.json$")
+_RENDER_MODES = ("pads", "arpeggios")
 _SOURCE_GENRES = ("jazz", "pop_rock")
 _VOICER_FAMILIES = ("piano", "guitar", "synth")
 _VOICER_ID_BY_GENRE_FAMILY = {
@@ -112,8 +116,9 @@ def _generator_revision() -> tuple[str, bool]:
         dirty = subprocess.run(
             [
                 "git", "status", "--porcelain", "--untracked-files=normal",
-                "--", "chord_module.py", "render.py", "voicing", "eda",
-                "percussion_module.py",
+                "--", "chord_module.py", "instruments.py", "render.py",
+                "voicing", "eda", "percussion_module.py",
+                "HumanizedMidiRenderer.java",
             ],
             cwd=repo_root,
             check=True,
@@ -130,16 +135,111 @@ def _manifest_path(output: str) -> Path:
     return output_path.with_name(output_path.name + ".manifest.json")
 
 
+def _percentage(value: float | int, name: str) -> float:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(float(value))
+        or not 0 <= float(value) <= 100
+    ):
+        raise ValueError(f"{name} must be a finite percentage between 0 and 100")
+    return float(value)
+
+
+def _render_mode_plan(
+    mode: str,
+    file_count: int,
+    seed: int,
+    arpeggio_percent: float | None = None,
+    pad_percent: float | None = None,
+) -> tuple[list[str], str, dict[str, float]]:
+    """Return deterministic per-song modes and the requested split."""
+    if mode not in (*_RENDER_MODES, "mixed"):
+        raise ValueError(
+            "mode must be 'pads', 'arpeggios', or 'mixed'"
+        )
+    if (
+        isinstance(file_count, bool)
+        or not isinstance(file_count, int)
+        or file_count < 0
+    ):
+        raise ValueError("file_count must be a non-negative integer")
+    if isinstance(seed, bool) or not isinstance(seed, int):
+        raise ValueError("seed must be an integer")
+
+    percentages_requested = (
+        arpeggio_percent is not None or pad_percent is not None
+    )
+    if not percentages_requested:
+        if mode == "mixed":
+            raise ValueError(
+                "mixed mode requires --arpeggio-percent or --pad-percent"
+            )
+        percentages = {
+            "arpeggios": 100.0 if mode == "arpeggios" else 0.0,
+            "pads": 100.0 if mode == "pads" else 0.0,
+        }
+        return [mode] * file_count, mode, percentages
+
+    if mode == "arpeggios":
+        raise ValueError(
+            "percentage options cannot be combined with --mode arpeggios; "
+            "use --mode mixed"
+        )
+    arpeggios = (
+        _percentage(arpeggio_percent, "arpeggio_percent")
+        if arpeggio_percent is not None else None
+    )
+    pads = (
+        _percentage(pad_percent, "pad_percent")
+        if pad_percent is not None else None
+    )
+    if arpeggios is None:
+        arpeggios = 100.0 - pads
+    if pads is None:
+        pads = 100.0 - arpeggios
+    if not math.isclose(arpeggios + pads, 100.0, rel_tol=0, abs_tol=1e-9):
+        raise ValueError("arpeggio_percent and pad_percent must sum to 100")
+    pads = 100.0 - arpeggios
+
+    arpeggio_count = min(
+        file_count,
+        max(0, math.floor(file_count * arpeggios / 100.0 + 0.5)),
+    )
+    arpeggio_indexes = set(
+        random.Random(seed).sample(range(file_count), arpeggio_count)
+    )
+    modes = [
+        "arpeggios" if index in arpeggio_indexes else "pads"
+        for index in range(file_count)
+    ]
+    return modes, "mixed", {
+        "arpeggios": arpeggios,
+        "pads": pads,
+    }
+
+
 def _render_command(
     input_dirs: list[str],
     output: str,
     seed: int,
     mode: str,
+    render_mode_percentages: dict[str, float] | None = None,
 ) -> str:
-    return shlex.join([
+    command = [
         sys.executable, "render.py", "--in-dir", *input_dirs,
         "--out", output, "--mode", mode, "--seed", str(seed),
-    ])
+    ]
+    if mode == "mixed":
+        if render_mode_percentages is None:
+            raise ValueError("mixed render commands require percentage targets")
+        command.extend([
+            "--arpeggio-percent",
+            f"{render_mode_percentages['arpeggios']:g}",
+            "--pad-percent",
+            f"{render_mode_percentages['pads']:g}",
+        ])
+    return shlex.join(command)
 
 
 def _voicing_summary(chord_module: ChordModule) -> dict:
@@ -173,6 +273,62 @@ def _voicing_summary(chord_module: ChordModule) -> dict:
         "extension_drop_count": extension_drops,
         "extension_drops": extension_drop_records,
     }
+
+
+def _arpeggio_manifest(chord_module: ChordModule) -> dict:
+    diagnostics = chord_module.last_arpeggio_diagnostics
+    profile_id = chord_module.last_arpeggio_profile
+    if profile_id not in ARPEGGIO_PROFILES:
+        raise ValueError(
+            f"Missing arpeggio profile for rendered chord module: {profile_id!r}"
+        )
+    profile = ARPEGGIO_PROFILES[profile_id]
+    result = {
+        "performance_profile": profile_id,
+        "meter": "4/4",
+        "event_subdivisions": [
+            item.get("subdivision") for item in diagnostics
+        ],
+        "event_onset_counts": [
+            int(item.get("onset_count", 0)) for item in diagnostics
+        ],
+        "event_attack_counts": [
+            int(item.get("attack_count", 0)) for item in diagnostics
+        ],
+        "event_pair_counts": [
+            int(item.get("pair_count", 0)) for item in diagnostics
+        ],
+        "event_pad_fallbacks": [
+            item.get("pad_fallback") is True for item in diagnostics
+        ],
+        "event_pattern_families": [
+            item.get("pattern_family") for item in diagnostics
+        ],
+        "event_motif_families": [
+            item.get("motif_family") for item in diagnostics
+        ],
+        "event_start_phases": [
+            item.get("start_phase") for item in diagnostics
+        ],
+        "sustain_to_event_end": True,
+        "gate_ratio": profile.gate_ratio,
+        "eighth_probability": profile.eighth_probability,
+        "pair_probability": profile.pair_probability,
+        "source_voicing_midis": [
+            list(midis) for midis in chord_module.last_voiced_midis
+        ],
+        "source_sounding_strings": [
+            list(item.get("source_sounding_strings") or ())
+            for item in diagnostics
+        ],
+        "event_supercycle_lengths": [
+            item.get("supercycle_length") for item in diagnostics
+        ],
+        "event_source_index_cycles": [
+            item.get("source_index_cycle") for item in diagnostics
+        ],
+    }
+    return result
 
 
 def _no_chord_summary(progression: dict) -> dict:
@@ -326,16 +482,27 @@ def _render_source(args: tuple) -> dict:
         "bass_program": bass_module.last_instrument.program,
         "pad_collapse": bass_module.collapsed_to_pad,
         "voicing_summary": _voicing_summary(chord_module),
+        "render_mode": mode,
+        "arpeggio": (
+            _arpeggio_manifest(chord_module)
+            if mode == "arpeggios" else None
+        ),
     }
 
 
 def render_song(progression: dict, seed: int | None = None, mode: str = "pads") -> str:
-    chords = ChordModule(mode=mode, seed=seed).render(
+    chord_module = ChordModule(mode=mode, seed=seed)
+    chords = chord_module.render(
         progression,
         preferred_family=progression.get("voicer_family"),
         bass_module_active=True,
     )
-    bass = BassModule(seed=seed).render(progression)
+    bass = BassModule(seed=seed).render(
+        progression,
+        pad_instrument=chord_module.selected_instrument,
+        pad_mode=mode == "pads",
+        chord_midis=chord_module.last_voiced_midis,
+    )
     percussion = PercussionModule(seed=seed).render(progression)
     return "  ".join((chords, bass, percussion))
 
@@ -345,11 +512,22 @@ def render_directory(
     output: str,
     seed: int | None = None,
     mode: str = "pads",
+    *,
+    arpeggio_percent: float | None = None,
+    pad_percent: float | None = None,
 ) -> None:
     if not isinstance(seed, int) or isinstance(seed, bool):
         raise ValueError("render_directory requires an explicit integer seed")
     input_dir_list = _input_dir_list(input_dir)
     files = _source_files(input_dir_list)
+    render_modes, effective_mode, render_mode_targets = _render_mode_plan(
+        mode,
+        len(files),
+        seed,
+        arpeggio_percent,
+        pad_percent,
+    )
+    render_mode_counts = Counter(render_modes)
     source_dirs = [
         str(Path(input_dir).resolve()) for input_dir in input_dir_list
     ]
@@ -387,7 +565,13 @@ def render_directory(
                         projected_counts[order[0]] += 1
                         voicer_orders.append(order)
                     render_args = (
-                        (batch_start + offset, raw, seed, mode, voicer_order)
+                        (
+                            batch_start + offset,
+                            raw,
+                            seed,
+                            render_modes[batch_start + offset],
+                            voicer_order,
+                        )
                         for offset, (
                             (_source_id, _path, raw, _progression, _source_dir),
                             voicer_order,
@@ -436,6 +620,8 @@ def render_directory(
                             "voicer": voicer,
                             "voicer_genre": result["voicer_genre"],
                             "voicer_family": result["voicer_family"],
+                            "render_mode": result["render_mode"],
+                            "arpeggio": result["arpeggio"],
                             "percussion_included": result["percussion_included"],
                             "percussion_feel": result["percussion_feel"],
                             "seed": seed + index,
@@ -448,19 +634,41 @@ def render_directory(
                             f"[I{result['instrument_program']}], "
                             f"bass={result['bass_instrument']} "
                             f"[I{result['bass_program']}]"
-                            f"{' (pad collapse)' if result['pad_collapse'] else ''}, {mode})"
+                            f"{' (pad collapse)' if result['pad_collapse'] else ''}, "
+                            f"{result['render_mode']})"
                             f", percussion={'on' if result['percussion_included'] else 'off'}"
                         )
 
         manifest = {
             "manifest_version": 1,
-            "command": _render_command(input_dir_list, output, seed, mode),
+            "command": _render_command(
+                input_dir_list,
+                output,
+                seed,
+                effective_mode,
+                render_mode_targets if effective_mode == "mixed" else None,
+            ),
             "seed": seed,
             "source_dir": source_dirs[0] if len(source_dirs) == 1 else None,
             "source_dirs": source_dirs,
             "output": str(output_path.resolve()),
             "generator_revision": revision,
             "generator_revision_dirty": dirty,
+            "render_mode": effective_mode,
+            "render_mode_counts": {
+                render_mode: render_mode_counts.get(render_mode, 0)
+                for render_mode in _RENDER_MODES
+            },
+            "render_mode_percentages": {
+                render_mode: (
+                    100.0 * render_mode_counts.get(render_mode, 0) / len(render_modes)
+                    if render_modes else 0.0
+                )
+                for render_mode in _RENDER_MODES
+            },
+            "render_mode_targets": (
+                render_mode_targets if effective_mode == "mixed" else None
+            ),
             "voicer_counts": {
                 voicer: voicer_counts.get(voicer, 0)
                 for voicer in _VOICER_IDS
@@ -570,10 +778,36 @@ def main() -> None:
     )
     parser.add_argument("--out", required=True)
     parser.add_argument("--seed", type=int)
-    parser.add_argument("--mode", choices=("pads", "arpeggios"), default="pads")
+    parser.add_argument(
+        "--mode",
+        choices=("pads", "arpeggios", "mixed"),
+        default="pads",
+        help="Render all songs as pads, arpeggios, or a percentage mix.",
+    )
+    parser.add_argument(
+        "--arpeggio-percent",
+        "--arpeggio-percentage",
+        dest="arpeggio_percent",
+        type=float,
+        help="Target percentage of songs rendered as arpeggios.",
+    )
+    parser.add_argument(
+        "--pad-percent",
+        "--pad-percentage",
+        dest="pad_percent",
+        type=float,
+        help="Target percentage of songs rendered as pads.",
+    )
     args = parser.parse_args()
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
-    render_directory(args.in_dir, args.out, args.seed, args.mode)
+    render_directory(
+        args.in_dir,
+        args.out,
+        args.seed,
+        args.mode,
+        arpeggio_percent=args.arpeggio_percent,
+        pad_percent=args.pad_percent,
+    )
 
 
 if __name__ == "__main__":

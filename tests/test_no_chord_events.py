@@ -1,3 +1,4 @@
+import json
 import sys
 from pathlib import Path
 
@@ -10,6 +11,7 @@ from chord_gen import apply_no_chord_filter, no_chord_summary
 from chord_module import ChordModule
 from percussion_module import PercussionModule
 from voicing.engine import Engine
+from voicing import corpus
 from voicing.types import ChordEvent, Song, VoicedChord, resolve_degrees
 from voicing.voicers import pop_piano
 
@@ -108,3 +110,32 @@ def test_harmonic_tracks_rest_while_percussion_is_unchanged():
     assert PercussionModule(seed=2, omission_probability=0).render(
         {**progression, "chords": [playable]}
     ) == PercussionModule(seed=2, omission_probability=0).render(progression)
+
+
+def test_corpus_chord_vocabulary_ignores_no_chord_events(tmp_path):
+    labels_dir = tmp_path / "fixture-labels"
+    labels_dir.mkdir()
+    no_chord = {
+        **_event(),
+        "is_no_chord": True,
+        "root_interval": None,
+        "triad": None,
+        "bass_interval": None,
+        "root": None,
+        "bass": None,
+        "harte": "N",
+    }
+    (labels_dir / "song_0.json").write_text(json.dumps({
+        "chords": [_event(), no_chord],
+    }))
+    corpus._load_all_events.cache_clear()
+    corpus.chord_type_vocabulary.cache_clear()
+    corpus.chord_type_counts.cache_clear()
+    try:
+        chord_type = ("major", "N", "N", "N", "N")
+        assert corpus.chord_type_vocabulary(str(tmp_path)) == {chord_type}
+        assert corpus.chord_type_counts(str(tmp_path)) == {chord_type: 1}
+    finally:
+        corpus._load_all_events.cache_clear()
+        corpus.chord_type_vocabulary.cache_clear()
+        corpus.chord_type_counts.cache_clear()

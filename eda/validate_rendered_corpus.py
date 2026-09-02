@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import re
 import sys
 from collections import defaultdict
@@ -11,6 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from chord_gen import DURATION_BEATS
 from voicing.dct import (
     compute_dct,
     predicate_isolated,
@@ -21,7 +23,11 @@ from voicing.types import EXT_SLOTS, SLOT_TO_ROLE, Song, resolve_degrees
 
 
 _SOURCE_NAME = re.compile(r"^song_(\d+)\.json$")
-_NOTE = re.compile(r"^([A-G])(#?)(-?\d+)(ww|w\.?|h\.?|q\.?)$")
+_NOTE = re.compile(
+    r"^([A-G])(#?)(-?\d+)"
+    r"(?:(ww|w\.?|h\.?|q\.?|s)|/(\d+(?:\.\d+)?))"
+    r"(?:A(\d+))?$"
+)
 _NOTE_PC = {
     "C": 0,
     "C#": 1,
@@ -37,11 +43,15 @@ _NOTE_PC = {
     "B": 11,
 }
 _VOICE = re.compile(r"^V\d+$")
+_AT = re.compile(r"^@(\d+(?:\.\d+)?)$")
+_ARPEGGIO_BOUNDARY = re.compile(r"^#ARPEVENT(\d+)$")
+_ARPEGGIO_GRID_STEPS = {"sixteenth": 1, "eighth": 2}
+_ARPEGGIO_MIN_SUSTAIN_SIXTEENTHS = 2
 
 
 def _parse_note(token: str) -> int | None:
     if token.startswith("R"):
-        if token[1:] not in {"ww", "w.", "w", "h.", "h", "q.", "q"}:
+        if token[1:] not in {*DURATION_BEATS, "s"}:
             raise ValueError(f"invalid rest token {token!r}")
         return None
     match = _NOTE.fullmatch(token)
@@ -52,40 +62,167 @@ def _parse_note(token: str) -> int | None:
     return 12 * (octave + 1) + _NOTE_PC[name]
 
 
-def _parse_track(tokens: list[str]) -> list[list[int]]:
+def _standard_duration_sixteenths(duration: str) -> float:
+    if duration == "s":
+        return 1.0
+    return DURATION_BEATS[duration] * 4
+
+
+def _parse_track_details(tokens: list[str]) -> list[dict]:
     events = []
+    pending_onset = None
     for token in tokens:
         if token.startswith(("T", "V", "I")):
             continue
+        if token.startswith("@"):
+            match = _AT.fullmatch(token)
+            if match is None:
+                raise ValueError(f"invalid absolute-time token {token!r}")
+            if pending_onset is not None:
+                raise ValueError(
+                    f"absolute-time token {token!r} has no following event"
+                )
+            onset = float(match.group(1)) * 16
+            pending_onset = (
+                int(round(onset)) if onset.is_integer() else onset
+            )
+            continue
+        if token.startswith("R"):
+            _parse_note(token)
+            events.append({
+                "midis": [],
+                "duration": token[1:],
+                "duration_sixteenths": _standard_duration_sixteenths(token[1:]),
+                "velocity": None,
+                "onset_sixteenths": pending_onset,
+                "is_rest": True,
+                "token": token,
+            })
+            pending_onset = None
+            continue
+        if token.startswith("#"):
+            if _ARPEGGIO_BOUNDARY.fullmatch(token) is None:
+                raise ValueError(f"invalid arpeggio boundary marker {token!r}")
+            events.append({
+                "midis": [],
+                "duration": None,
+                "duration_sixteenths": 0.0,
+                "velocity": None,
+                "onset_sixteenths": pending_onset,
+                "is_rest": False,
+                "is_timeline_marker": True,
+                "boundary_event_index": int(
+                    _ARPEGGIO_BOUNDARY.fullmatch(token).group(1)
+                ),
+                "token": token,
+            })
+            pending_onset = None
+            continue
+        percussion_parts = token.split("+")
+        if percussion_parts and all(
+            re.fullmatch(r"\[[A-Z0-9_]+\]s", part)
+            for part in percussion_parts
+        ):
+            events.append({
+                "midis": [],
+                "duration": "s",
+                "duration_sixteenths": 1.0,
+                "velocity": None,
+                "onset_sixteenths": pending_onset,
+                "is_rest": False,
+                "percussion": True,
+                "token": token,
+            })
+            pending_onset = None
+            continue
         notes = []
+        duration_values = []
+        velocities = []
         for note_token in token.split("+"):
-            midi = _parse_note(note_token)
-            if midi is not None:
-                notes.append(midi)
-        events.append(notes)
+            match = _NOTE.fullmatch(note_token)
+            if match is None:
+                raise ValueError(f"invalid JFugue note token {note_token!r}")
+            notes.append(_parse_note(note_token))
+            duration = match.group(4)
+            numeric_duration = match.group(5)
+            duration_values.append(
+                ("standard", duration)
+                if duration is not None
+                else ("numeric", float(numeric_duration))
+            )
+            velocities.append(
+                int(match.group(6)) if match.group(6) is not None else None
+            )
+        if len(set(duration_values)) != 1:
+            raise ValueError(
+                f"chord token has mixed durations {token!r}"
+            )
+        duration_kind, duration_value = duration_values[0]
+        events.append({
+            "midis": notes,
+            "duration": duration_value if duration_kind == "standard" else None,
+            "duration_sixteenths": (
+                _standard_duration_sixteenths(duration_value)
+                if duration_kind == "standard"
+                else duration_value * 16
+            ),
+            "velocity": velocities[0] if len(set(velocities)) == 1 else None,
+            "velocities": velocities,
+            "onset_sixteenths": pending_onset,
+            "is_rest": False,
+            "is_timeline_marker": False,
+            "token": token,
+        })
+        pending_onset = None
+    if pending_onset is not None:
+        raise ValueError("absolute-time token has no following event")
     return events
+
+
+def parse_score_line_voice_details(line: str) -> dict[str, list[dict]]:
+    """Return detailed events for every voice in one score line."""
+    tokens = line.split()
+    voice_positions = [
+        index for index, token in enumerate(tokens) if _VOICE.fullmatch(token)
+    ]
+    if not voice_positions:
+        raise ValueError("score line must contain voice tracks")
+    voices = {}
+    for position_index, start in enumerate(voice_positions):
+        voice = tokens[start]
+        if voice in voices:
+            raise ValueError(f"score line contains duplicate {voice} track")
+        end = (
+            voice_positions[position_index + 1]
+            if position_index + 1 < len(voice_positions)
+            else len(tokens)
+        )
+        voices[voice] = _parse_track_details(tokens[start + 1:end])
+    if "V0" not in voices or "V1" not in voices:
+        raise ValueError("score line must contain V0 and V1 tracks")
+    return voices
+
+
+def parse_score_line_detailed(line: str) -> tuple[list[dict], list[dict]]:
+    """Return parsed chord and bass tokens, including duration metadata."""
+    voices = parse_score_line_voice_details(line)
+    return voices["V0"], voices["V1"]
+
+
+def _parse_track(tokens: list[str]) -> list[list[int]]:
+    return [
+        event["midis"]
+        for event in _parse_track_details(tokens)
+        if not event.get("is_timeline_marker")
+    ]
 
 
 def parse_score_line(line: str) -> tuple[list[list[int]], list[list[int]]]:
     """Return chord-track and bass-track MIDI events from one score line."""
-    tokens = line.split()
-    try:
-        v0 = tokens.index("V0")
-        v1 = tokens.index("V1")
-    except ValueError as error:
-        raise ValueError("score line must contain V0 and V1 tracks") from error
-    if v1 <= v0:
-        raise ValueError("V1 must follow V0 in a score line")
-    next_voice = next(
-        (
-            index for index in range(v1 + 1, len(tokens))
-            if _VOICE.fullmatch(tokens[index])
-        ),
-        len(tokens),
-    )
+    chord_tokens, bass_tokens = parse_score_line_detailed(line)
     return (
-        _parse_track(tokens[v0 + 1:v1]),
-        _parse_track(tokens[v1 + 1:next_voice]),
+        [event["midis"] for event in chord_tokens],
+        [event["midis"] for event in bass_tokens],
     )
 
 
@@ -182,6 +319,1007 @@ def _load_manifest(path: Path) -> dict:
     if not isinstance(data, dict) or not isinstance(data.get("records"), list):
         raise ValueError(f"{path} must contain a records array")
     return data
+
+
+def _arpeggio_slot_count(duration: object) -> int:
+    if not isinstance(duration, str):
+        raise ValueError(f"Unknown duration token {duration!r}")
+    try:
+        beats = DURATION_BEATS[duration]
+    except KeyError:
+        raise ValueError(f"Unknown duration token {duration!r}") from None
+    slots = beats * 4
+    if not float(slots).is_integer():
+        raise ValueError(
+            f"Duration token {duration!r} cannot be represented on a "
+            "sixteenth-note arpeggio grid"
+        )
+    return int(slots)
+
+
+def _track_timeline_sixteenths(
+    track: list[dict],
+    absolute: bool = False,
+) -> float:
+    if not absolute:
+        return sum(float(event["duration_sixteenths"]) for event in track)
+    cursor = 0.0
+    for event in track:
+        if event.get("is_timeline_marker"):
+            onset = event.get("onset_sixteenths")
+            if onset is not None:
+                cursor = max(cursor, float(onset))
+            continue
+        onset = event.get("onset_sixteenths")
+        duration = float(event["duration_sixteenths"])
+        if onset is None:
+            cursor += duration
+        else:
+            cursor = max(cursor, float(onset) + duration)
+    return cursor
+
+
+def _validate_timed_arpeggio_track(
+    chord_tokens: list[dict],
+    bass_tokens: list[dict],
+    percussion_tokens: list[dict] | None,
+    song: Song,
+    record: dict,
+    issues: list[dict],
+) -> tuple[list[list[int]], int]:
+    """Validate spec 13 timed attacks and return their source voicings."""
+    failures = 0
+
+    def fail(
+        category: str,
+        event_index: int | None = None,
+        detail: str | None = None,
+        midi: list[int] | None = None,
+    ) -> None:
+        nonlocal failures
+        _issue(
+            issues, category, record, event_index,
+            midi=midi, detail=detail,
+        )
+        failures += 1
+
+    info = record.get("arpeggio")
+    if not isinstance(info, dict):
+        fail("arpeggio_manifest_missing")
+        info = {}
+
+    profile_id = info.get("performance_profile")
+    profile = None
+    try:
+        from instruments import ARPEGGIO_PROFILES
+        profile = ARPEGGIO_PROFILES[profile_id]
+    except (ImportError, KeyError, TypeError):
+        fail(
+            "arpeggio_profile_invalid",
+            detail=f"profile={profile_id!r}",
+        )
+    if info.get("meter") != "4/4":
+        fail(
+            "arpeggio_meter_invalid",
+            detail=f"expected='4/4' actual={info.get('meter')!r}",
+        )
+    gate_ratio = info.get("gate_ratio")
+    if (
+        isinstance(gate_ratio, bool)
+        or not isinstance(gate_ratio, (int, float))
+        or not math.isfinite(float(gate_ratio))
+        or gate_ratio <= 0
+    ):
+        fail("arpeggio_gate_ratio_invalid")
+        gate_ratio = 1.0
+    elif profile is not None and not math.isclose(
+        float(gate_ratio), profile.gate_ratio, rel_tol=0, abs_tol=1e-9
+    ):
+        fail(
+            "arpeggio_gate_ratio_mismatch",
+            detail=(
+                f"profile={profile.gate_ratio} "
+                f"manifest={gate_ratio}"
+            ),
+        )
+    sustain_to_event_end = info.get("sustain_to_event_end") is True
+
+    event_count = len(song.chords)
+
+    def array(name: str) -> list:
+        value = info.get(name)
+        if not isinstance(value, list) or len(value) != event_count:
+            fail(
+                f"arpeggio_{name}_invalid",
+                detail=f"expected {event_count} values",
+            )
+            return [None] * event_count
+        return value
+
+    def optional_array(name: str) -> list:
+        value = info.get(name)
+        if value is None:
+            return [None] * event_count
+        if not isinstance(value, list) or len(value) != event_count:
+            fail(
+                f"arpeggio_{name}_invalid",
+                detail=f"expected {event_count} values",
+            )
+            return [None] * event_count
+        return value
+
+    subdivisions = array("event_subdivisions")
+    onset_counts = array("event_onset_counts")
+    attack_counts = optional_array("event_attack_counts")
+    pair_counts = optional_array("event_pair_counts")
+    pad_fallbacks = optional_array("event_pad_fallbacks")
+    normalized_pad_fallbacks = []
+    for event_index, value in enumerate(pad_fallbacks):
+        if value is None:
+            normalized_pad_fallbacks.append(False)
+        elif isinstance(value, bool):
+            normalized_pad_fallbacks.append(value)
+        else:
+            fail(
+                "arpeggio_pad_fallback_invalid",
+                event_index,
+                detail=f"actual={value!r}",
+            )
+            normalized_pad_fallbacks.append(False)
+    pad_fallbacks = normalized_pad_fallbacks
+    pattern_families = array("event_pattern_families")
+    motif_families = array("event_motif_families")
+    start_phases = array("event_start_phases")
+
+    raw_source = info.get("source_voicing_midis")
+    source_shape_valid = (
+        isinstance(raw_source, list)
+        and len(raw_source) == event_count
+    )
+    if not source_shape_valid:
+        fail(
+            "arpeggio_source_voicing_count_mismatch",
+            detail=f"expected {event_count} source voicing lists",
+        )
+    source_midis = [[] for _ in song.chords]
+    if isinstance(raw_source, list):
+        for event_index, value in enumerate(raw_source[:event_count]):
+            if (
+                not isinstance(value, list)
+                or any(
+                    not isinstance(pitch, int) or isinstance(pitch, bool)
+                    for pitch in value
+                )
+            ):
+                fail(
+                    "arpeggio_source_voicing_invalid",
+                    event_index,
+                )
+                continue
+            source_midis[event_index] = list(value)
+
+    source_strings = info.get("source_sounding_strings")
+    if profile is not None and profile.family == "guitar":
+        if not isinstance(source_strings, list) or len(source_strings) != event_count:
+            fail(
+                "arpeggio_guitar_provenance_invalid",
+                detail=f"expected {event_count} string lists",
+            )
+            source_strings = [[] for _ in song.chords]
+        for event_index, chord in enumerate(song.chords):
+            strings = source_strings[event_index]
+            if chord.is_no_chord:
+                if strings != []:
+                    fail(
+                        "arpeggio_guitar_provenance_invalid",
+                        event_index,
+                        detail="no-chord events must have no sounding strings",
+                    )
+                continue
+            if (
+                not isinstance(strings, list)
+                or len(strings) != len(source_midis[event_index])
+                or any(
+                    isinstance(string, bool)
+                    or not isinstance(string, int)
+                    or string < 1
+                    or string > 6
+                    for string in strings
+                )
+                or len(set(strings)) != len(strings)
+            ):
+                fail(
+                    "arpeggio_guitar_provenance_invalid",
+                    event_index,
+                    detail="sounding_strings must be distinct integers 1..6",
+                )
+
+    expected_counts = []
+    event_starts = []
+    event_ends = []
+    absolute_position = 0
+    for event_index, chord in enumerate(song.chords):
+        event_start = absolute_position
+        try:
+            source_units = _arpeggio_slot_count(chord.duration_token)
+        except ValueError as error:
+            fail(
+                "arpeggio_source_duration_invalid",
+                event_index,
+                detail=str(error),
+            )
+            source_units = 0
+        absolute_position += source_units
+        event_starts.append(event_start)
+        event_ends.append(absolute_position)
+        subdivision = subdivisions[event_index]
+        declared_count = onset_counts[event_index]
+        declared_count_valid = (
+            isinstance(declared_count, int)
+            and not isinstance(declared_count, bool)
+            and declared_count >= 0
+        )
+        pad_fallback = pad_fallbacks[event_index]
+        if chord.is_no_chord:
+            expected_count = 0
+            if pad_fallback:
+                fail(
+                    "arpeggio_pad_fallback_invalid",
+                    event_index,
+                    detail="no-chord events cannot use pad fallback",
+                )
+            if subdivision is not None:
+                fail(
+                    "arpeggio_subdivision_invalid",
+                    event_index,
+                    detail="no-chord events must declare null subdivision",
+                )
+            if source_midis[event_index]:
+                fail(
+                    "arpeggio_no_chord_source_voicing",
+                    event_index,
+                    midi=source_midis[event_index],
+                )
+        else:
+            if pad_fallback:
+                expected_count = 1
+                if subdivision is not None:
+                    fail(
+                        "arpeggio_pad_fallback_subdivision_invalid",
+                        event_index,
+                    )
+                if declared_count_valid and declared_count != 0:
+                    fail(
+                        "arpeggio_pad_fallback_onset_count_invalid",
+                        event_index,
+                        detail=f"actual={declared_count}",
+                    )
+            elif subdivision not in {"sixteenth", "eighth"}:
+                fail(
+                    "arpeggio_subdivision_invalid",
+                    event_index,
+                    detail=f"subdivision={subdivision!r}",
+                )
+                expected_count = 0
+            else:
+                onsets_per_beat = 4 if subdivision == "sixteenth" else 2
+                count = DURATION_BEATS[chord.duration_token] * onsets_per_beat
+                expected_count = int(count) if float(count).is_integer() else 0
+                if not float(count).is_integer():
+                    fail(
+                        "arpeggio_subdivision_duration_invalid",
+                        event_index,
+                    )
+            if not source_midis[event_index]:
+                fail("arpeggio_source_voicing_empty", event_index)
+            if sustain_to_event_end and declared_count_valid and not pad_fallback:
+                step = _ARPEGGIO_GRID_STEPS.get(subdivision)
+                minimum_count = math.ceil(len(source_midis[event_index]) / 2)
+                if declared_count < minimum_count:
+                    fail(
+                        "arpeggio_onset_count_too_small",
+                        event_index,
+                        detail=f"minimum={minimum_count} actual={declared_count}",
+                    )
+                if declared_count > len(source_midis[event_index]):
+                    fail(
+                        "arpeggio_onset_count_too_large",
+                        event_index,
+                        detail=(
+                            f"maximum={len(source_midis[event_index])} "
+                            f"actual={declared_count}"
+                        ),
+                    )
+                if step is not None and declared_count * step > source_units:
+                    fail(
+                        "arpeggio_onset_grid_exceeds_event",
+                        event_index,
+                    )
+                if (
+                    step is not None
+                    and (
+                        max(0, declared_count - 1) * step
+                        + _ARPEGGIO_MIN_SUSTAIN_SIXTEENTHS
+                        > source_units
+                    )
+                ):
+                    fail(
+                        "arpeggio_sustain_tail_unavailable",
+                        event_index,
+                    )
+                if (
+                    subdivision == "eighth"
+                    and declared_count * 2 > source_units
+                ):
+                    fail(
+                        "arpeggio_eighth_grid_exceeds_event",
+                        event_index,
+                    )
+                expected_count = declared_count
+        expected_counts.append(expected_count)
+        if (
+            not declared_count_valid
+            or (not sustain_to_event_end and declared_count != expected_count)
+        ):
+            fail(
+                "arpeggio_onset_count_mismatch",
+                event_index,
+                detail=(
+                    f"expected={expected_count} actual={declared_count!r}"
+                ),
+            )
+        if sustain_to_event_end and attack_counts[event_index] is not None:
+            declared_attacks = attack_counts[event_index]
+            expected_attacks = (
+                0
+                if chord.is_no_chord or pad_fallback
+                else len(source_midis[event_index])
+            )
+            if (
+                not isinstance(declared_attacks, int)
+                or isinstance(declared_attacks, bool)
+                or declared_attacks != expected_attacks
+            ):
+                fail(
+                    "arpeggio_attack_count_mismatch",
+                    event_index,
+                    detail=(
+                        f"expected={expected_attacks} "
+                        f"actual={declared_attacks!r}"
+                    ),
+                )
+        if sustain_to_event_end and pair_counts[event_index] is not None:
+            declared_pairs = pair_counts[event_index]
+            if (
+                not isinstance(declared_pairs, int)
+                or isinstance(declared_pairs, bool)
+                or declared_pairs < 0
+                or declared_pairs > expected_count
+                or (pad_fallback and declared_pairs != 0)
+            ):
+                fail(
+                    "arpeggio_pair_count_invalid",
+                    event_index,
+                )
+        if chord.is_no_chord or pad_fallback:
+            if pattern_families[event_index] is not None:
+                fail(
+                    "arpeggio_pattern_provenance_invalid",
+                    event_index,
+                )
+            if motif_families[event_index] is not None:
+                fail(
+                    "arpeggio_motif_provenance_invalid",
+                    event_index,
+                )
+            if start_phases[event_index] is not None:
+                fail(
+                    "arpeggio_phase_provenance_invalid",
+                    event_index,
+                )
+        else:
+            if pattern_families[event_index] not in {
+                "up", "down", "up_down", "outside_in"
+            }:
+                fail(
+                    "arpeggio_pattern_provenance_invalid",
+                    event_index,
+                )
+            if motif_families[event_index] not in {
+                "straight", "bass_return", "top_return", "light_alternate"
+            }:
+                fail(
+                    "arpeggio_motif_provenance_invalid",
+                    event_index,
+                )
+            if (
+                not isinstance(start_phases[event_index], int)
+                or isinstance(start_phases[event_index], bool)
+                or start_phases[event_index] < 0
+            ):
+                fail(
+                    "arpeggio_phase_provenance_invalid",
+                    event_index,
+                )
+
+    if info.get("event_supercycle_lengths") is not None:
+        supercycle_lengths = array("event_supercycle_lengths")
+    else:
+        supercycle_lengths = [None] * event_count
+
+    epsilon = 1e-6
+    boundary_markers = [
+        token for token in chord_tokens
+        if token.get("is_timeline_marker")
+    ]
+    attack_tokens = [
+        token for token in chord_tokens
+        if not token.get("is_timeline_marker")
+    ]
+    if boundary_markers:
+        if len(boundary_markers) != event_count:
+            fail(
+                "arpeggio_boundary_marker_count_mismatch",
+                detail=(
+                    f"expected={event_count} "
+                    f"actual={len(boundary_markers)}"
+                ),
+            )
+        marker_indices = [
+            marker.get("boundary_event_index") for marker in boundary_markers
+        ]
+        if marker_indices != list(range(event_count)):
+            fail(
+                "arpeggio_boundary_marker_order_invalid",
+                detail=f"actual={marker_indices!r}",
+            )
+        for marker in boundary_markers:
+            marker_index = marker.get("boundary_event_index")
+            if (
+                not isinstance(marker_index, int)
+                or isinstance(marker_index, bool)
+                or not 0 <= marker_index < event_count
+                or marker.get("onset_sixteenths") is None
+                or not math.isclose(
+                    float(marker["onset_sixteenths"]),
+                    event_ends[marker_index],
+                    rel_tol=0,
+                    abs_tol=epsilon,
+                )
+            ):
+                fail(
+                    "arpeggio_boundary_marker_invalid",
+                    detail=f"marker={marker.get('token')!r}",
+                )
+
+    expected_token_count = sum(
+        1 if chord.is_no_chord or pad_fallbacks[event_index] else count
+        for event_index, (chord, count) in enumerate(
+            zip(song.chords, expected_counts)
+        )
+    )
+    if len(attack_tokens) != expected_token_count:
+        fail(
+            "arpeggio_token_count_mismatch",
+            detail=(
+                f"expected={expected_token_count} "
+                f"actual={len(attack_tokens)}"
+            ),
+        )
+    if len(bass_tokens) != event_count:
+        fail(
+            "arpeggio_bass_timeline_mismatch",
+            detail=(
+                f"expected={event_count} bass events "
+                f"actual={len(bass_tokens)}"
+            ),
+        )
+    if percussion_tokens is None:
+        fail("arpeggio_percussion_timeline_missing")
+    cursor = 0
+    for event_index, (chord, expected_count) in enumerate(
+        zip(song.chords, expected_counts)
+    ):
+        pad_fallback = pad_fallbacks[event_index]
+        token_count = (
+            1
+            if chord.is_no_chord or pad_fallback
+            else expected_count
+        )
+        available = min(token_count, max(0, len(attack_tokens) - cursor))
+        group = attack_tokens[cursor:cursor + available]
+        cursor += available
+        if len(group) != token_count:
+            fail(
+                "arpeggio_event_token_count_mismatch",
+                event_index,
+                detail=f"expected={token_count} actual={len(group)}",
+            )
+            continue
+        if chord.is_no_chord:
+            token = group[0]
+            if (
+                not token["is_rest"]
+                or token["duration"] != chord.duration_token
+                or token.get("onset_sixteenths") is None
+                or not math.isclose(
+                    float(token["onset_sixteenths"]),
+                    event_starts[event_index],
+                    rel_tol=0,
+                    abs_tol=epsilon,
+                )
+            ):
+                fail(
+                    "arpeggio_no_chord_rest_mismatch",
+                    event_index,
+                    detail=f"expected @ {event_starts[event_index]} R{chord.duration_token}",
+                )
+            continue
+        if pad_fallback:
+            token = group[0]
+            if (
+                token["is_rest"]
+                or token["duration"] != chord.duration_token
+                or token.get("onset_sixteenths") is None
+                or not math.isclose(
+                    float(token["onset_sixteenths"]),
+                    event_starts[event_index],
+                    rel_tol=0,
+                    abs_tol=epsilon,
+                )
+                or sorted(token["midis"]) != sorted(source_midis[event_index])
+            ):
+                fail(
+                    "arpeggio_pad_fallback_token_mismatch",
+                    event_index,
+                    detail=(
+                        f"expected @ {event_starts[event_index]} "
+                        f"{chord.duration_token} "
+                        f"{source_midis[event_index]}"
+                    ),
+                )
+            continue
+
+        subdivision = subdivisions[event_index]
+        step = _ARPEGGIO_GRID_STEPS.get(subdivision)
+        attacked_midis = []
+        actual_pair_count = 0
+        for slot, token in enumerate(group):
+            onset = token.get("onset_sixteenths")
+            allowed_widths = {1, 2} if sustain_to_event_end else {1}
+            if token["is_rest"] or len(token["midis"]) not in allowed_widths:
+                fail(
+                    "arpeggio_token_shape",
+                    event_index,
+                    detail=(
+                        "timed arpeggio attacks must contain "
+                        f"{'one or two' if sustain_to_event_end else 'one'} notes"
+                    ),
+                )
+                continue
+            if len(token["midis"]) == 2:
+                actual_pair_count += 1
+            attacked_midis.extend(token["midis"])
+            for pitch in token["midis"]:
+                if pitch not in source_midis[event_index]:
+                    fail(
+                        "arpeggio_pitch_not_in_source_voicing",
+                        event_index,
+                        midi=[pitch],
+                        detail=f"source={source_midis[event_index]}",
+                    )
+            if onset is None:
+                fail(
+                    "arpeggio_onset_missing",
+                    event_index,
+                )
+                continue
+            if onset < event_starts[event_index] or onset >= event_ends[event_index]:
+                fail(
+                    "arpeggio_onset_outside_event",
+                    event_index,
+                    detail=(
+                        f"onset={onset} event="
+                        f"[{event_starts[event_index]}, {event_ends[event_index]})"
+                    ),
+                )
+            if slot == 0 and not math.isclose(
+                float(onset), event_starts[event_index],
+                rel_tol=0, abs_tol=epsilon,
+            ):
+                fail(
+                    "arpeggio_first_onset_mismatch",
+                    event_index,
+                    detail=f"expected={event_starts[event_index]} actual={onset}",
+                )
+            if step is not None:
+                expected_onset = event_starts[event_index] + slot * step
+                if not math.isclose(
+                    float(onset), expected_onset,
+                    rel_tol=0, abs_tol=epsilon,
+                ):
+                    fail(
+                        "arpeggio_onset_grid_mismatch",
+                        event_index,
+                        detail=f"expected={expected_onset} actual={onset}",
+                    )
+            duration_sixteenths = token.get("duration_sixteenths")
+            if (
+                isinstance(duration_sixteenths, bool)
+                or not isinstance(duration_sixteenths, (int, float))
+                or not math.isfinite(float(duration_sixteenths))
+                or duration_sixteenths <= 0
+            ):
+                fail("arpeggio_note_duration_invalid", event_index)
+                continue
+            if token.get("duration") is not None:
+                fail(
+                    "arpeggio_timed_duration_missing",
+                    event_index,
+                )
+            velocities = token.get("velocities", ())
+            if (
+                len(velocities) != len(token["midis"])
+                or any(
+                    isinstance(velocity, bool)
+                    or not isinstance(velocity, int)
+                    or not 1 <= velocity <= 127
+                    for velocity in velocities
+                )
+            ):
+                fail("arpeggio_velocity_invalid", event_index)
+            note_off = float(onset) + float(duration_sixteenths)
+            if note_off <= float(onset):
+                fail("arpeggio_note_off_invalid", event_index)
+            if note_off > event_ends[event_index] + epsilon:
+                fail(
+                    "arpeggio_note_off_beyond_event",
+                    event_index,
+                    detail=(
+                        f"note_off={note_off} "
+                        f"event_end={event_ends[event_index]}"
+                    ),
+                )
+            if sustain_to_event_end:
+                if (
+                    float(event_ends[event_index]) - float(onset)
+                    < _ARPEGGIO_MIN_SUSTAIN_SIXTEENTHS - epsilon
+                ):
+                    fail(
+                        "arpeggio_sustain_too_short",
+                        event_index,
+                    )
+                if not math.isclose(
+                    note_off,
+                    float(event_ends[event_index]),
+                    rel_tol=0,
+                    abs_tol=epsilon,
+                ):
+                    fail(
+                        "arpeggio_note_not_sustained_to_event_end",
+                        event_index,
+                        detail=(
+                            f"note_off={note_off} "
+                            f"event_end={event_ends[event_index]}"
+                        ),
+                    )
+            elif step is not None and duration_sixteenths > (
+                step * float(gate_ratio) + epsilon
+            ):
+                fail("arpeggio_gate_invalid", event_index)
+
+        if sustain_to_event_end:
+            if sorted(attacked_midis) != sorted(source_midis[event_index]):
+                fail(
+                    "arpeggio_voicing_coverage_mismatch",
+                    event_index,
+                    detail=(
+                        f"source={source_midis[event_index]} "
+                        f"attacked={attacked_midis}"
+                    ),
+                )
+            declared_pairs = pair_counts[event_index]
+            if (
+                declared_pairs is not None
+                and declared_pairs != actual_pair_count
+            ):
+                fail(
+                    "arpeggio_pair_count_mismatch",
+                    event_index,
+                    detail=(
+                        f"expected={declared_pairs} "
+                        f"actual={actual_pair_count}"
+                    ),
+                )
+
+        supercycle = supercycle_lengths[event_index]
+        if (
+            isinstance(supercycle, int)
+            and not isinstance(supercycle, bool)
+            and supercycle > 0
+            and len(group) >= supercycle
+            and len(source_midis[event_index]) > 0
+        ):
+            covered = {
+                pitch
+                for token in group
+                if not token["is_rest"]
+                for pitch in token["midis"]
+            }
+            if not set(source_midis[event_index]) <= covered:
+                fail(
+                    "arpeggio_motif_coverage",
+                    event_index,
+                    detail=(
+                        f"source={source_midis[event_index]} "
+                        f"attacked={sorted(covered)}"
+                    ),
+                )
+
+    if cursor != len(attack_tokens):
+        fail(
+            "arpeggio_extra_tokens",
+            detail=f"unconsumed={len(attack_tokens) - cursor}",
+        )
+
+    for event_index, chord in enumerate(song.chords):
+        if event_index >= len(bass_tokens):
+            continue
+        token = bass_tokens[event_index]
+        if (
+            token["is_rest"] != chord.is_no_chord
+            or token["duration"] != chord.duration_token
+            or (not chord.is_no_chord and len(token["midis"]) != 1)
+        ):
+            fail(
+                "arpeggio_bass_timeline_mismatch",
+                event_index,
+                detail=f"expected duration={chord.duration_token!r}",
+            )
+
+    expected_timeline = float(absolute_position)
+    v0_timeline = _track_timeline_sixteenths(chord_tokens, absolute=True)
+    v1_timeline = _track_timeline_sixteenths(bass_tokens)
+    if not math.isclose(v0_timeline, expected_timeline, rel_tol=0, abs_tol=epsilon):
+        fail(
+            "arpeggio_v0_timeline_mismatch",
+            detail=f"expected={expected_timeline} actual={v0_timeline}",
+        )
+    if not math.isclose(v1_timeline, expected_timeline, rel_tol=0, abs_tol=epsilon):
+        fail(
+            "arpeggio_bass_timeline_mismatch",
+            detail=f"expected={expected_timeline} actual={v1_timeline}",
+        )
+    if percussion_tokens is not None:
+        v9_timeline = _track_timeline_sixteenths(percussion_tokens)
+        if not math.isclose(
+            v9_timeline, expected_timeline, rel_tol=0, abs_tol=epsilon
+        ):
+            fail(
+                "arpeggio_percussion_timeline_mismatch",
+                detail=f"expected={expected_timeline} actual={v9_timeline}",
+            )
+    return source_midis, failures
+
+
+def _validate_legacy_arpeggio_track(
+    chord_tokens: list[dict],
+    bass_tokens: list[dict],
+    song: Song,
+    record: dict,
+    issues: list[dict],
+) -> tuple[list[list[int]], int]:
+    """Validate arpeggio expansion and return its source voicings."""
+    failures = 0
+
+    def fail(
+        category: str,
+        event_index: int | None = None,
+        detail: str | None = None,
+        midi: list[int] | None = None,
+    ) -> None:
+        nonlocal failures
+        _issue(
+            issues, category, record, event_index,
+            midi=midi, detail=detail,
+        )
+        failures += 1
+
+    info = record.get("arpeggio")
+    if not isinstance(info, dict):
+        fail("arpeggio_manifest_missing")
+        info = {}
+    if info.get("subdivision") != "sixteenth":
+        fail(
+            "arpeggio_subdivision_invalid",
+            detail=f"expected='sixteenth' actual={info.get('subdivision')!r}",
+        )
+
+    raw_counts = info.get("event_slot_counts")
+    counts_valid = (
+        isinstance(raw_counts, list)
+        and all(
+            isinstance(value, int) and not isinstance(value, bool)
+            and value >= 0
+            for value in raw_counts
+        )
+    )
+    if not counts_valid:
+        fail("arpeggio_slot_counts_invalid")
+        raw_counts = []
+
+    raw_source = info.get("source_voicing_midis")
+    source_shape_valid = (
+        isinstance(raw_source, list)
+        and len(raw_source) == len(song.chords)
+    )
+    if not source_shape_valid:
+        fail(
+            "arpeggio_source_voicing_count_mismatch",
+            detail=f"expected {len(song.chords)} source voicing lists",
+        )
+    source_midis = [[] for _ in song.chords]
+    if isinstance(raw_source, list):
+        for event_index, value in enumerate(raw_source[:len(song.chords)]):
+            if (
+                not isinstance(value, list)
+                or any(
+                    not isinstance(pitch, int) or isinstance(pitch, bool)
+                    for pitch in value
+                )
+            ):
+                fail(
+                    "arpeggio_source_voicing_invalid",
+                    event_index,
+                )
+                continue
+            source_midis[event_index] = list(value)
+
+    expected_counts = []
+    for event_index, chord in enumerate(song.chords):
+        try:
+            slots = _arpeggio_slot_count(chord.duration_token)
+        except ValueError as error:
+            fail(
+                "arpeggio_source_duration_invalid",
+                event_index,
+                detail=str(error),
+            )
+            slots = 0
+        expected_counts.append(0 if chord.is_no_chord else slots)
+        if chord.is_no_chord and source_midis[event_index]:
+            fail(
+                "arpeggio_no_chord_source_voicing",
+                event_index,
+                midi=source_midis[event_index],
+            )
+        elif not chord.is_no_chord and not source_midis[event_index]:
+            fail("arpeggio_source_voicing_empty", event_index)
+
+    if counts_valid and raw_counts != expected_counts:
+        fail(
+            "arpeggio_slot_count_mismatch",
+            detail=f"expected={expected_counts} actual={raw_counts}",
+        )
+
+    expected_token_count = sum(
+        1 if chord.is_no_chord else count
+        for chord, count in zip(song.chords, expected_counts)
+    )
+    if len(chord_tokens) != expected_token_count:
+        fail(
+            "arpeggio_token_count_mismatch",
+            detail=(
+                f"expected={expected_token_count} "
+                f"actual={len(chord_tokens)}"
+            ),
+        )
+    if len(bass_tokens) != len(song.chords):
+        fail(
+            "arpeggio_bass_timeline_mismatch",
+            detail=(
+                f"expected={len(song.chords)} bass events "
+                f"actual={len(bass_tokens)}"
+            ),
+        )
+
+    cursor = 0
+    for event_index, (chord, slot_count) in enumerate(
+        zip(song.chords, expected_counts)
+    ):
+        token_count = 1 if chord.is_no_chord else slot_count
+        available = min(token_count, max(0, len(chord_tokens) - cursor))
+        group = chord_tokens[cursor:cursor + available]
+        cursor += available
+        if len(group) != token_count:
+            fail(
+                "arpeggio_event_token_count_mismatch",
+                event_index,
+                detail=f"expected={token_count} actual={len(group)}",
+            )
+            continue
+        if chord.is_no_chord:
+            token = group[0]
+            if (
+                not token["is_rest"]
+                or token["duration"] != chord.duration_token
+            ):
+                fail(
+                    "arpeggio_no_chord_rest_mismatch",
+                    event_index,
+                    detail=f"expected R{chord.duration_token}",
+                )
+            continue
+        for token in group:
+            if (
+                token["is_rest"]
+                or token["duration"] != "s"
+                or len(token["midis"]) != 1
+            ):
+                fail(
+                    "arpeggio_token_shape",
+                    event_index,
+                    detail="playable arpeggio slots must be one sixteenth note",
+                )
+                continue
+            pitch = token["midis"][0]
+            if pitch not in source_midis[event_index]:
+                fail(
+                    "arpeggio_pitch_not_in_source_voicing",
+                    event_index,
+                    midi=[pitch],
+                    detail=(
+                        f"source={source_midis[event_index]}"
+                    ),
+                )
+    if cursor != len(chord_tokens):
+        fail(
+            "arpeggio_extra_tokens",
+            detail=f"unconsumed={len(chord_tokens) - cursor}",
+        )
+    for event_index, chord in enumerate(song.chords):
+        if event_index >= len(bass_tokens):
+            continue
+        token = bass_tokens[event_index]
+        expected_duration = chord.duration_token
+        if (
+            token["is_rest"] != chord.is_no_chord
+            or token["duration"] != expected_duration
+            or (not chord.is_no_chord and len(token["midis"]) != 1)
+        ):
+            fail(
+                "arpeggio_bass_timeline_mismatch",
+                event_index,
+                detail=f"expected duration={expected_duration!r}",
+            )
+    return source_midis, failures
+
+
+def _validate_arpeggio_track(
+    chord_tokens: list[dict],
+    bass_tokens: list[dict],
+    song: Song,
+    record: dict,
+    issues: list[dict],
+    percussion_tokens: list[dict] | None = None,
+) -> tuple[list[list[int]], int]:
+    """Validate either the spec 12 or spec 13 arpeggio manifest shape."""
+    info = record.get("arpeggio")
+    if isinstance(info, dict) and (
+        "event_onset_counts" in info
+        or "performance_profile" in info
+    ):
+        return _validate_timed_arpeggio_track(
+            chord_tokens,
+            bass_tokens,
+            percussion_tokens,
+            song,
+            record,
+            issues,
+        )
+    return _validate_legacy_arpeggio_track(
+        chord_tokens, bass_tokens, song, record, issues
+    )
 
 
 def _label_roots(
@@ -348,30 +1486,72 @@ def validate_corpus(
             )
             report["pairing_errors"] += 1
 
+        render_mode = record.get("render_mode", "pads")
+        if render_mode not in {"pads", "arpeggios"}:
+            _issue(
+                issues, "invalid_render_mode", record,
+                detail=f"render_mode={render_mode!r}",
+            )
+            report["hard_failure_count"] += 1
+            render_mode = "pads"
+
         try:
-            chord_events, bass_events = parse_score_line(blocks[ordinal])
+            voice_details = parse_score_line_voice_details(blocks[ordinal])
+            chord_token_details = voice_details["V0"]
+            bass_token_details = voice_details["V1"]
+            percussion_token_details = voice_details.get("V9")
         except ValueError as error:
             _issue(issues, "malformed_score_block", record, detail=str(error))
             report["pairing_errors"] += 1
             continue
-        if len(chord_events) != len(song.chords) or len(bass_events) != len(song.chords):
-            _issue(
-                issues, "score_event_count_mismatch", record,
-                detail=(
-                    f"labels={len(song.chords)} chord_track={len(chord_events)} "
-                    f"bass_track={len(bass_events)}"
-                ),
+        chord_events = [event["midis"] for event in chord_token_details]
+        bass_events = [event["midis"] for event in bass_token_details]
+        if render_mode == "arpeggios":
+            source_voicing_midis, arpeggio_failures = _validate_arpeggio_track(
+                chord_token_details,
+                bass_token_details,
+                song,
+                record,
+                issues,
+                percussion_token_details,
             )
-            report["pairing_errors"] += 1
+            report["hard_failure_count"] += arpeggio_failures
+            if len(bass_events) != len(song.chords):
+                _issue(
+                    issues, "score_event_count_mismatch", record,
+                    detail=(
+                        f"labels={len(song.chords)} chord_track=arpeggio "
+                        f"bass_track={len(bass_events)}"
+                    ),
+                )
+                report["pairing_errors"] += 1
+        else:
+            source_voicing_midis = chord_events
+            if (
+                len(chord_events) != len(song.chords)
+                or len(bass_events) != len(song.chords)
+            ):
+                _issue(
+                    issues, "score_event_count_mismatch", record,
+                    detail=(
+                        f"labels={len(song.chords)} "
+                        f"chord_track={len(chord_events)} "
+                        f"bass_track={len(bass_events)}"
+                    ),
+                )
+                report["pairing_errors"] += 1
 
         summary = record.get("voicing_summary") or {}
         for level, count in (summary.get("relaxation_levels") or {}).items():
             metrics["relaxation_level"][str(level)]["events"] += int(count)
 
         for event_index, chord in enumerate(song.chords):
-            if event_index >= len(chord_events) or event_index >= len(bass_events):
+            if (
+                event_index >= len(source_voicing_midis)
+                or event_index >= len(bass_events)
+            ):
                 continue
-            midi = chord_events[event_index]
+            midi = source_voicing_midis[event_index]
             bass_midi = bass_events[event_index]
             label = _label_dict(chord)
             if chord.is_no_chord:
