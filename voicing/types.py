@@ -58,19 +58,32 @@ class ChordEvent:
     """Mirrors spec 07 §2.2 exactly. `root_interval`/`bass_interval` are
     normative; `root`/`bass`/`harte` are carried through for diagnostics only
     and must not be parsed."""
-    root_interval: int
-    triad: str
-    bass_interval: int
+    root_interval: Optional[int]
+    triad: Optional[str]
+    bass_interval: Optional[int]
     seventh: str = "N"
     ninth: str = "N"
     eleventh: str = "N"
     thirteenth: str = "N"
-    root: str = ""
-    bass: str = ""
+    root: Optional[str] = ""
+    bass: Optional[str] = ""
     harte: str = ""
+    is_no_chord: bool = False
+    duration_token: str = "w"
 
     @staticmethod
     def from_dict(d: dict) -> "ChordEvent":
+        is_no_chord = d.get("is_no_chord", d.get("harte") == "N")
+        if not isinstance(is_no_chord, bool):
+            raise ValueError("is_no_chord must be a boolean")
+        if is_no_chord:
+            if (d.get("harte") != "N" or
+                    any(d.get(field) is not None for field in ("root_interval", "triad", "bass_interval")) or
+                    any(d.get(field, "N") != "N" for field in EXT_SLOTS) or
+                    any(d.get(field) is not None for field in ("root", "bass"))):
+                raise ValueError("no-chord events must use canonical N fields")
+        elif d.get("harte") == "N":
+            raise ValueError("harte 'N' requires is_no_chord: true")
         return ChordEvent(
             root_interval=d["root_interval"],
             triad=d["triad"],
@@ -82,10 +95,14 @@ class ChordEvent:
             root=d.get("root", ""),
             bass=d.get("bass", ""),
             harte=d.get("harte", ""),
+            is_no_chord=is_no_chord,
+            duration_token=d.get("duration_token", "w"),
         )
 
     def chord_type(self) -> tuple:
         """Root-invariant chord-type key, spec 07 §8.2."""
+        if self.is_no_chord:
+            raise ValueError("no-chord events have no chord type")
         return (self.triad, self.seventh, self.ninth, self.eleventh, self.thirteenth)
 
 
@@ -113,6 +130,8 @@ def resolve_degrees(chord: ChordEvent) -> list[Degree]:
     §2.5 collision-merge rule. Degrees are returned in DEGREE_ORDER order
     (root, 3rd, 5th, 7th, 9th, 11th, 13th), one entry per *surviving* voice
     (merges collapse two roles into one Degree)."""
+    if chord.is_no_chord:
+        raise ValueError("cannot resolve degrees for a no-chord event")
     third_semi, fifth_semi = TRIAD_THIRD_FIFTH[chord.triad]
 
     slots: dict[str, Optional[Degree]] = {}

@@ -101,11 +101,12 @@ class Engine:
         self.window_relaxed_count = 0
         self.total_count = 0
         self.extension_dropped_count = 0
+        self.silence_count = 0
         self.log = []
         self.extension_drop_records = []
 
     # ------------------------------------------------------------------
-    def run(self, song: Song) -> list[VoicedChord]:
+    def run(self, song: Song) -> list[VoicedChord | None]:
         if not isinstance(song.tonic_pc, int) or not 0 <= song.tonic_pc < 12:
             raise ValueError(f"song.tonic_pc must be in 0..11, got {song.tonic_pc!r}")
         self.ctx["_active_tonic_pc"] = song.tonic_pc
@@ -116,6 +117,13 @@ class Engine:
         prev_chord = None
         out = []
         for t, chord in enumerate(song.chords):
+            if chord.is_no_chord:
+                out.append(None)
+                self.silence_count += 1
+                prev_cand = None
+                prev_chord = None
+                self.ctx.pop("_guitar_home_root_fret", None)
+                continue
             voiced, cand = self.step(t, chord, prev_cand, prev_chord, center)
             out.append(voiced)
             prev_cand = cand

@@ -32,6 +32,8 @@ from chord_gen import (
     _node_child_distribution,
     _trie_child_prefix,
     _trie_reaches_density,
+    apply_no_chord_filter,
+    no_chord_summary,
     reconstruct_harte,
     select_extension_trie,
     stage1_distribution,
@@ -405,6 +407,8 @@ class GenerationQuota:
         targeted_triad: bool = False,
         targeted_extension: Optional[str] = None,
     ) -> None:
+        if event.get("is_no_chord", event.get("harte") == "N"):
+            raise ValueError("GenerationQuota cannot record a no-chord event")
         triad = str(event["triad"])
         root = str(event["root_interval"])
         self.triad_counts[triad] += 1
@@ -500,6 +504,8 @@ class TargetChordGenerator(ChordGenerator):
         }
         if self.instrument_profile is not None:
             payload["voicer_family"] = self.instrument_profile
+        if any(event.get("is_no_chord", event.get("harte") == "N") for event in events):
+            payload["no_chord"] = no_chord_summary(events)
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2)
@@ -1034,6 +1040,7 @@ class TargetChordGenerator(ChordGenerator):
             current_time += duration_seconds
 
             events.append({
+                "is_no_chord": False,
                 "root_interval": root_interval,
                 "triad": triad,
                 "bass_interval": bass_interval,
@@ -1150,6 +1157,8 @@ def generate_target_corpus(
     random_tonic: bool = False,
     random_bpm: bool = False,
     random_bpm_range: Tuple[int, int] = (60, 180),
+    no_chord_rate: float = 0.01,
+    no_chord_seed: int | None = None,
 ) -> Dict[str, List[List[dict]]]:
     """Generate the quota-driven §08 corpus without mixing genre models."""
     if events_per_genre <= 0:
@@ -1244,6 +1253,12 @@ def generate_target_corpus(
             raise RuntimeError(
                 f"Could not meet {genre} generation targets: {quota.deficits()}"
             )
+        songs = apply_no_chord_filter(
+            songs,
+            rate=no_chord_rate,
+            mode="exact",
+            seed=no_chord_seed if no_chord_seed is not None else genre_seed,
+        )
         result[genre] = songs
 
         if output_dirs is not None:
@@ -1309,6 +1324,8 @@ def parse_args():
     parser.add_argument("--min-count-b", type=int, default=500)
     parser.add_argument("--epsilon-floor", type=float, default=0.02)
     parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--no-chord-rate", type=float, default=0.01)
+    parser.add_argument("--no-chord-off", action="store_true")
     parser.add_argument("--dist-dir", default=_DEFAULT_DIST_DIR)
     parser.add_argument(
         "--out-dir",
@@ -1378,6 +1395,7 @@ def main() -> None:
         params=base_params,
         output_dirs=output_dirs,
         random_tonic=random_tonic,
+        no_chord_rate=0.0 if args.no_chord_off else args.no_chord_rate,
         random_bpm=random_bpm,
         random_bpm_range=bpm_range,
     )

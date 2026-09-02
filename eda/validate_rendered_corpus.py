@@ -121,6 +121,7 @@ def parse_score_blocks(path: str | Path) -> dict[int, str]:
 
 def _label_dict(chord) -> dict:
     return {
+        "is_no_chord": chord.is_no_chord,
         "root_interval": chord.root_interval,
         "triad": chord.triad,
         "bass_interval": chord.bass_interval,
@@ -237,6 +238,9 @@ def validate_corpus(
         "pairing_errors": 0,
         "hard_failure_count": 0,
         "extension_drop_rates": {},
+        "no_chord_events": 0,
+        "no_chord_duration_seconds": 0.0,
+        "duration_seconds": 0.0,
     }
     extension_counts = defaultdict(lambda: {
         "events": 0,
@@ -316,6 +320,10 @@ def validate_corpus(
             report["pairing_errors"] += 1
 
         progression = json.loads(raw.decode("utf-8"))
+        report["duration_seconds"] += sum(
+            float(event.get("duration_seconds", 0.0))
+            for event in progression.get("chords", [])
+        )
         song = Song.from_dict(progression)
         actual_genre = progression.get("genre")
         family = record.get("voicer_family") or "unknown"
@@ -366,6 +374,19 @@ def validate_corpus(
             midi = chord_events[event_index]
             bass_midi = bass_events[event_index]
             label = _label_dict(chord)
+            if chord.is_no_chord:
+                report["events"] += 1
+                report["no_chord_events"] += 1
+                report["no_chord_duration_seconds"] += float(
+                    progression["chords"][event_index].get("duration_seconds", 0.0)
+                )
+                if midi:
+                    _issue(issues, "no_chord_chord_notes", record, event_index, label, midi)
+                    report["hard_failure_count"] += 1
+                if bass_midi:
+                    _issue(issues, "no_chord_bass_notes", record, event_index, label, bass_midi)
+                    report["hard_failure_count"] += 1
+                continue
             root_pc = (song.tonic_pc + chord.root_interval) % 12
             bass_pc = (root_pc + chord.bass_interval) % 12
             degrees = resolve_degrees(chord)
@@ -587,6 +608,13 @@ def validate_corpus(
     report["metrics"] = {
         dimension: dict(values) for dimension, values in metrics.items()
     }
+    report["no_chord_event_rate"] = (
+        report["no_chord_events"] / report["events"] if report["events"] else 0.0
+    )
+    report["no_chord_duration_rate"] = (
+        report["no_chord_duration_seconds"] / report["duration_seconds"]
+        if report["duration_seconds"] else 0.0
+    )
     return report
 
 

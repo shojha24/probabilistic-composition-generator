@@ -166,15 +166,17 @@ class ChordModule:
         self.last_instrument = selected_instrument.name
         self.last_instrument_program = selected_instrument.program
         self.selected_instrument = selected_instrument
-        self.last_voiced_midis = [list(chord.midi) for chord in voiced]
-        self.last_voiced_roles = [list(chord.roles) for chord in voiced]
+        self.last_voiced_midis = [list(chord.midi) if chord is not None else [] for chord in voiced]
+        self.last_voiced_roles = [list(chord.roles) if chord is not None else [] for chord in voiced]
         self.last_voicing_diagnostics = [
-            dict(chord.diagnostics) for chord in voiced
+            dict(chord.diagnostics) if chord is not None else {"no_chord": True}
+            for chord in voiced
         ]
         events = progression.chords if isinstance(progression, Song) else progression["chords"]
         tokens = [
-            chord_token(chord.midi, event.get("duration_token", "w")
-                        if isinstance(event, dict) else "w")
+            chord_token(chord.midi if chord is not None else [],
+                        event.get("duration_token", "w")
+                        if isinstance(event, dict) else event.duration_token)
             for chord, event in zip(voiced, events)
         ]
         return f"T{song.bpm} V0 I{selected_instrument.program} " + " ".join(tokens)

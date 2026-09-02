@@ -175,6 +175,24 @@ def _voicing_summary(chord_module: ChordModule) -> dict:
     }
 
 
+def _no_chord_summary(progression: dict) -> dict:
+    events = progression.get("chords", ())
+    no_chord_events = [
+        event for event in events
+        if event.get("is_no_chord", event.get("harte") == "N")
+    ]
+    total_duration = sum(float(event.get("duration_seconds", 0.0)) for event in events)
+    no_chord_duration = sum(
+        float(event.get("duration_seconds", 0.0)) for event in no_chord_events
+    )
+    return {
+        "event_count": len(no_chord_events),
+        "duration_seconds": no_chord_duration,
+        "event_rate": len(no_chord_events) / len(events) if events else 0.0,
+        "duration_rate": no_chord_duration / total_duration if total_duration else 0.0,
+    }
+
+
 def _least_used_voicer(voicers: list[str], counts: Counter) -> str:
     return min(
         voicers,
@@ -341,6 +359,8 @@ def render_directory(
     voicer_counts = Counter()
     family_counts_by_genre = {}
     manifest_records = []
+    no_chord_by_genre = Counter()
+    no_chord_duration_by_genre = Counter()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     temporary_output = tempfile.NamedTemporaryFile(
         mode="w", encoding="utf-8", dir=output_path.parent,
@@ -385,6 +405,9 @@ def render_directory(
                         family_counts_by_genre.setdefault(
                             genre, Counter()
                         )[result["voicer_family"]] += 1
+                        no_chord = _no_chord_summary(progression)
+                        no_chord_by_genre[genre] += no_chord["event_count"]
+                        no_chord_duration_by_genre[genre] += no_chord["duration_seconds"]
                         chord_track = result["chord_track"]
                         bass_track = result["bass_track"]
                         percussion_track = result["percussion_track"]
@@ -417,6 +440,7 @@ def render_directory(
                             "percussion_feel": result["percussion_feel"],
                             "seed": seed + index,
                             "voicing_summary": result["voicing_summary"],
+                            "no_chord": no_chord,
                         })
                         print(
                             f"Rendered song {index}: {source_dir.name}/{path.name} "
@@ -447,6 +471,13 @@ def render_directory(
                     for family in _VOICER_FAMILIES
                 }
                 for genre, counts in sorted(family_counts_by_genre.items())
+            },
+            "no_chord_by_genre": {
+                genre: {
+                    "event_count": no_chord_by_genre[genre],
+                    "duration_seconds": no_chord_duration_by_genre[genre],
+                }
+                for genre in sorted(no_chord_by_genre)
             },
             "records": manifest_records,
         }

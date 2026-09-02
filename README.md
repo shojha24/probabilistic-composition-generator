@@ -603,9 +603,11 @@ Use a fixed seed when comparing changes to generation or voicing behavior.
 
 The project has these known limits:
 
+- NO_CHORD events are not currently generated.
 - The Java renderer remains a proof of concept and is not invoked by
   `render.py`.
 - Arpeggio rendering is not implemented.
+- Melody tracks are yet to be generated.
 - Statistical distribution targets need larger calibration reports.
 - Extended guitar shapes use an explicit programmatic derivation because
   complete canonical coverage is not available in the reviewed sources.

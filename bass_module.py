@@ -5,7 +5,7 @@ import random
 from dataclasses import dataclass
 
 from instruments import BASS_INSTRUMENTS, Instrument
-from voicing.types import Song
+from voicing.types import ChordEvent, Song
 from chord_module import midi_to_jfugue
 
 
@@ -44,11 +44,20 @@ class BassModule:
         events = progression.chords if isinstance(progression, Song) else progression["chords"]
         tokens = []
         for index, event in enumerate(events):
-            bass_pc = (event["root_interval"] + event.get("bass_interval", 0) + song.tonic_pc) % 12
+            is_no_chord = (
+                event.is_no_chord if isinstance(event, ChordEvent)
+                else event.get("is_no_chord", event.get("harte") == "N")
+            )
+            duration = event.get("duration_token", "w") if isinstance(event, dict) else event.duration_token
+            if is_no_chord:
+                tokens.append(f"R{duration}")
+                continue
+            root_interval = event["root_interval"] if isinstance(event, dict) else event.root_interval
+            bass_interval = event.get("bass_interval", 0) if isinstance(event, dict) else event.bass_interval
+            bass_pc = (root_interval + bass_interval + song.tonic_pc) % 12
             midi = 36 + bass_pc
             chord_pitches = chord_midis[index] if chord_midis and index < len(chord_midis) else ()
             if 40 <= midi <= 47 and any(40 <= pitch <= 47 for pitch in chord_pitches):
                 midi -= 12
-            duration = event.get("duration_token", "w")
             tokens.append(f"{midi_to_jfugue(midi)}{duration}")
         return f"V1 I{program} " + " ".join(tokens)

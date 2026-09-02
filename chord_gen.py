@@ -46,6 +46,7 @@ changing the default sampling path.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import random
@@ -613,6 +614,8 @@ def _trie_reaches_density(
 # ─────────────────────────────────────────────────────────────────────────────
 def reconstruct_harte(root_name: str, triad: str, bass_name: str,
                        seventh: str, ninth: str, eleventh: str, thirteenth: str) -> str:
+    if triad is None:
+        return "N"
     base = QUALITY_SHORTHAND.get((triad, seventh))
     if base is None:
         # No attested quality token covers this exact (triad,seventh) pair
@@ -630,6 +633,107 @@ def reconstruct_harte(root_name: str, triad: str, bass_name: str,
     if bass_name and bass_name != root_name:
         result += "/" + bass_name
     return result
+
+
+def is_no_chord_eligible(event: dict) -> bool:
+    """Return whether an event may be safely replaced without affecting quotas."""
+    return (
+        not event.get("is_no_chord", event.get("harte") == "N")
+        and event.get("triad") in {"major", "minor"}
+        and event.get("bass_interval") == 0
+        and all(event.get(slot, "N") == "N" for slot in EXT_SLOTS)
+    )
+
+
+def _no_chord_rng(seed: int | None) -> random.Random:
+    material = f"no_chord:{seed!r}".encode("utf-8")
+    return random.Random(int.from_bytes(hashlib.sha256(material).digest()[:8], "big"))
+
+
+def apply_no_chord_filter(
+    songs: List[List[dict]],
+    *,
+    rate: float = 0.01,
+    mode: str = "exact",
+    seed: int | None = None,
+    eligible_predicate=None,
+) -> List[List[dict]]:
+    """Replace eligible timed events with canonical Harte ``N`` records."""
+    if not isinstance(rate, (int, float)) or isinstance(rate, bool) or not 0 <= rate <= 1:
+        raise ValueError("no-chord rate must be between 0 and 1")
+    if mode not in {"exact", "probabilistic"}:
+        raise ValueError("no-chord mode must be 'exact' or 'probabilistic'")
+    predicate = eligible_predicate or is_no_chord_eligible
+    result = [[dict(event) for event in song] for song in songs]
+    candidates = [
+        (song_index, event_index)
+        for song_index, song in enumerate(result)
+        for event_index, event in enumerate(song)
+        if predicate(event)
+    ]
+    total = sum(len(song) for song in result)
+    target = int(rate * total + 0.5)
+    if mode == "exact":
+        if target > len(candidates):
+            raise ValueError(
+                f"requested {target} no-chord events at rate {rate}, "
+                f"but only {len(candidates)} eligible events are available"
+            )
+        selected = set(_no_chord_rng(seed).sample(candidates, target))
+    else:
+        if rate == 0:
+            selected = set()
+        elif not candidates:
+            raise ValueError("no-chord rate requires at least one eligible event")
+        else:
+            probability = rate * total / len(candidates)
+            if probability > 1:
+                raise ValueError(
+                    f"no-chord probability {probability} exceeds 1; "
+                    f"rate {rate} requires more eligible events"
+                )
+            rng = _no_chord_rng(seed)
+            selected = {candidate for candidate in candidates if rng.random() < probability}
+    for song_index, event_index in selected:
+        event = result[song_index][event_index]
+        event.update({
+            "is_no_chord": True,
+            "root_interval": None,
+            "triad": None,
+            "bass_interval": None,
+            "seventh": "N",
+            "ninth": "N",
+            "eleventh": "N",
+            "thirteenth": "N",
+            "root": None,
+            "bass": None,
+            "harte": "N",
+        })
+    for song in result:
+        for event in song:
+            event.setdefault("is_no_chord", False)
+    return result
+
+
+def no_chord_summary(events: List[dict]) -> dict:
+    """Return descriptive no-chord counts for a completed timed event list."""
+    if events and isinstance(events[0], list):
+        events = [event for song in events for event in song]
+    total_duration = sum(float(event.get("duration_seconds", 0.0)) for event in events)
+    no_chord_events = [
+        event for event in events
+        if event.get("is_no_chord", event.get("harte") == "N")
+    ]
+    no_chord_duration = sum(
+        float(event.get("duration_seconds", 0.0)) for event in no_chord_events
+    )
+    return {
+        "enabled": bool(no_chord_events),
+        "event_count": len(no_chord_events),
+        "event_rate": len(no_chord_events) / len(events) if events else 0.0,
+        "duration_seconds": no_chord_duration,
+        "duration_rate": no_chord_duration / total_duration if total_duration else 0.0,
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -806,6 +910,7 @@ class ChordGenerator:
             current_time += duration_seconds
 
             events.append({
+                "is_no_chord": False,
                 "root_interval": root_interval,
                 "triad": triad,
                 "bass_interval": bass_interval,
@@ -848,6 +953,8 @@ class ChordGenerator:
             ),
             "chords": events,
         }
+        if any(event.get("is_no_chord", event.get("harte") == "N") for event in events):
+            payload["no_chord"] = no_chord_summary(events)
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2)
@@ -900,6 +1007,9 @@ def parse_args():
 
     p.add_argument("--songs", type=int, default=100)
     p.add_argument("--seed", type=int, default=None)
+    p.add_argument("--no-chord-rate", type=float, default=0.01)
+    p.add_argument("--no-chord-mode", choices=("exact", "probabilistic"), default="exact")
+    p.add_argument("--no-chord-off", action="store_true")
     p.add_argument("--dist-dir", default=_DEFAULT_DIST_DIR)
     p.add_argument(
         "--out-dir",
@@ -949,6 +1059,7 @@ def main():
         os.makedirs(output_dir, exist_ok=True)
 
     print(f"Generating {args.songs} song(s) -> {output_description}")
+    generated = []
     for i in range(args.songs):
         song_genre = random.choice(VALID_GENRES) if args.random_genre else args.genre
         song_tonic = random.randint(0, 11) if args.random_tonic else fixed_tonic
@@ -969,9 +1080,29 @@ def main():
             params=GenParams(**{**base_params.__dict__}),
         )
         events = gen.generate()
+        generated.append((song_genre, gen, events))
+    rate = 0.0 if args.no_chord_off else args.no_chord_rate
+    by_genre = {
+        genre: [(index, events) for index, (song_genre, _gen, events) in enumerate(generated)
+                if song_genre == genre]
+        for genre in VALID_GENRES
+    }
+    filtered = {}
+    for genre, indexed_songs in by_genre.items():
+        filtered.update({
+            index: events
+            for index, events in zip(
+                (index for index, _events in indexed_songs),
+                apply_no_chord_filter(
+                    [events for _index, events in indexed_songs],
+                    rate=rate, mode=args.no_chord_mode, seed=args.seed,
+                ),
+            )
+        })
+    for i, (song_genre, gen, _events) in enumerate(generated):
         gen.write_song(
             os.path.join(output_dirs[song_genre], f"song_{i}.json"),
-            events,
+            filtered[i],
         )
 
     print("Done.")
