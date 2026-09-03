@@ -676,7 +676,6 @@ Use a fixed seed when comparing changes to generation or voicing behavior.
 
 The project has these known limits:
 
-- NO_CHORD events are not currently generated.
 - The Java renderer remains a proof of concept and is not invoked by
   `render.py`.
 - Melody tracks are yet to be generated.
