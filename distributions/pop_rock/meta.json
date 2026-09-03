@@ -1,0 +1,12 @@
+{
+  "songs": 1114,
+  "runs": 1800,
+  "chords": 139078,
+  "stage1_level0_states": 93,
+  "stage1_level1_contexts": 93,
+  "stage1_level2_contexts": 1396,
+  "stage2_level0_roots": 12,
+  "stage2_level1b_contexts": 128,
+  "stage3_trie_A_states": 93,
+  "stage3_trie_B_triads": 8
+}

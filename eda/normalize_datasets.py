@@ -86,9 +86,11 @@ def normalize_chord(chord):
 
 def main():
     ROOT_DIR = Path(__file__).resolve().parent.parent
+    EDA_DIR = Path(__file__).resolve().parent
+    
     DATA_DIR = ROOT_DIR / "data"
     OUTPUT_DIR = ROOT_DIR / "data_normalized"
-    ERROR_LOG = ROOT_DIR / "corrupt_files_log.txt"
+    ERROR_LOG = EDA_DIR / "corrupt_files_log.txt" # Saves log to the eda folder
 
     jams_files = list(DATA_DIR.rglob('*.jams'))
     

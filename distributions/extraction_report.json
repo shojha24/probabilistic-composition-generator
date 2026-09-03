@@ -1,59 +1,45 @@
 {
   "corpora": {
     "McGill Billboard": {
-      "files": 890,
+      "files": 0,
       "chords": 119978,
-      "transitions": 119088,
+      "runs": 1477,
       "genre": "pop_rock",
       "key_failures": 0,
       "chord_failures": 0
     },
     "iReal Pro": {
-      "files": 2048,
+      "files": 0,
       "chords": 134924,
-      "transitions": 132876,
+      "runs": 2421,
       "genre": "jazz",
       "key_failures": 0,
       "chord_failures": 0
     },
     "isophonics": {
-      "files": 224,
+      "files": 0,
       "chords": 19100,
-      "transitions": 18876,
+      "runs": 323,
       "genre": "pop_rock",
       "key_failures": 0,
       "chord_failures": 0
     },
-    "Nottingham Music Database": {
-      "files": 1002,
-      "chords": 60873,
-      "transitions": 59871,
-      "genre": "folk",
-      "key_failures": 0,
-      "chord_failures": 0
-    },
     "Weimar Jazz Database": {
-      "files": 429,
+      "files": 0,
       "chords": 26098,
-      "transitions": 25669,
+      "runs": 450,
       "genre": "jazz",
       "key_failures": 27,
       "chord_failures": 0
-    },
-    "When in Rome": {
-      "files": 449,
-      "chords": 100939,
-      "transitions": 100490,
-      "genre": "classical",
-      "key_failures": 0,
-      "chord_failures": 0
     }
   },
-  "total_files": 5042,
-  "total_chords_parsed": 461912,
-  "total_transitions": 456870,
+  "total_files": 3591,
+  "total_songs_with_chords": 3591,
+  "total_chords_parsed": 300100,
+  "total_runs": 4671,
   "skipped_no_key": 27,
   "skipped_unknown_corpus": 0,
   "parse_errors": 0,
-  "chord_parse_failures": 0
+  "chord_parse_failures": 0,
+  "validation_problems": []
 }

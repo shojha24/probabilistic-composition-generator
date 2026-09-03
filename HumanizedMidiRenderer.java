@@ -3,6 +3,7 @@ import org.jfugue.player.Player;
 
 import javax.sound.midi.*;
 import java.io.*;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 /**
@@ -45,6 +46,10 @@ import java.util.*;
  * Detects identical consecutive notes and forces a short retrigger gap.
  * Safely resolves instances where Gaussian jitter causes a previous 
  * Note-Off to cross over a subsequent Note-On for the same pitch.
+ *
+ * 11. Arpeggio source-boundary markers.
+ * Explicit ARPEVENT markers preserve scheduled chord boundaries while
+ * timing humanization is applied.
  */
 public class HumanizedMidiRenderer {
 
@@ -166,6 +171,66 @@ public class HumanizedMidiRenderer {
             || (sm.getCommand() == ShortMessage.NOTE_ON && sm.getData2() == 0);
     }
 
+    private static final String ARPEGGIO_BOUNDARY_MARKER = "ARPEVENT";
+
+    private static boolean isArpeggioBoundaryMarker(MidiEvent event) {
+        if (!(event.getMessage() instanceof MetaMessage)) return false;
+        MetaMessage meta = (MetaMessage) event.getMessage();
+        return meta.getType() == 0x06
+            && new String(meta.getData(), StandardCharsets.UTF_8)
+                .startsWith(ARPEGGIO_BOUNDARY_MARKER);
+    }
+
+    private static List<Long> readArpeggioBoundaries(List<MidiEvent> events) {
+        Set<Long> boundaries = new TreeSet<>();
+        for (MidiEvent event : events) {
+            if (isArpeggioBoundaryMarker(event)) {
+                boundaries.add(event.getTick());
+            }
+        }
+        return new ArrayList<>(boundaries);
+    }
+
+    private static long nextSourceBoundary(
+        List<Long> boundaries,
+        long sourceOnset
+    ) {
+        for (long boundary : boundaries) {
+            if (boundary > sourceOnset) return boundary;
+        }
+        return Long.MAX_VALUE;
+    }
+
+    private static void enforceSourceBoundary(
+        MidiEvent on,
+        MidiEvent off,
+        long boundary,
+        long minNoteDurationTicks
+    ) {
+        if (boundary == Long.MAX_VALUE) return;
+
+        long latestOnset = Math.max(0, boundary - minNoteDurationTicks);
+        if (on.getTick() >= boundary) on.setTick(latestOnset);
+        if (off.getTick() > boundary) off.setTick(boundary);
+
+        long minimumOff = on.getTick() + minNoteDurationTicks;
+        if (off.getTick() < minimumOff) {
+            if (minimumOff > boundary) {
+                on.setTick(latestOnset);
+                minimumOff = on.getTick() + minNoteDurationTicks;
+            }
+            off.setTick(Math.min(boundary, minimumOff));
+        }
+    }
+
+    private static int compareEvents(MidiEvent e1, MidiEvent e2) {
+        int cmp = Long.compare(e1.getTick(), e2.getTick());
+        if (cmp != 0) return cmp;
+        if (isNoteOff(e1) && isNoteOn(e2)) return -1;
+        if (isNoteOn(e1) && isNoteOff(e2)) return 1;
+        return 0;
+    }
+
     // ── Humanization ──────────────────────────────────────────────────────────
 
     private static void humanizeSequence(Sequence sequence, Random rng) {
@@ -184,19 +249,14 @@ public class HumanizedMidiRenderer {
             List<MidiEvent> events = new ArrayList<>();
             for (int i = 0; i < track.size(); i++) events.add(track.get(i));
             
-            events.sort((e1, e2) -> {
-                int cmp = Long.compare(e1.getTick(), e2.getTick());
-                if (cmp != 0) return cmp;
-                // Same tick: guarantee Note-Offs come before Note-Ons
-                if (isNoteOff(e1) && isNoteOn(e2)) return -1;
-                if (isNoteOn(e1) && isNoteOff(e2)) return 1;
-                return 0;
-            });
+            events.sort(HumanizedMidiRenderer::compareEvents);
+            List<Long> sourceBoundaries = readArpeggioBoundaries(events);
 
             // ── 2. Assign one timing offset per chord group ───────────────
             Map<Integer, Queue<Long>> noteOnOffsets = new HashMap<>();
             Map<Integer, Long>        lastOnTick    = new HashMap<>();
             Map<Integer, Long>        lastOnDelta   = new HashMap<>();
+            Map<MidiEvent, Long> sourceBoundaryByOn = new IdentityHashMap<>();
 
             for (MidiEvent event : events) {
                 if (!isNoteOn(event)) continue;
@@ -205,6 +265,9 @@ public class HumanizedMidiRenderer {
                 int ch   = sm.getChannel();
                 long tick = event.getTick();
                 int key  = (ch << 7) | sm.getData1();
+                sourceBoundaryByOn.put(
+                    event, nextSourceBoundary(sourceBoundaries, tick)
+                );
 
                 Long prevTick  = lastOnTick.get(ch);
                 Long prevDelta = lastOnDelta.get(ch);
@@ -224,7 +287,12 @@ public class HumanizedMidiRenderer {
             }
 
             // ── 3 & 4. Apply offsets and velocity jitter ──────────────────
-            Map<Integer, Long> activeNoteOnDelta = new HashMap<>();
+            // Pair overlapping notes in source order. A map of one active
+            // note is insufficient when a pitch is retriggered before its
+            // previous Note-Off.
+            Map<Integer, Queue<MidiEvent>> activeNoteOns = new HashMap<>();
+            Map<Integer, Queue<Long>> activeNoteOnDeltas = new HashMap<>();
+            Map<Integer, List<MidiEvent[]>> notePairs = new HashMap<>();
 
             for (MidiEvent event : events) {
                 if (!isNoteOn(event) && !isNoteOff(event)) continue;
@@ -237,13 +305,25 @@ public class HumanizedMidiRenderer {
                 long delta;
                 if (isNoteOn(event)) {
                     Queue<Long> q = noteOnOffsets.get(key);
-                    delta = (q != null && !q.isEmpty()) ? q.peek() : 0L;
-                    activeNoteOnDelta.put(key, delta);
+                    delta = (q != null && !q.isEmpty()) ? q.poll() : 0L;
+                    activeNoteOnDeltas.computeIfAbsent(
+                        key, k -> new LinkedList<>()
+                    ).add(delta);
+                    activeNoteOns.computeIfAbsent(
+                        key, k -> new LinkedList<>()
+                    ).add(event);
                 } else {
-                    Long stashed = activeNoteOnDelta.remove(key);
-                    delta = (stashed != null) ? stashed : 0L;
-                    Queue<Long> q = noteOnOffsets.get(key);
-                    if (q != null) q.poll();
+                    Queue<Long> deltas = activeNoteOnDeltas.get(key);
+                    delta = (
+                        deltas != null && !deltas.isEmpty()
+                    ) ? deltas.poll() : 0L;
+                    Queue<MidiEvent> ons = activeNoteOns.get(key);
+                    if (ons != null && !ons.isEmpty()) {
+                        MidiEvent on = ons.poll();
+                        notePairs.computeIfAbsent(
+                            key, k -> new LinkedList<>()
+                        ).add(new MidiEvent[] {on, event});
+                    }
                 }
 
                 event.setTick(Math.max(0, event.getTick() + delta));
@@ -260,62 +340,80 @@ public class HumanizedMidiRenderer {
 
             // ── 5. Retrigger gap & Overlap resolution (FIX E) ─────────────
             final long retriggerGapTicks = Math.max(1, ppq / 48); // ~10 ticks
-
-            Map<Integer, MidiEvent> lastNoteOff = new HashMap<>();
-            Map<MidiEvent, MidiEvent> offToOnMap = new HashMap<>();
-            Map<Integer, MidiEvent> activeOn = new HashMap<>();
-
-            for (MidiEvent event : events) {
-                if (isNoteOn(event)) {
-                    ShortMessage sm = (ShortMessage) event.getMessage();
-                    int key = (sm.getChannel() << 7) | sm.getData1();
-                    
-                    activeOn.put(key, event);
-
-                    MidiEvent prevOff = lastNoteOff.get(key);
-                    if (prevOff != null) {
-                        long requiredOffTick = event.getTick() - retriggerGapTicks;
-                        
-                        if (prevOff.getTick() > requiredOffTick) {
-                            MidiEvent itsOwnOn = offToOnMap.get(prevOff);
-                            long absoluteMinOff = (itsOwnOn != null) 
-                                    ? itsOwnOn.getTick() + minNoteDurationTicks 
-                                    : 0;
-
-                            long newOffTick = Math.max(absoluteMinOff, requiredOffTick);
-                            prevOff.setTick(newOffTick);
-
-                            if (newOffTick > requiredOffTick) {
-                                // Pushing Note-Off back hit the duration floor. 
-                                // Push the next Note-On forward to guarantee the gap.
-                                event.setTick(newOffTick + retriggerGapTicks);
+            for (List<MidiEvent[]> pairs : notePairs.values()) {
+                for (MidiEvent[] pair : pairs) {
+                    enforceSourceBoundary(
+                        pair[0],
+                        pair[1],
+                        sourceBoundaryByOn.getOrDefault(
+                            pair[0], Long.MAX_VALUE
+                        ),
+                        minNoteDurationTicks
+                    );
+                }
+            }
+            for (List<MidiEvent[]> pairs : notePairs.values()) {
+                pairs.sort(Comparator.comparingLong(pair -> pair[0].getTick()));
+                for (int i = 0; i < pairs.size(); i++) {
+                    MidiEvent on = pairs.get(i)[0];
+                    MidiEvent off = pairs.get(i)[1];
+                    if (i > 0) {
+                        MidiEvent previousOn = pairs.get(i - 1)[0];
+                        MidiEvent previousOff = pairs.get(i - 1)[1];
+                        long requiredOff = on.getTick() - retriggerGapTicks;
+                        long previousBoundary = sourceBoundaryByOn.getOrDefault(
+                            previousOn, Long.MAX_VALUE
+                        );
+                        if (previousBoundary != Long.MAX_VALUE) {
+                            requiredOff = Math.min(
+                                requiredOff, previousBoundary
+                            );
+                        }
+                        if (previousOff.getTick() > requiredOff) {
+                            long newOff = Math.max(
+                                previousOn.getTick() + minNoteDurationTicks,
+                                requiredOff
+                            );
+                            if (previousBoundary != Long.MAX_VALUE) {
+                                newOff = Math.min(newOff, previousBoundary);
+                            }
+                            previousOff.setTick(newOff);
+                            if (newOff > requiredOff) {
+                                long shift = newOff + retriggerGapTicks
+                                    - on.getTick();
+                                on.setTick(on.getTick() + shift);
+                                off.setTick(off.getTick() + shift);
                             }
                         }
                     }
-                } else if (isNoteOff(event)) {
-                    ShortMessage sm = (ShortMessage) event.getMessage();
-                    int key = (sm.getChannel() << 7) | sm.getData1();
-                    
-                    lastNoteOff.put(key, event);
-                    MidiEvent on = activeOn.remove(key);
-                    if (on != null) {
-                        offToOnMap.put(event, on);
+                    long minOff = on.getTick() + minNoteDurationTicks;
+                    if (off.getTick() < minOff) {
+                        long boundary = sourceBoundaryByOn.getOrDefault(
+                            on, Long.MAX_VALUE
+                        );
+                        off.setTick(
+                            boundary == Long.MAX_VALUE
+                                ? minOff
+                                : Math.min(minOff, boundary)
+                        );
                     }
                 }
             }
-
-            // ── 6. Enforce minimum note duration ──────────────────────────
-            for (Map.Entry<MidiEvent, MidiEvent> entry : offToOnMap.entrySet()) {
-                MidiEvent off = entry.getKey();
-                MidiEvent on  = entry.getValue();
-                long minOff = on.getTick() + minNoteDurationTicks;
-                if (off.getTick() < minOff) {
-                    off.setTick(minOff);
+            for (List<MidiEvent[]> pairs : notePairs.values()) {
+                for (MidiEvent[] pair : pairs) {
+                    enforceSourceBoundary(
+                        pair[0],
+                        pair[1],
+                        sourceBoundaryByOn.getOrDefault(
+                            pair[0], Long.MAX_VALUE
+                        ),
+                        minNoteDurationTicks
+                    );
                 }
             }
 
             // ── 7. Re-sort by tick and rebuild track ──────────────────────
-            events.sort(Comparator.comparingLong(MidiEvent::getTick));
+            events.sort(HumanizedMidiRenderer::compareEvents);
             for (int i = track.size() - 1; i >= 0; i--) track.remove(track.get(i));
             for (MidiEvent event : events) track.add(event);
         }

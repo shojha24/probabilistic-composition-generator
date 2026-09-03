@@ -5,7 +5,7 @@ import csv
 
 def main():
     ROOT_DIR = Path(__file__).resolve().parent.parent
-    DATA_DIR = ROOT_DIR / "data_normalized"
+    DATA_DIR = ROOT_DIR / "data"
 
     jams_files = list(DATA_DIR.rglob('*.jams'))
     
@@ -50,7 +50,8 @@ def main():
     # Alphabetize the dataset columns for consistent formatting
     sorted_datasets = sorted(list(all_datasets))
 
-    out_path = ROOT_DIR / 'chord_dataset_normalized_counts.csv'
+    EDA_DIR = Path(__file__).resolve().parent
+    out_path = EDA_DIR / 'chord_dataset_counts.csv'
     
     # Write results to CSV
     with open(out_path, mode='w', newline='', encoding='utf-8') as f:

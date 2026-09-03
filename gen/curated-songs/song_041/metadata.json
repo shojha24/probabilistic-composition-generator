@@ -1,0 +1,375 @@
+{
+  "arpeggio": null,
+  "bass": {
+    "pad_collapse_inferred": true,
+    "rendered_instrument": {
+      "name": "warm-pad",
+      "program": 89
+    },
+    "track_file": "tracks/bass.txt"
+  },
+  "chord_pad": {
+    "instrument": {
+      "name": "warm-pad",
+      "program": 89
+    },
+    "pad_collapse_inferred": true,
+    "render_mode": "pads",
+    "track_file": "tracks/chord.txt"
+  },
+  "files": {
+    "arpeggio_track": null,
+    "bass_track": "tracks/bass.txt",
+    "chord_track": "tracks/chord.txt",
+    "labels": "labels.json",
+    "midi": "midi/song.mid",
+    "percussion_track": "tracks/percussion.txt",
+    "score": "score.txt"
+  },
+  "instruments_used": {
+    "bass": {
+      "name": "warm-pad",
+      "program": 89,
+      "track": "V1"
+    },
+    "chord": {
+      "name": "warm-pad",
+      "program": 89,
+      "track": "V0"
+    },
+    "percussion": {
+      "feel": "normal",
+      "included": false,
+      "track": "V9"
+    }
+  },
+  "label_summary": {
+    "bass_intervals": [
+      0,
+      2,
+      3,
+      4,
+      7,
+      11
+    ],
+    "bpm": 120,
+    "duration_tokens": [
+      "h",
+      "h.",
+      "q",
+      "q.",
+      "w",
+      "ww"
+    ],
+    "duration_total_seconds": 131.25,
+    "extension_density": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "extension_slots": {
+      "eleventh": [
+        "#11",
+        "11"
+      ],
+      "ninth": [
+        "9",
+        "b9"
+      ],
+      "seventh": [
+        "7",
+        "b7",
+        "bb7"
+      ],
+      "thirteenth": [
+        "13",
+        "b13"
+      ]
+    },
+    "extensions": [
+      "#11",
+      "11",
+      "13",
+      "7",
+      "9",
+      "b13",
+      "b7",
+      "b9",
+      "bb7"
+    ],
+    "genre": "jazz",
+    "harte_chords": [
+      "A:7(b9,11,b13)",
+      "A:7/Ab",
+      "A:min",
+      "A:min7",
+      "A:min7(9)",
+      "Ab:7",
+      "Ab:7sus4",
+      "Ab:maj(9)/Bb",
+      "Ab:maj7",
+      "B:7",
+      "B:min7",
+      "Bb:7",
+      "Bb:7(9,#11)",
+      "Bb:7(9,#11,13)",
+      "Bb:7(b9,#11,b13)",
+      "Bb:min7",
+      "C:7",
+      "C:7(b9,11,13)",
+      "C:maj",
+      "C:maj(9)",
+      "C:maj/Eb",
+      "C:maj6",
+      "C:maj7",
+      "C:maj7(9,11,13)",
+      "C:min6",
+      "C:min7",
+      "D:7",
+      "D:7(9)",
+      "D:maj",
+      "D:min7",
+      "D:minmaj7",
+      "Db:7/F",
+      "Db:maj7",
+      "E:7(b9,#11,b13)",
+      "E:maj",
+      "E:min7",
+      "E:min7/B",
+      "Eb:7",
+      "Eb:dim7",
+      "Eb:maj",
+      "Eb:maj(9)/F",
+      "Eb:maj6",
+      "Eb:maj7",
+      "F#:hdim7",
+      "F:7(9)",
+      "F:7(9,#11,13)",
+      "F:aug",
+      "F:hdim7",
+      "F:maj",
+      "F:maj/C",
+      "F:maj7",
+      "F:maj7(9,11,13)",
+      "F:min6",
+      "F:min7(9)/A",
+      "G:5",
+      "G:7",
+      "G:7sus4",
+      "G:maj7",
+      "G:sus4"
+    ],
+    "no_chord": {
+      "duration_seconds": 0,
+      "event_count": 0,
+      "event_rate": 0.0,
+      "has_no_chord": false
+    },
+    "num_chords": 100,
+    "root_intervals": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11
+    ],
+    "tonic_pc": 0,
+    "triads": [
+      "5",
+      "augmented",
+      "diminished",
+      "major",
+      "minor",
+      "sus4"
+    ]
+  },
+  "percussion": {
+    "feel": "normal",
+    "included": false,
+    "kit_tokens": [],
+    "pattern_signature_sha256": "c2154c0f653631f387e6541a793935a01a9b44020bbaff928f84cf05461a49c1",
+    "track_event_count": 1049,
+    "track_file": "tracks/percussion.txt"
+  },
+  "sample_id": "song_041",
+  "selection_features": [
+    "bass_instrument:warm-pad",
+    "bass_interval:0",
+    "bass_interval:11",
+    "bass_interval:2",
+    "bass_interval:3",
+    "bass_interval:4",
+    "bass_interval:7",
+    "chord_instrument:warm-pad",
+    "dct_exposure:isolated",
+    "dct_exposure:none",
+    "dct_exposure:octave",
+    "dct_exposure:top",
+    "duration:h",
+    "duration:h.",
+    "duration:q",
+    "duration:q.",
+    "duration:w",
+    "duration:ww",
+    "extension:#11",
+    "extension:11",
+    "extension:13",
+    "extension:7",
+    "extension:9",
+    "extension:b13",
+    "extension:b7",
+    "extension:b9",
+    "extension:bb7",
+    "extension_density:0",
+    "extension_density:1",
+    "extension_density:2",
+    "extension_density:3",
+    "extension_density:4",
+    "extension_drops:no",
+    "family:synth",
+    "genre:jazz",
+    "mode:pads",
+    "no_chord:no",
+    "pad_collapse:yes",
+    "percussion:off",
+    "percussion_feel:normal",
+    "relaxation_levels:0",
+    "relaxation_levels:4",
+    "relaxation_levels:5",
+    "root_interval:0",
+    "root_interval:1",
+    "root_interval:10",
+    "root_interval:11",
+    "root_interval:2",
+    "root_interval:3",
+    "root_interval:4",
+    "root_interval:5",
+    "root_interval:6",
+    "root_interval:7",
+    "root_interval:8",
+    "root_interval:9",
+    "root_omission:omitted",
+    "root_omission:retained",
+    "triad:5",
+    "triad:augmented",
+    "triad:diminished",
+    "triad:major",
+    "triad:minor",
+    "triad:sus4"
+  ],
+  "source": {
+    "label": {
+      "path": "gen/target-jazz-labels/song_80.json",
+      "sha256": "25cca184608919808119ef6a50a9ee296c60a1918bc6d51581576b1e3be14eb9"
+    },
+    "manifest_record": {
+      "arpeggio": null,
+      "bpm": 120,
+      "genre": "jazz",
+      "no_chord": {
+        "duration_rate": 0.0,
+        "duration_seconds": 0,
+        "event_count": 0,
+        "event_rate": 0.0
+      },
+      "num_chords": 100,
+      "ordinal": 80,
+      "percussion_feel": "normal",
+      "percussion_included": false,
+      "preferred_voicer": "jazz-synth",
+      "preferred_voicer_family": "synth",
+      "render_mode": "pads",
+      "seed": 87,
+      "source_dir": "/mnt/c/Users/SO110258/Documents/probabilistic-composition-generator/gen/target-jazz-labels",
+      "source_file": "song_80.json",
+      "source_id": 80,
+      "source_sha256": "25cca184608919808119ef6a50a9ee296c60a1918bc6d51581576b1e3be14eb9",
+      "tonic_pc": 0,
+      "voicer": "jazz-synth",
+      "voicer_family": "synth",
+      "voicer_genre": "jazz",
+      "voicer_order": [
+        "jazz-synth",
+        "jazz-piano",
+        "jazz-guitar",
+        "pop-piano",
+        "pop-synth",
+        "pop-guitar"
+      ],
+      "voicing_summary": {
+        "dct_exposure": {
+          "isolated": 16,
+          "none": 17,
+          "octave": 33,
+          "top": 34
+        },
+        "extension_drop_count": 0,
+        "extension_drops": [],
+        "omitted_roles": {},
+        "relaxation_levels": {
+          "0": 96,
+          "4": 2,
+          "5": 2
+        },
+        "root_omission": {
+          "omitted": 12,
+          "retained": 88
+        }
+      }
+    },
+    "midi": {
+      "path": "gen/target-output/START_SONG_80.mid",
+      "sha256": "2d82c20e11035babfd208a70a6b41a429e583dabbd3000dcba5227088c70831f"
+    },
+    "score_ordinal": 80
+  },
+  "track_programs": {
+    "V0": 89,
+    "V1": 89,
+    "V9": 9
+  },
+  "voicing_style": {
+    "preferred_voicer": "jazz-synth",
+    "preferred_voicer_family": "synth",
+    "summary": {
+      "dct_exposure": {
+        "isolated": 16,
+        "none": 17,
+        "octave": 33,
+        "top": 34
+      },
+      "extension_drop_count": 0,
+      "extension_drops": [],
+      "omitted_roles": {},
+      "relaxation_levels": {
+        "0": 96,
+        "4": 2,
+        "5": 2
+      },
+      "root_omission": {
+        "omitted": 12,
+        "retained": 88
+      }
+    },
+    "voicer": "jazz-synth",
+    "voicer_family": "synth",
+    "voicer_genre": "jazz",
+    "voicer_order": [
+      "jazz-synth",
+      "jazz-piano",
+      "jazz-guitar",
+      "pop-piano",
+      "pop-synth",
+      "pop-guitar"
+    ]
+  }
+}

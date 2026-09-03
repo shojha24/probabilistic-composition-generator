@@ -100,8 +100,10 @@ def normalize_chord(chord):
 def main():
     # Setup paths
     ROOT_DIR = Path(__file__).resolve().parent.parent
-    input_csv = ROOT_DIR / 'chord_dataset_counts.csv'
-    output_csv = ROOT_DIR / 'chord_dataset_counts_fixed.csv'
+    EDA_DIR = Path(__file__).resolve().parent # This specifically targets your eda folder
+
+    input_csv = EDA_DIR / 'chord_dataset_counts.csv'
+    output_csv = EDA_DIR / 'chord_dataset_counts_fixed.csv'
 
     print(f"Loading {input_csv.name}...")
     df = pd.read_csv(input_csv)
