@@ -1,0 +1,343 @@
+{
+  "arpeggio": null,
+  "bass": {
+    "pad_collapse_inferred": false,
+    "rendered_instrument": {
+      "name": "synth-bass-1",
+      "program": 38
+    },
+    "track_file": "tracks/bass.txt"
+  },
+  "chord_pad": {
+    "instrument": {
+      "name": "distortion-guitar",
+      "program": 30
+    },
+    "pad_collapse_inferred": false,
+    "render_mode": "pads",
+    "track_file": "tracks/chord.txt"
+  },
+  "files": {
+    "arpeggio_track": null,
+    "bass_track": "tracks/bass.txt",
+    "chord_track": "tracks/chord.txt",
+    "labels": "labels.json",
+    "midi": "midi/song.mid",
+    "percussion_track": "tracks/percussion.txt",
+    "score": "score.txt"
+  },
+  "instruments_used": {
+    "bass": {
+      "name": "synth-bass-1",
+      "program": 38,
+      "track": "V1"
+    },
+    "chord": {
+      "name": "distortion-guitar",
+      "program": 30,
+      "track": "V0"
+    },
+    "percussion": {
+      "feel": "normal",
+      "included": true,
+      "track": "V9"
+    }
+  },
+  "label_summary": {
+    "bass_intervals": [
+      0,
+      2,
+      4,
+      7,
+      11
+    ],
+    "bpm": 120,
+    "duration_tokens": [
+      "h",
+      "h.",
+      "q",
+      "q.",
+      "w",
+      "w."
+    ],
+    "duration_total_seconds": 163.25,
+    "extension_density": [
+      0,
+      1,
+      2
+    ],
+    "extension_slots": {
+      "ninth": [
+        "9"
+      ],
+      "seventh": [
+        "7",
+        "b7",
+        "bb7"
+      ]
+    },
+    "extensions": [
+      "7",
+      "9",
+      "b7",
+      "bb7"
+    ],
+    "genre": "pop_rock",
+    "harte_chords": [
+      "A:1",
+      "A:maj",
+      "A:min",
+      "A:min7",
+      "Ab:1",
+      "Ab:maj",
+      "B:7(9)",
+      "B:7sus4(9)",
+      "B:sus4/F#",
+      "Bb:hdim7",
+      "Bb:maj",
+      "Bb:min",
+      "Bb:sus4",
+      "Bb:sus4/C",
+      "C:5",
+      "C:7",
+      "C:7sus4(9)",
+      "C:maj",
+      "C:maj/B",
+      "C:maj7",
+      "C:min",
+      "C:sus4",
+      "D:7",
+      "D:7sus4",
+      "D:maj/A",
+      "D:min",
+      "D:min/Db",
+      "D:min7",
+      "Db:5",
+      "Db:maj",
+      "E:7",
+      "E:maj/B",
+      "E:min",
+      "Eb:7sus4(9)",
+      "Eb:maj",
+      "Eb:sus2",
+      "F#:hdim7",
+      "F#:maj",
+      "F:maj",
+      "F:maj/C",
+      "F:maj6",
+      "F:min7/A",
+      "F:min7/C",
+      "G:1",
+      "G:5",
+      "G:7",
+      "G:7sus4",
+      "G:maj",
+      "G:sus4"
+    ],
+    "no_chord": {
+      "duration_seconds": 0,
+      "event_count": 0,
+      "event_rate": 0.0,
+      "has_no_chord": false
+    },
+    "num_chords": 100,
+    "root_intervals": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11
+    ],
+    "tonic_pc": 0,
+    "triads": [
+      "1",
+      "5",
+      "diminished",
+      "major",
+      "minor",
+      "sus2",
+      "sus4"
+    ]
+  },
+  "percussion": {
+    "feel": "normal",
+    "included": true,
+    "kit_tokens": [
+      "[ACOUSTIC_SNARE]s",
+      "[BASS_DRUM]s",
+      "[CLOSED_HI_HAT]s",
+      "[CRASH_CYMBAL_2]s"
+    ],
+    "pattern_signature_sha256": "e3c90de4469172d9adfb1ad531fdda5be8ffe00229ea910a2a5dd7abfa80dff8",
+    "track_event_count": 1305,
+    "track_file": "tracks/percussion.txt"
+  },
+  "sample_id": "song_083",
+  "selection_features": [
+    "bass_instrument:synth-bass-1",
+    "bass_interval:0",
+    "bass_interval:11",
+    "bass_interval:2",
+    "bass_interval:4",
+    "bass_interval:7",
+    "chord_instrument:distortion-guitar",
+    "dct_exposure:isolated",
+    "dct_exposure:none",
+    "dct_exposure:top",
+    "duration:h",
+    "duration:h.",
+    "duration:q",
+    "duration:q.",
+    "duration:w",
+    "duration:w.",
+    "extension:7",
+    "extension:9",
+    "extension:b7",
+    "extension:bb7",
+    "extension_density:0",
+    "extension_density:1",
+    "extension_density:2",
+    "extension_drops:no",
+    "family:guitar",
+    "genre:pop_rock",
+    "mode:pads",
+    "no_chord:no",
+    "omitted_roles:5th",
+    "pad_collapse:no",
+    "percussion:on",
+    "percussion_feel:normal",
+    "relaxation_levels:0",
+    "relaxation_levels:7",
+    "root_interval:0",
+    "root_interval:1",
+    "root_interval:10",
+    "root_interval:11",
+    "root_interval:2",
+    "root_interval:3",
+    "root_interval:4",
+    "root_interval:5",
+    "root_interval:6",
+    "root_interval:7",
+    "root_interval:8",
+    "root_interval:9",
+    "root_omission:retained",
+    "triad:1",
+    "triad:5",
+    "triad:diminished",
+    "triad:major",
+    "triad:minor",
+    "triad:sus2",
+    "triad:sus4"
+  ],
+  "source": {
+    "label": {
+      "path": "gen/target-pop-rock-labels/song_385.json",
+      "sha256": "3611f4594a9c6ce8edbb001cb2e61c3263f31a95be34ea3446392b934ed0452e"
+    },
+    "manifest_record": {
+      "arpeggio": null,
+      "bpm": 120,
+      "genre": "pop_rock",
+      "no_chord": {
+        "duration_rate": 0.0,
+        "duration_seconds": 0,
+        "event_count": 0,
+        "event_rate": 0.0
+      },
+      "num_chords": 100,
+      "ordinal": 1635,
+      "percussion_feel": "normal",
+      "percussion_included": true,
+      "preferred_voicer": "pop-guitar",
+      "preferred_voicer_family": "guitar",
+      "render_mode": "pads",
+      "seed": 1642,
+      "source_dir": "/mnt/c/Users/SO110258/Documents/probabilistic-composition-generator/gen/target-pop-rock-labels",
+      "source_file": "song_385.json",
+      "source_id": 385,
+      "source_sha256": "3611f4594a9c6ce8edbb001cb2e61c3263f31a95be34ea3446392b934ed0452e",
+      "tonic_pc": 0,
+      "voicer": "pop-guitar",
+      "voicer_family": "guitar",
+      "voicer_genre": "pop_rock",
+      "voicer_order": [
+        "pop-guitar",
+        "pop-synth",
+        "pop-piano",
+        "jazz-synth",
+        "jazz-guitar",
+        "jazz-piano"
+      ],
+      "voicing_summary": {
+        "dct_exposure": {
+          "isolated": 22,
+          "none": 73,
+          "top": 5
+        },
+        "extension_drop_count": 0,
+        "extension_drops": [],
+        "omitted_roles": {
+          "5th": 1
+        },
+        "relaxation_levels": {
+          "0": 82,
+          "7": 18
+        },
+        "root_omission": {
+          "retained": 100
+        }
+      }
+    },
+    "midi": {
+      "path": "gen/target-output/START_SONG_1635.mid",
+      "sha256": "1a40194846eeae0adb053d917467788294a6d29d9680bea158c121ea0ab147a9"
+    },
+    "score_ordinal": 1635
+  },
+  "track_programs": {
+    "V0": 30,
+    "V1": 38,
+    "V9": 9
+  },
+  "voicing_style": {
+    "preferred_voicer": "pop-guitar",
+    "preferred_voicer_family": "guitar",
+    "summary": {
+      "dct_exposure": {
+        "isolated": 22,
+        "none": 73,
+        "top": 5
+      },
+      "extension_drop_count": 0,
+      "extension_drops": [],
+      "omitted_roles": {
+        "5th": 1
+      },
+      "relaxation_levels": {
+        "0": 82,
+        "7": 18
+      },
+      "root_omission": {
+        "retained": 100
+      }
+    },
+    "voicer": "pop-guitar",
+    "voicer_family": "guitar",
+    "voicer_genre": "pop_rock",
+    "voicer_order": [
+      "pop-guitar",
+      "pop-synth",
+      "pop-piano",
+      "jazz-synth",
+      "jazz-guitar",
+      "jazz-piano"
+    ]
+  }
+}

@@ -433,6 +433,27 @@ validate one corpus, pass one `--labels-dir`; for a combined corpus, pass both
 label directories after the same option. `--manifest` and `--genre` are
 optional.
 
+Create a deterministic 100-song selection from the existing target labels,
+rendered score, and MIDI artifacts:
+
+```bash
+python3 tools/curate_target_corpus.py \
+  --manifest ./gen/target-scores.txt.manifest.json \
+  --score ./gen/target-scores.txt \
+  --midi-dir ./gen/target-output \
+  --out-dir ./gen/curated-songs \
+  --seed 20250308
+```
+
+The curation uses exact 50-jazz/50-pop-rock and 30-arpeggio/70-pad quotas,
+balances all six realized voicer variants, and greedily covers the observed
+triads, extensions, extension densities, duration tokens, root/bass
+intervals, instruments, percussion states, voicing decisions, and arpeggio
+patterns. Each `song_NNN/` directory contains `labels.json`, `score.txt`,
+`midi/song.mid`, separate `tracks/` files, and `metadata.json`. The top-level
+`manifest.json` records source ordinals, hashes, quotas, coverage, and
+selection criteria; `validation.json` records the bundle-level checks.
+
 Use `--target-events N` for a smaller or custom total. The event budget is
 split between genres, and the §08 minimums are scaled for smaller budgets:
 
@@ -620,6 +641,7 @@ The current responsibilities are:
 | `extract_distributions.py` | Learn count tables |
 | `chord_gen.py` | Sample natural timed symbolic chord events |
 | `target_corpus_gen.py` | Generate the separate quota-aware target corpus |
+| `tools/curate_target_corpus.py` | Create an auditable diversity-aware target subset |
 | `chord_module.py` | Select a voicer and render pad or arpeggio chord tracks |
 | `bass_module.py` | Render bass tracks |
 | `percussion_module.py` | Render optional voice-9 percussion tracks |

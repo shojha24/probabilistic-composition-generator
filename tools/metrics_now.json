@@ -1,0 +1,32 @@
+{
+  "jazz": {
+    "total_chords": 4800,
+    "avg_notes_per_chord": 4.62,
+    "dense_ge_6": 727,
+    "dense_ge_6_pct": 15.15,
+    "close_lt3": 1604,
+    "close_lt3_pct": 33.42,
+    "close_lt2": 92,
+    "close_lt2_pct": 1.92,
+    "pc_doubling": 2091,
+    "pc_doubling_pct": 43.56,
+    "exact_midi_dup": 0,
+    "third_doubled": 194,
+    "all_label_tensions_spelled": 97
+  },
+  "pop_rock": {
+    "total_chords": 4800,
+    "avg_notes_per_chord": 4.56,
+    "dense_ge_6": 829,
+    "dense_ge_6_pct": 17.27,
+    "close_lt3": 535,
+    "close_lt3_pct": 11.15,
+    "close_lt2": 0,
+    "close_lt2_pct": 0.0,
+    "pc_doubling": 2856,
+    "pc_doubling_pct": 59.5,
+    "exact_midi_dup": 0,
+    "third_doubled": 289,
+    "all_label_tensions_spelled": 60
+  }
+}

@@ -1,0 +1,331 @@
+{
+  "arpeggio": null,
+  "bass": {
+    "pad_collapse_inferred": true,
+    "rendered_instrument": {
+      "name": "new-age-pad",
+      "program": 88
+    },
+    "track_file": "tracks/bass.txt"
+  },
+  "chord_pad": {
+    "instrument": {
+      "name": "new-age-pad",
+      "program": 88
+    },
+    "pad_collapse_inferred": true,
+    "render_mode": "pads",
+    "track_file": "tracks/chord.txt"
+  },
+  "files": {
+    "arpeggio_track": null,
+    "bass_track": "tracks/bass.txt",
+    "chord_track": "tracks/chord.txt",
+    "labels": "labels.json",
+    "midi": "midi/song.mid",
+    "percussion_track": "tracks/percussion.txt",
+    "score": "score.txt"
+  },
+  "instruments_used": {
+    "bass": {
+      "name": "new-age-pad",
+      "program": 88,
+      "track": "V1"
+    },
+    "chord": {
+      "name": "new-age-pad",
+      "program": 88,
+      "track": "V0"
+    },
+    "percussion": {
+      "feel": "normal",
+      "included": false,
+      "track": "V9"
+    }
+  },
+  "label_summary": {
+    "bass_intervals": [
+      0,
+      4,
+      7,
+      11
+    ],
+    "bpm": 120,
+    "duration_tokens": [
+      "h",
+      "h.",
+      "q",
+      "q.",
+      "w",
+      "w.",
+      "ww"
+    ],
+    "duration_total_seconds": 176.25,
+    "extension_density": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "extension_slots": {
+      "eleventh": [
+        "11"
+      ],
+      "ninth": [
+        "#9",
+        "9"
+      ],
+      "seventh": [
+        "7",
+        "b7"
+      ]
+    },
+    "extensions": [
+      "#9",
+      "11",
+      "7",
+      "9",
+      "b7"
+    ],
+    "genre": "pop_rock",
+    "harte_chords": [
+      "A:7",
+      "A:7(9)",
+      "A:min",
+      "A:min7",
+      "Ab:maj",
+      "Bb:maj",
+      "Bb:maj/D",
+      "Bb:sus4",
+      "C:5",
+      "C:7",
+      "C:7(#9)",
+      "C:maj",
+      "C:min",
+      "C:sus2",
+      "D:7(9)",
+      "D:maj",
+      "D:min",
+      "D:min7",
+      "Db:5",
+      "Db:maj/C",
+      "E:7",
+      "E:min7",
+      "Eb:7",
+      "Eb:maj",
+      "Eb:min",
+      "F#:min7",
+      "F:5",
+      "F:7",
+      "F:7/C",
+      "F:maj",
+      "F:maj7",
+      "F:min",
+      "F:min7",
+      "F:sus4",
+      "G:5",
+      "G:7",
+      "G:7(#9)",
+      "G:7(9,11)",
+      "G:7/B",
+      "G:7sus4",
+      "G:aug7",
+      "G:maj",
+      "G:min",
+      "G:min7"
+    ],
+    "no_chord": {
+      "duration_seconds": 0,
+      "event_count": 0,
+      "event_rate": 0.0,
+      "has_no_chord": false
+    },
+    "num_chords": 100,
+    "root_intervals": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10
+    ],
+    "tonic_pc": 0,
+    "triads": [
+      "5",
+      "augmented",
+      "major",
+      "minor",
+      "sus2",
+      "sus4"
+    ]
+  },
+  "percussion": {
+    "feel": "normal",
+    "included": false,
+    "kit_tokens": [],
+    "pattern_signature_sha256": "8103e2fb88adda5ffdf66685e0b3978cac0c82e713fbd97dbfbc40e3b5494b06",
+    "track_event_count": 1409,
+    "track_file": "tracks/percussion.txt"
+  },
+  "sample_id": "song_099",
+  "selection_features": [
+    "bass_instrument:new-age-pad",
+    "bass_interval:0",
+    "bass_interval:11",
+    "bass_interval:4",
+    "bass_interval:7",
+    "chord_instrument:new-age-pad",
+    "dct_exposure:isolated",
+    "dct_exposure:none",
+    "dct_exposure:octave",
+    "dct_exposure:top",
+    "duration:h",
+    "duration:h.",
+    "duration:q",
+    "duration:q.",
+    "duration:w",
+    "duration:w.",
+    "duration:ww",
+    "extension:#9",
+    "extension:11",
+    "extension:7",
+    "extension:9",
+    "extension:b7",
+    "extension_density:0",
+    "extension_density:1",
+    "extension_density:2",
+    "extension_density:3",
+    "extension_drops:no",
+    "family:synth",
+    "genre:pop_rock",
+    "mode:pads",
+    "no_chord:no",
+    "pad_collapse:yes",
+    "percussion:off",
+    "percussion_feel:normal",
+    "relaxation_levels:0",
+    "root_interval:0",
+    "root_interval:1",
+    "root_interval:10",
+    "root_interval:2",
+    "root_interval:3",
+    "root_interval:4",
+    "root_interval:5",
+    "root_interval:6",
+    "root_interval:7",
+    "root_interval:8",
+    "root_interval:9",
+    "root_omission:retained",
+    "triad:5",
+    "triad:augmented",
+    "triad:major",
+    "triad:minor",
+    "triad:sus2",
+    "triad:sus4"
+  ],
+  "source": {
+    "label": {
+      "path": "gen/target-pop-rock-labels/song_1154.json",
+      "sha256": "1355a1f1a4a68aa83642fd9fc7614c6552562b880a25868345a791f9cb1a12a9"
+    },
+    "manifest_record": {
+      "arpeggio": null,
+      "bpm": 120,
+      "genre": "pop_rock",
+      "no_chord": {
+        "duration_rate": 0.0,
+        "duration_seconds": 0,
+        "event_count": 0,
+        "event_rate": 0.0
+      },
+      "num_chords": 100,
+      "ordinal": 2404,
+      "percussion_feel": "normal",
+      "percussion_included": false,
+      "preferred_voicer": "pop-synth",
+      "preferred_voicer_family": "synth",
+      "render_mode": "pads",
+      "seed": 2411,
+      "source_dir": "/mnt/c/Users/SO110258/Documents/probabilistic-composition-generator/gen/target-pop-rock-labels",
+      "source_file": "song_1154.json",
+      "source_id": 1154,
+      "source_sha256": "1355a1f1a4a68aa83642fd9fc7614c6552562b880a25868345a791f9cb1a12a9",
+      "tonic_pc": 0,
+      "voicer": "pop-synth",
+      "voicer_family": "synth",
+      "voicer_genre": "pop_rock",
+      "voicer_order": [
+        "pop-synth",
+        "pop-piano",
+        "pop-guitar",
+        "jazz-synth",
+        "jazz-piano",
+        "jazz-guitar"
+      ],
+      "voicing_summary": {
+        "dct_exposure": {
+          "isolated": 15,
+          "none": 69,
+          "octave": 11,
+          "top": 5
+        },
+        "extension_drop_count": 0,
+        "extension_drops": [],
+        "omitted_roles": {},
+        "relaxation_levels": {
+          "0": 100
+        },
+        "root_omission": {
+          "retained": 100
+        }
+      }
+    },
+    "midi": {
+      "path": "gen/target-output/START_SONG_2404.mid",
+      "sha256": "8ab41afc56b45982584acd5dc15a422ab6015e46d85ecb1e10f1c308608ba649"
+    },
+    "score_ordinal": 2404
+  },
+  "track_programs": {
+    "V0": 88,
+    "V1": 88,
+    "V9": 9
+  },
+  "voicing_style": {
+    "preferred_voicer": "pop-synth",
+    "preferred_voicer_family": "synth",
+    "summary": {
+      "dct_exposure": {
+        "isolated": 15,
+        "none": 69,
+        "octave": 11,
+        "top": 5
+      },
+      "extension_drop_count": 0,
+      "extension_drops": [],
+      "omitted_roles": {},
+      "relaxation_levels": {
+        "0": 100
+      },
+      "root_omission": {
+        "retained": 100
+      }
+    },
+    "voicer": "pop-synth",
+    "voicer_family": "synth",
+    "voicer_genre": "pop_rock",
+    "voicer_order": [
+      "pop-synth",
+      "pop-piano",
+      "pop-guitar",
+      "jazz-synth",
+      "jazz-piano",
+      "jazz-guitar"
+    ]
+  }
+}
