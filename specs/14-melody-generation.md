@@ -274,6 +274,69 @@ Program numbers and exact weights should be centralized in
 `instruments.py`, validated at startup, and selected with a deterministic
 child RNG. A profile must never modify chord instrument selection.
 
+### 4.4 Melody-only instrument catalog
+
+The melody catalog is additive and must remain separate from
+`CHORD_INSTRUMENTS` and `BASS_INSTRUMENTS`. Do not add the `melody` role to an
+existing chord or bass entry, change an existing program number, or change the
+weights or eligibility of any non-melody module. A future implementation may
+define a separate `MELODY_INSTRUMENTS` tuple or mapping in `instruments.py`;
+the existing catalogs remain unchanged.
+
+The repository stores `Instrument.program` as a **zero-based raw MIDI/GM
+program ID**. The 1-based patch number is included below only to prevent
+off-by-one mistakes when comparing with external GM tables. Runtime score
+generation must use the zero-based ID, consistent with the current
+`I{program}` output.
+
+The first melody implementation should keep this curated set:
+
+| AAM family | Melody instrument name | Program ID (0-based) | GM patch (1-based) | Current catalog |
+|---|---|---:|---:|---|
+| Bowed | `violin` | 40 | 41 | melody-only |
+| Bowed | `viola` | 41 | 42 | melody-only |
+| Bowed/world string | `fiddle` | 110 | 111 | already present |
+| Brass | `trumpet` | 56 | 57 | melody-only |
+| Brass | `trombone` | 57 | 58 | melody-only |
+| Flute/Pipe | `flute` | 73 | 74 | melody-only |
+| Flute/Pipe | `pan-flute` | 75 | 76 | melody-only |
+| Flute/Pipe | `shakuhachi` | 77 | 78 | already present |
+| Guitars | `electric-guitar-clean` | 27 | 28 | already present |
+| Guitars | `overdriven-guitar` | 29 | 30 | already present |
+| Guitars | `distortion-guitar` | 30 | 31 | already present |
+| Sax/Reed | `alto-sax` | 65 | 66 | melody-only |
+| Sax/Reed | `tenor-sax` | 66 | 67 | melody-only |
+| Sax/Reed | `clarinet` | 71 | 72 | melody-only |
+| Synth lead | `synth-lead-square` | 80 | 81 | already present |
+
+Use the catalog with the following initial profile guidance:
+
+| Profile | Preferred instruments |
+|---|---|
+| `lead-high-sparse` | `violin`, `fiddle`, `flute`, `pan-flute`, `alto-sax`, `clarinet`, `shakuhachi` |
+| `lead-mid-neutral` | `viola`, `trumpet`, `electric-guitar-clean`, `clarinet`, `tenor-sax`, `fiddle` |
+| `lead-mid-dense` | `overdriven-guitar`, `distortion-guitar`, `trombone`, `tenor-sax`, `synth-lead-square`, `viola` |
+
+The profile is allowed to reject a preferred patch when its configured MIDI
+range or tessitura would make the requested melody infeasible. Such a choice
+must be recorded as an instrument-selection fallback; it must not mutate the
+other module catalogs.
+
+The following reference instruments are intentionally not in the first melody
+catalog:
+
+- `Erhu`, `Jinghu`, `Morin Khuur`, `Fujara`, `Flugelhorn`, and `Ukulele` do not
+  have dedicated General MIDI 1 programs in the supplied table. Do not invent
+  program IDs; add them only behind an explicit non-GM soundfont mapping.
+- `Concert Flute` is represented by the standard GM `flute` entry above.
+- `Cello` and `Contrabass` remain chord/bass resources in the current role
+  design and are not selected for the initial melody range.
+- `Sitar`, `Banjo`, `Shamisen`, and `Koto` remain chord/arpeggio resources in
+  the current design, despite being capable of carrying a melodic line.
+- Piano, electric-piano, organ, pad, choir, and sound-effect patches remain
+  outside the initial melody catalog so harmonic and melodic roles stay
+  distinguishable.
+
 ## 5. Tonal and harmonic candidate model
 
 ### 5.1 Candidate sources
