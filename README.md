@@ -235,6 +235,25 @@ as the complement. The per-song `render_mode` values and aggregate
 are recorded in the manifest. Existing `pads` and `arpeggios` modes remain
 single-mode renders.
 
+Control the per-song probability of audible percussion with
+`--percussion-percent`; it defaults to `70` to preserve the existing 70/30
+audible/silent split:
+
+```bash
+python render.py \
+  --in-dir ./gen/pop-rock-labels \
+  --out ./gen/percussion_scores.txt \
+  --mode pads \
+  --percussion-percent 85 \
+  --seed 7
+```
+
+The value must be between 0 and 100. This is a seeded probability evaluated
+once per song, not an exact corpus quota. A song that fails the draw still
+gets a synchronized silent `V9` track. The requested percentage, probability,
+and realized count are recorded in the manifest. The Python APIs expose the
+same control as `percussion_percent`.
+
 Directory rendering requires an explicit integer `--seed` and accepts one or
 more `--in-dir` values. Each directory's source files are validated and
 sorted by numeric ID before rendering, so `song_10.json` follows
@@ -249,12 +268,12 @@ duplicate input directories fail the render.
   arpeggios from those same selected voicings;
 - `bass_module.py` renders the generated bass pitch in a low register.
 - `percussion_module.py` repeats a seeded kick, snare, and cymbal groove on
-  voice `V9` (the General MIDI percussion channel). Each song has a 70%
-  chance of audible percussion; the remaining 30% retain a synchronized
-  silent `V9` track. When percussion is audible, songs at 60–120 BPM have a
-  20% chance of a cut-time (double-time) feel, while songs at 121–180 BPM have
-  a 20% chance of a half-time feel. The selected feel is recorded in the
-  manifest.
+  voice `V9` (the General MIDI percussion channel). Each song has a configurable
+  chance of audible percussion, defaulting to 70%; the remaining songs retain
+  a synchronized silent `V9` track. When percussion is audible, songs at
+  60–120 BPM have a 20% chance of a cut-time (double-time) feel, while songs at
+  121–180 BPM have a 20% chance of a half-time feel. The selected feel and
+  inclusion result are recorded in the manifest.
 
 The output uses `START_SONG_N` and `END_SONG` markers. All three tracks use
 the chord duration timeline, so they remain synchronized. In arpeggio mode,

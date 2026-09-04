@@ -63,6 +63,32 @@ def test_render_song_wires_percussion_voice():
     assert score.split("  ")[-1].startswith("V9 ")
 
 
+def test_render_song_exposes_percussion_inclusion_percentage():
+    progression = _progression("w")
+    default_score = render_song(progression, seed=0)
+    explicit_default_score = render_song(
+        progression, seed=0, percussion_percent=70
+    )
+    assert default_score == explicit_default_score
+
+    silent_score = render_song(
+        progression, seed=0, percussion_percent=0
+    )
+    assert "[" not in silent_score.split("  ")[-1]
+
+    audible_score = render_song(
+        progression, seed=0, percussion_percent=100
+    )
+    assert "[" in audible_score.split("  ")[-1]
+
+
+def test_render_song_rejects_invalid_percussion_inclusion_percentage():
+    with pytest.raises(ValueError, match="percussion_percent"):
+        render_song(_progression("w"), seed=0, percussion_percent=-1)
+    with pytest.raises(ValueError, match="percussion_percent"):
+        render_song(_progression("w"), seed=0, percussion_percent=101)
+
+
 def test_omitted_percussion_keeps_a_silent_synchronized_voice():
     module = PercussionModule(seed=4, omission_probability=1)
     track = module.render(_progression("w", "h"))

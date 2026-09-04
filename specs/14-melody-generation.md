@@ -49,6 +49,15 @@ The first implementation should use:
 Per-chord key estimation is not the default. Optional local-key inference may
 be added later as a phrase-level latent context with a persistence cost.
 
+When melody is requested, apply one song-level inclusion gate with a default
+probability of **70%**. Thus, 70% of eligible songs receive a generated melody
+and 30% receive no V2 melody track, matching the existing percussion-style
+song-level inclusion behavior. The gate is evaluated once per song, not once
+per chord or note, and uses its own deterministic random stream. An explicit
+`melody_condition=none` remains a hard disable and bypasses the gate. The
+inclusion probability must be configurable for tests and corpus experiments,
+with `0.70` as the default.
+
 ## 2. Goals and non-goals
 
 ### 2.1 Goals
@@ -423,6 +432,7 @@ domain labels, never Python's process-randomized `hash()`:
 
 ```text
 render seed
+    -> melody-inclusion
     -> melody-profile
     -> melody-rhythm
     -> melody-candidate
@@ -431,7 +441,8 @@ render seed
 
 The melody streams must not consume the voicing, bass, percussion, instrument,
 or arpeggio RNGs. With the same progression, render seed, voicing order,
-profile, and condition, melody output must be byte-reproducible.
+profile, condition, and inclusion probability, the inclusion decision and
+melody output must be byte-reproducible.
 
 ## 7. Exposure conditions
 
@@ -475,6 +486,7 @@ render_song(
     mode="pads",
     melody_condition="none",
     melody_profile="lead-high-sparse",
+    melody_inclusion_probability=0.70,
 )
 ```
 
@@ -485,11 +497,20 @@ For directory rendering, add equivalent options:
     none | neutral | dct_exposed | dct_withheld | chromatic | dense_overlap
 --melody-profile
     lead-high-sparse | lead-mid-neutral | lead-mid-dense
+--melody-inclusion-probability
+    floating-point value from 0.0 to 1.0; default 0.70
 ```
 
 `none` is the default and must preserve existing accompaniment behavior.
 Melody configuration is independent of `--mode mixed` and its
 `--arpeggio-percent`/`--pad-percent` allocation.
+
+For any condition other than `none`, the inclusion probability is evaluated
+once for each source song. If the song is not selected, render no V2 track and
+record `omission_reason=probability_gate`; do not generate or partially
+serialize a melody. A probability of `1.0` is the deterministic way to
+request melody for every song, and `0.0` is equivalent to an intentional
+omission while retaining the requested condition in provenance.
 
 ### 8.2 Score tracks
 
@@ -531,8 +552,11 @@ Add a `melody` field to each render manifest record:
 {
   "melody": {
     "enabled": true,
+    "included": true,
     "condition": "neutral",
     "profile": "lead-high-sparse",
+    "inclusion_probability": 0.7,
+    "omission_reason": null,
     "instrument": "flute",
     "instrument_program": 73,
     "track": "V2",
@@ -564,13 +588,19 @@ Add a `melody` field to each render manifest record:
 }
 ```
 
-With melody disabled, `melody` is `null` or an equivalent explicit disabled
-record. The chosen representation must be consistent across all manifests.
+When `melody_condition=none`, `melody` is `null` or an equivalent explicit
+disabled record. When a requested melody is omitted by the 70% gate, retain an
+explicit disabled record with `included=false`, the requested condition and
+profile, the configured `inclusion_probability`, and
+`omission_reason=probability_gate`. The chosen representation must be
+consistent across all manifests.
 
 The manifest must also record:
 
 - source label hash and source ordinal already used by the renderer;
 - melody condition and profile;
+- requested and realized inclusion state;
+- configured inclusion probability and omission reason;
 - deterministic seed derivation version;
 - source-degree versus realized-voicing evidence;
 - fallback reasons;
@@ -654,8 +684,9 @@ Create `tests/test_melody.py` covering:
 8. phrase reset at no-chord events;
 9. source-event mapping for notes held across playable chord boundaries;
 10. DCT/extension exposed and withheld conditions;
-11. deterministic output for equal seeds; and
-12. explicit fallback diagnostics when no legal candidate remains.
+11. the 70% song-level inclusion gate and its `0.0`/`1.0` boundaries;
+12. deterministic inclusion and melody output for equal seeds; and
+13. explicit fallback diagnostics when no legal candidate remains.
 
 Include rare examples such as:
 
@@ -671,6 +702,8 @@ Include rare examples such as:
 Extend `tests/test_rendered_corpus.py` to verify:
 
 - a melody-enabled render contains V2 and its manifest record;
+- a requested melody render omits V2 and records a probability-gate omission
+  when the seeded 70% inclusion decision rejects a song;
 - a melody-disabled render remains backward compatible;
 - V0/V1/V9 are invariant under melody enablement;
 - mixed pad/arpeggio allocation is unchanged when melody is enabled;
@@ -815,23 +848,25 @@ the chord evidence.
 The first implementation phase is accepted only when:
 
 1. `melody_condition=none` preserves existing rendering behavior.
-2. A fixed seed produces byte-identical melody score and metadata.
-3. Different conditions preserve the same chord labels, source hashes, timing,
+2. A requested melody condition applies exactly one seeded song-level inclusion
+   decision, defaulting to 70% inclusion.
+3. A fixed seed produces byte-identical inclusion, melody score, and metadata.
+4. Different conditions preserve the same chord labels, source hashes, timing,
    voicer choices, V0, V1, and V9 decisions.
-4. Every melody note has valid range, timing, role, pitch-source, and source
+5. Every included melody note has valid range, timing, role, pitch-source, and source
    event provenance.
-5. No-chord events are synchronized rests and phrase resets by default.
-6. Non-diatonic and extension-rich events can produce legal candidates without
+6. Omitted songs contain no V2 track and retain an auditable omission reason.
+7. No-chord events are synchronized rests and phrase resets by default.
+8. Non-diatonic and extension-rich events can produce legal candidates without
    a per-chord hard key reset.
-7. A melody note may cross playable chord boundaries only with explicit
+9. A melody note may cross playable chord boundaries only with explicit
    source-event mapping and valid duration.
-8. DCT/extension exposure and withholding are measurable rather than inferred
+10. DCT/extension exposure and withholding are measurable rather than inferred
    from final audio.
-9. The validator reports melody-specific failures without weakening existing
+11. The validator reports melody-specific failures without weakening existing
    chord, arpeggio, bass, percussion, or no-chord checks.
-10. Focused unit and integration tests cover both new behavior and regressions.
+12. Focused unit and integration tests cover both new behavior and regressions.
 
 Realism and recognition utility remain empirical outcomes. The generator should
 ship with a controlled realism envelope and explicit variants, not with a
 claim that one melody policy is universally correct.
-
