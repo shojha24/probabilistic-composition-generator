@@ -133,6 +133,36 @@ def test_mixed_render_directory_records_each_mode(tmp_path):
     assert report["hard_failure_count"] == 0
 
 
+def test_render_directory_records_percussion_inclusion_target(tmp_path):
+    for index in range(2):
+        (tmp_path / f"song_{index}.json").write_text(
+            json.dumps(_label())
+        )
+
+    output = tmp_path / "scores.txt"
+    render_directory(
+        tmp_path,
+        str(output),
+        seed=7,
+        mode="pads",
+        percussion_percent=0,
+    )
+    manifest = json.loads(
+        output.with_name(output.name + ".manifest.json").read_text()
+    )
+
+    assert manifest["percussion_inclusion_percent"] == 0.0
+    assert manifest["percussion_inclusion_probability"] == 0.0
+    assert manifest["percussion_included_count"] == 0
+    assert manifest["percussion_realized_percent"] == 0.0
+    assert "--percussion-percent 0" in manifest["command"]
+    assert all(
+        record["percussion_included"] is False
+        and record["percussion_inclusion_percent"] == 0.0
+        for record in manifest["records"]
+    )
+
+
 def test_manifest_hash_and_score_pairing(tmp_path):
     label_path = tmp_path / "song_10.json"
     raw = json.dumps(_label(), separators=(",", ":")).encode()

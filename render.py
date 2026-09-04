@@ -19,7 +19,10 @@ from pathlib import Path
 from bass_module import BassModule
 from chord_module import ChordModule, POLICIES
 from instruments import ARPEGGIO_PROFILES
-from percussion_module import PercussionModule
+from percussion_module import (
+    PERCUSSION_OMISSION_PROBABILITY,
+    PercussionModule,
+)
 
 
 _SONG_FILENAME = re.compile(r"^song_(\d+)\.json$")
@@ -42,6 +45,9 @@ _VOICER_IDS = tuple(
 _VOICER_ORDER = {
     voicer: index for index, voicer in enumerate(_VOICER_IDS)
 }
+_DEFAULT_PERCUSSION_PERCENT = (
+    100.0 * (1.0 - PERCUSSION_OMISSION_PROBABILITY)
+)
 
 
 def _input_dir_list(
@@ -146,6 +152,12 @@ def _percentage(value: float | int, name: str) -> float:
     return float(value)
 
 
+def _percussion_inclusion_percent(value: float | int | None) -> float:
+    if value is None:
+        return _DEFAULT_PERCUSSION_PERCENT
+    return _percentage(value, "percussion_percent")
+
+
 def _render_mode_plan(
     mode: str,
     file_count: int,
@@ -225,10 +237,13 @@ def _render_command(
     seed: int,
     mode: str,
     render_mode_percentages: dict[str, float] | None = None,
+    percussion_percent: float = _DEFAULT_PERCUSSION_PERCENT,
 ) -> str:
+    percussion_percent = _percussion_inclusion_percent(percussion_percent)
     command = [
         sys.executable, "render.py", "--in-dir", *input_dirs,
         "--out", output, "--mode", mode, "--seed", str(seed),
+        "--percussion-percent", f"{percussion_percent:g}",
     ]
     if mode == "mixed":
         if render_mode_percentages is None:
@@ -435,7 +450,16 @@ def _voicer_order(
 
 def _render_source(args: tuple) -> dict:
     """Render one source record in an isolated worker."""
-    index, raw, seed, mode, *voicer_orders = args
+    index, raw, seed, mode, *extras = args
+    percussion_percent = _DEFAULT_PERCUSSION_PERCENT
+    voicer_orders = extras
+    if (
+        extras
+        and isinstance(extras[-1], (int, float))
+        and not isinstance(extras[-1], bool)
+    ):
+        percussion_percent = _percussion_inclusion_percent(extras[-1])
+        voicer_orders = extras[:-1]
     progression = json.loads(raw.decode("utf-8"))
     chord_module = ChordModule(mode=mode, seed=seed + index)
     if voicer_orders:
@@ -465,7 +489,10 @@ def _render_source(args: tuple) -> dict:
         pad_mode=mode == "pads",
         chord_midis=chord_module.last_voiced_midis,
     )
-    percussion_module = PercussionModule(seed=seed + index)
+    percussion_module = PercussionModule(
+        seed=seed + index,
+        omission_probability=1.0 - percussion_percent / 100.0,
+    )
     percussion_track = percussion_module.render(progression)
     return {
         "chord_track": chord_track,
@@ -473,6 +500,7 @@ def _render_source(args: tuple) -> dict:
         "percussion_track": percussion_track,
         "percussion_included": percussion_module.last_included,
         "percussion_feel": percussion_module.last_feel,
+        "percussion_inclusion_percent": percussion_percent,
         "voicer": chord_module.last_voicer or "unknown",
         "voicer_genre": chord_module.last_voicer_genre,
         "voicer_family": chord_module.last_voicer_family,
@@ -490,7 +518,14 @@ def _render_source(args: tuple) -> dict:
     }
 
 
-def render_song(progression: dict, seed: int | None = None, mode: str = "pads") -> str:
+def render_song(
+    progression: dict,
+    seed: int | None = None,
+    mode: str = "pads",
+    *,
+    percussion_percent: float | int | None = None,
+) -> str:
+    percussion_percent = _percussion_inclusion_percent(percussion_percent)
     chord_module = ChordModule(mode=mode, seed=seed)
     chords = chord_module.render(
         progression,
@@ -503,7 +538,10 @@ def render_song(progression: dict, seed: int | None = None, mode: str = "pads") 
         pad_mode=mode == "pads",
         chord_midis=chord_module.last_voiced_midis,
     )
-    percussion = PercussionModule(seed=seed).render(progression)
+    percussion = PercussionModule(
+        seed=seed,
+        omission_probability=1.0 - percussion_percent / 100.0,
+    ).render(progression)
     return "  ".join((chords, bass, percussion))
 
 
@@ -515,6 +553,7 @@ def render_directory(
     *,
     arpeggio_percent: float | None = None,
     pad_percent: float | None = None,
+    percussion_percent: float | int | None = None,
 ) -> None:
     if not isinstance(seed, int) or isinstance(seed, bool):
         raise ValueError("render_directory requires an explicit integer seed")
@@ -526,6 +565,9 @@ def render_directory(
         seed,
         arpeggio_percent,
         pad_percent,
+    )
+    percussion_inclusion_percent = _percussion_inclusion_percent(
+        percussion_percent
     )
     render_mode_counts = Counter(render_modes)
     source_dirs = [
@@ -539,6 +581,7 @@ def render_directory(
     manifest_records = []
     no_chord_by_genre = Counter()
     no_chord_duration_by_genre = Counter()
+    percussion_included_count = 0
     output_path.parent.mkdir(parents=True, exist_ok=True)
     temporary_output = tempfile.NamedTemporaryFile(
         mode="w", encoding="utf-8", dir=output_path.parent,
@@ -571,6 +614,7 @@ def render_directory(
                             seed,
                             render_modes[batch_start + offset],
                             voicer_order,
+                            percussion_inclusion_percent,
                         )
                         for offset, (
                             (_source_id, _path, raw, _progression, _source_dir),
@@ -592,6 +636,8 @@ def render_directory(
                         no_chord = _no_chord_summary(progression)
                         no_chord_by_genre[genre] += no_chord["event_count"]
                         no_chord_duration_by_genre[genre] += no_chord["duration_seconds"]
+                        if result["percussion_included"]:
+                            percussion_included_count += 1
                         chord_track = result["chord_track"]
                         bass_track = result["bass_track"]
                         percussion_track = result["percussion_track"]
@@ -624,6 +670,9 @@ def render_directory(
                             "arpeggio": result["arpeggio"],
                             "percussion_included": result["percussion_included"],
                             "percussion_feel": result["percussion_feel"],
+                            "percussion_inclusion_percent": (
+                                percussion_inclusion_percent
+                            ),
                             "seed": seed + index,
                             "voicing_summary": result["voicing_summary"],
                             "no_chord": no_chord,
@@ -647,6 +696,7 @@ def render_directory(
                 seed,
                 effective_mode,
                 render_mode_targets if effective_mode == "mixed" else None,
+                percussion_inclusion_percent,
             ),
             "seed": seed,
             "source_dir": source_dirs[0] if len(source_dirs) == 1 else None,
@@ -668,6 +718,15 @@ def render_directory(
             },
             "render_mode_targets": (
                 render_mode_targets if effective_mode == "mixed" else None
+            ),
+            "percussion_inclusion_percent": percussion_inclusion_percent,
+            "percussion_inclusion_probability": (
+                percussion_inclusion_percent / 100.0
+            ),
+            "percussion_included_count": percussion_included_count,
+            "percussion_realized_percent": (
+                100.0 * percussion_included_count / len(render_modes)
+                if render_modes else 0.0
             ),
             "voicer_counts": {
                 voicer: voicer_counts.get(voicer, 0)
@@ -798,6 +857,17 @@ def main() -> None:
         type=float,
         help="Target percentage of songs rendered as pads.",
     )
+    parser.add_argument(
+        "--percussion-percent",
+        "--percussion-percentage",
+        "--percussion-inclusion-percent",
+        dest="percussion_percent",
+        type=float,
+        help=(
+            "Per-song probability percentage for audible percussion; "
+            "default is 70."
+        ),
+    )
     args = parser.parse_args()
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     render_directory(
@@ -807,6 +877,7 @@ def main() -> None:
         args.mode,
         arpeggio_percent=args.arpeggio_percent,
         pad_percent=args.pad_percent,
+        percussion_percent=args.percussion_percent,
     )
 
 
