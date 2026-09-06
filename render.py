@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
 
 from bass_module import BassModule
@@ -48,6 +49,17 @@ _VOICER_ORDER = {
 _DEFAULT_PERCUSSION_PERCENT = (
     100.0 * (1.0 - PERCUSSION_OMISSION_PROBABILITY)
 )
+
+
+@dataclass(frozen=True)
+class RenderedSongTracks:
+    """The retained role strings for one rendered source song."""
+
+    ordinal: int
+    chord_track: str
+    bass_track: str
+    percussion_track: str
+    mixed_line: str
 
 
 def _input_dir_list(
@@ -136,9 +148,31 @@ def _generator_revision() -> tuple[str, bool]:
         return "unknown", False
 
 
-def _manifest_path(output: str) -> Path:
+def _manifest_path(output: str | Path) -> Path:
     output_path = Path(output)
     return output_path.with_name(output_path.name + ".manifest.json")
+
+
+def _track_output_paths(output: str | Path) -> dict[str, Path]:
+    """Derive and validate the complete score output set."""
+    output_path = Path(output)
+    paths = {
+        "mixed": output_path,
+        "chords": output_path.with_name(
+            f"{output_path.stem}_chords{output_path.suffix}"
+        ),
+        "bass": output_path.with_name(
+            f"{output_path.stem}_bass{output_path.suffix}"
+        ),
+        "percussion": output_path.with_name(
+            f"{output_path.stem}_percussion{output_path.suffix}"
+        ),
+        "manifest": _manifest_path(output_path),
+    }
+    resolved = [path.resolve() for path in paths.values()]
+    if len(set(resolved)) != len(resolved):
+        raise ValueError("derived render output paths must be unique")
+    return paths
 
 
 def _percentage(value: float | int, name: str) -> float:
@@ -448,41 +482,31 @@ def _voicer_order(
     ])
 
 
-def _render_source(args: tuple) -> dict:
-    """Render one source record in an isolated worker."""
-    index, raw, seed, mode, *extras = args
-    percussion_percent = _DEFAULT_PERCUSSION_PERCENT
-    voicer_orders = extras
-    if (
-        extras
-        and isinstance(extras[-1], (int, float))
-        and not isinstance(extras[-1], bool)
-    ):
-        percussion_percent = _percussion_inclusion_percent(extras[-1])
-        voicer_orders = extras[:-1]
-    progression = json.loads(raw.decode("utf-8"))
-    chord_module = ChordModule(mode=mode, seed=seed + index)
-    if voicer_orders:
-        requested_order = voicer_orders[0]
-        if isinstance(requested_order, (list, tuple)):
-            chord_track = chord_module.render(
-                progression,
-                bass_module_active=True,
-                voicer_order=requested_order,
-            )
-        else:
-            chord_track = chord_module.render(
-                progression,
-                preferred_family=requested_order,
-                bass_module_active=True,
-            )
+def _render_progression(
+    progression: dict,
+    ordinal: int,
+    seed: int | None,
+    mode: str,
+    *,
+    preferred_family: str | None = None,
+    voicer_order: list[str] | tuple[str, ...] | None = None,
+    percussion_percent: float | int | None = None,
+) -> dict:
+    percussion_percent = _percussion_inclusion_percent(percussion_percent)
+    chord_module = ChordModule(mode=mode, seed=seed)
+    if voicer_order is not None:
+        chord_track = chord_module.render(
+            progression,
+            bass_module_active=True,
+            voicer_order=voicer_order,
+        )
     else:
         chord_track = chord_module.render(
             progression,
-            preferred_family=progression.get("voicer_family"),
+            preferred_family=preferred_family,
             bass_module_active=True,
         )
-    bass_module = BassModule(seed=seed + index)
+    bass_module = BassModule(seed=seed)
     bass_track = bass_module.render(
         progression,
         pad_instrument=chord_module.selected_instrument,
@@ -490,14 +514,24 @@ def _render_source(args: tuple) -> dict:
         chord_midis=chord_module.last_voiced_midis,
     )
     percussion_module = PercussionModule(
-        seed=seed + index,
+        seed=seed,
         omission_probability=1.0 - percussion_percent / 100.0,
     )
     percussion_track = percussion_module.render(progression)
+    tracks = RenderedSongTracks(
+        ordinal=ordinal,
+        chord_track=chord_track,
+        bass_track=bass_track,
+        percussion_track=percussion_track,
+        mixed_line="  ".join(
+            (chord_track, bass_track, percussion_track)
+        ),
+    )
     return {
-        "chord_track": chord_track,
-        "bass_track": bass_track,
-        "percussion_track": percussion_track,
+        "tracks": tracks,
+        "chord_track": tracks.chord_track,
+        "bass_track": tracks.bass_track,
+        "percussion_track": tracks.percussion_track,
         "percussion_included": percussion_module.last_included,
         "percussion_feel": percussion_module.last_feel,
         "percussion_inclusion_percent": percussion_percent,
@@ -518,6 +552,64 @@ def _render_source(args: tuple) -> dict:
     }
 
 
+def _render_source(args: tuple) -> dict:
+    """Render one source record in an isolated worker."""
+    index, raw, seed, mode, *extras = args
+    voicer_orders = extras
+    percussion_percent = _DEFAULT_PERCUSSION_PERCENT
+    if (
+        extras
+        and isinstance(extras[-1], (int, float))
+        and not isinstance(extras[-1], bool)
+    ):
+        percussion_percent = _percussion_inclusion_percent(extras[-1])
+        voicer_orders = extras[:-1]
+    progression = json.loads(raw.decode("utf-8"))
+    requested_order = voicer_orders[0] if voicer_orders else None
+    if isinstance(requested_order, (list, tuple)):
+        result = _render_progression(
+            progression,
+            index,
+            seed + index,
+            mode,
+            voicer_order=requested_order,
+            percussion_percent=percussion_percent,
+        )
+    else:
+        result = _render_progression(
+            progression,
+            index,
+            seed + index,
+            mode,
+            preferred_family=(
+                requested_order
+                if requested_order is not None
+                else progression.get("voicer_family")
+            ),
+            percussion_percent=percussion_percent,
+        )
+    return result
+
+
+def render_song_tracks(
+    progression: dict,
+    seed: int | None = None,
+    mode: str = "pads",
+    *,
+    percussion_percent: float | int | None = None,
+) -> RenderedSongTracks:
+    """Render one progression once and retain all synchronized role strings."""
+    result = _render_progression(
+        progression,
+        0,
+        seed,
+        mode,
+        preferred_family=progression.get("voicer_family"),
+        percussion_percent=percussion_percent,
+    )
+    return result["tracks"]
+
+
 def render_song(
     progression: dict,
     seed: int | None = None,
@@ -525,24 +617,80 @@ def render_song(
     *,
     percussion_percent: float | int | None = None,
 ) -> str:
-    percussion_percent = _percussion_inclusion_percent(percussion_percent)
-    chord_module = ChordModule(mode=mode, seed=seed)
-    chords = chord_module.render(
+    return render_song_tracks(
         progression,
-        preferred_family=progression.get("voicer_family"),
-        bass_module_active=True,
-    )
-    bass = BassModule(seed=seed).render(
-        progression,
-        pad_instrument=chord_module.selected_instrument,
-        pad_mode=mode == "pads",
-        chord_midis=chord_module.last_voiced_midis,
-    )
-    percussion = PercussionModule(
         seed=seed,
-        omission_probability=1.0 - percussion_percent / 100.0,
-    ).render(progression)
-    return "  ".join((chords, bass, percussion))
+        mode=mode,
+        percussion_percent=percussion_percent,
+    ).mixed_line
+
+
+def _canonical_score_block(ordinal: int, line: str) -> str:
+    return f"START_SONG_{ordinal}\n{line}\nEND_SONG\n"
+
+
+def _stage_text(path: Path, text: str) -> Path:
+    temporary = tempfile.NamedTemporaryFile(
+        mode="wb",
+        dir=path.parent,
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        delete=False,
+    )
+    temporary_path = Path(temporary.name)
+    try:
+        with temporary:
+            temporary.write(text.encode("utf-8"))
+    except BaseException:
+        if temporary_path.exists():
+            temporary_path.unlink()
+        raise
+    return temporary_path
+
+
+def _reserve_backup(path: Path) -> Path:
+    handle = tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        dir=path.parent,
+        prefix=f".{path.name}.",
+        suffix=".bak",
+        delete=False,
+    )
+    backup = Path(handle.name)
+    handle.close()
+    backup.unlink()
+    return backup
+
+
+def _install_output_set(staged: dict[Path, Path]) -> None:
+    """Install all staged files together and restore the previous set on error."""
+    backups: dict[Path, Path] = {}
+    installed: list[Path] = []
+    try:
+        for target in staged:
+            if target.exists():
+                backup = _reserve_backup(target)
+                backups[target] = backup
+                os.replace(target, backup)
+        for target, temporary in staged.items():
+            os.replace(temporary, target)
+            installed.append(target)
+    except BaseException:
+        for target in reversed(installed):
+            if target.exists():
+                target.unlink()
+        for target, backup in backups.items():
+            if backup.exists():
+                os.replace(backup, target)
+        raise
+    finally:
+        for temporary in staged.values():
+            if temporary.exists():
+                temporary.unlink()
+        for backup in backups.values():
+            if backup.exists():
+                backup.unlink()
 
 
 def render_directory(
@@ -557,6 +705,7 @@ def render_directory(
 ) -> None:
     if not isinstance(seed, int) or isinstance(seed, bool):
         raise ValueError("render_directory requires an explicit integer seed")
+    output = str(output)
     input_dir_list = _input_dir_list(input_dir)
     files = _source_files(input_dir_list)
     render_modes, effective_mode, render_mode_targets = _render_mode_plan(
@@ -574,8 +723,9 @@ def render_directory(
         str(Path(input_dir).resolve()) for input_dir in input_dir_list
     ]
     revision, dirty = _generator_revision()
-    output_path = Path(output)
-    manifest_path = _manifest_path(output)
+    output_paths = _track_output_paths(output)
+    output_path = output_paths["mixed"]
+    manifest_path = output_paths["manifest"]
     voicer_counts = Counter()
     family_counts_by_genre = {}
     manifest_records = []
@@ -583,110 +733,125 @@ def render_directory(
     no_chord_duration_by_genre = Counter()
     percussion_included_count = 0
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    temporary_output = tempfile.NamedTemporaryFile(
-        mode="w", encoding="utf-8", dir=output_path.parent,
-        prefix=f".{output_path.name}.", suffix=".tmp", delete=False,
-    )
-    temporary_output_path = Path(temporary_output.name)
+    score_blocks = {
+        "mixed": [],
+        "chords": [],
+        "bass": [],
+        "percussion": [],
+    }
+    staged: dict[Path, Path] = {}
     try:
-        with temporary_output as out:
-            workers = min(8, len(files), os.cpu_count() or 1)
-            with ProcessPoolExecutor(max_workers=workers) as executor:
-                for batch_start in range(0, len(files), workers):
-                    batch = files[batch_start:batch_start + workers]
-                    projected_counts = Counter(voicer_counts)
-                    voicer_orders = []
-                    for (
-                        _source_id, _path, _raw, progression, _source_dir
-                    ) in batch:
-                        genre = progression.get("genre")
-                        order = _voicer_order(
-                            genre,
-                            projected_counts,
-                            _preferred_family(progression),
-                        )
-                        projected_counts[order[0]] += 1
-                        voicer_orders.append(order)
-                    render_args = (
-                        (
-                            batch_start + offset,
-                            raw,
-                            seed,
-                            render_modes[batch_start + offset],
-                            voicer_order,
-                            percussion_inclusion_percent,
-                        )
-                        for offset, (
-                            (_source_id, _path, raw, _progression, _source_dir),
-                            voicer_order,
-                        ) in enumerate(zip(batch, voicer_orders))
+        workers = min(8, len(files), os.cpu_count() or 1)
+        with ProcessPoolExecutor(max_workers=workers) as executor:
+            for batch_start in range(0, len(files), workers):
+                batch = files[batch_start:batch_start + workers]
+                projected_counts = Counter(voicer_counts)
+                voicer_orders = []
+                for (
+                    _source_id, _path, _raw, progression, _source_dir
+                ) in batch:
+                    genre = progression.get("genre")
+                    order = _voicer_order(
+                        genre,
+                        projected_counts,
+                        _preferred_family(progression),
                     )
-                    rendered = executor.map(_render_source, render_args, chunksize=1)
-                    for offset, result in enumerate(rendered):
-                        index = batch_start + offset
-                        (
-                            source_id, path, raw, progression, source_dir
-                        ) = batch[offset]
-                        voicer = result["voicer"]
-                        voicer_counts[voicer] += 1
-                        genre = progression.get("genre")
-                        family_counts_by_genre.setdefault(
-                            genre, Counter()
-                        )[result["voicer_family"]] += 1
-                        no_chord = _no_chord_summary(progression)
-                        no_chord_by_genre[genre] += no_chord["event_count"]
-                        no_chord_duration_by_genre[genre] += no_chord["duration_seconds"]
-                        if result["percussion_included"]:
-                            percussion_included_count += 1
-                        chord_track = result["chord_track"]
-                        bass_track = result["bass_track"]
-                        percussion_track = result["percussion_track"]
-                        out.write(f"START_SONG_{index}\n")
-                        out.write(
-                            f"{chord_track}  {bass_track}  {percussion_track}\n"
+                    projected_counts[order[0]] += 1
+                    voicer_orders.append(order)
+                render_args = (
+                    (
+                        batch_start + offset,
+                        raw,
+                        seed,
+                        render_modes[batch_start + offset],
+                        voicer_order,
+                        percussion_inclusion_percent,
+                    )
+                    for offset, (
+                        (_source_id, _path, raw, _progression, _source_dir),
+                        voicer_order,
+                    ) in enumerate(zip(batch, voicer_orders))
+                )
+                rendered = executor.map(_render_source, render_args, chunksize=1)
+                for offset, result in enumerate(rendered):
+                    index = batch_start + offset
+                    (
+                        source_id, path, raw, progression, source_dir
+                    ) = batch[offset]
+                    voicer = result["voicer"]
+                    voicer_counts[voicer] += 1
+                    genre = progression.get("genre")
+                    family_counts_by_genre.setdefault(
+                        genre, Counter()
+                    )[result["voicer_family"]] += 1
+                    no_chord = _no_chord_summary(progression)
+                    no_chord_by_genre[genre] += no_chord["event_count"]
+                    no_chord_duration_by_genre[genre] += no_chord["duration_seconds"]
+                    if result["percussion_included"]:
+                        percussion_included_count += 1
+                    tracks = result["tracks"]
+                    role_lines = {
+                        "mixed": tracks.mixed_line,
+                        "chords": tracks.chord_track,
+                        "bass": tracks.bass_track,
+                        "percussion": tracks.percussion_track,
+                    }
+                    for role, line in role_lines.items():
+                        score_blocks[role].append(
+                            _canonical_score_block(index, line)
                         )
-                        out.write("END_SONG\n")
-                        manifest_records.append({
-                            "ordinal": index,
-                            "source_dir": str(source_dir.resolve()),
-                            "source_file": path.name,
-                            "source_id": source_id,
-                            "source_sha256": hashlib.sha256(raw).hexdigest(),
-                            "genre": progression.get("genre"),
-                            "tonic_pc": progression.get("tonic_pc"),
-                            "bpm": progression.get("bpm", 120),
-                            "num_chords": progression.get(
-                                "num_chords", len(progression.get("chords", ()))
-                            ),
-                            "preferred_voicer": voicer_orders[offset][0],
-                            "preferred_voicer_family": _voicer_family(
-                                voicer_orders[offset][0]
-                            ),
-                            "voicer_order": voicer_orders[offset],
-                            "voicer": voicer,
-                            "voicer_genre": result["voicer_genre"],
-                            "voicer_family": result["voicer_family"],
-                            "render_mode": result["render_mode"],
-                            "arpeggio": result["arpeggio"],
-                            "percussion_included": result["percussion_included"],
-                            "percussion_feel": result["percussion_feel"],
-                            "percussion_inclusion_percent": (
-                                percussion_inclusion_percent
-                            ),
-                            "seed": seed + index,
-                            "voicing_summary": result["voicing_summary"],
-                            "no_chord": no_chord,
-                        })
-                        print(
-                            f"Rendered song {index}: {source_dir.name}/{path.name} "
-                            f"({voicer}, chord={result['instrument']} "
-                            f"[I{result['instrument_program']}], "
-                            f"bass={result['bass_instrument']} "
-                            f"[I{result['bass_program']}]"
-                            f"{' (pad collapse)' if result['pad_collapse'] else ''}, "
-                            f"{result['render_mode']})"
-                            f", percussion={'on' if result['percussion_included'] else 'off'}"
-                        )
+                    manifest_records.append({
+                        "ordinal": index,
+                        "source_dir": str(source_dir.resolve()),
+                        "source_file": path.name,
+                        "source_id": source_id,
+                        "source_sha256": hashlib.sha256(raw).hexdigest(),
+                        "genre": progression.get("genre"),
+                        "tonic_pc": progression.get("tonic_pc"),
+                        "bpm": progression.get("bpm", 120),
+                        "num_chords": progression.get(
+                            "num_chords", len(progression.get("chords", ()))
+                        ),
+                        "preferred_voicer": voicer_orders[offset][0],
+                        "preferred_voicer_family": _voicer_family(
+                            voicer_orders[offset][0]
+                        ),
+                        "voicer_order": voicer_orders[offset],
+                        "voicer": voicer,
+                        "voicer_genre": result["voicer_genre"],
+                        "voicer_family": result["voicer_family"],
+                        "render_mode": result["render_mode"],
+                        "arpeggio": result["arpeggio"],
+                        "percussion_included": result["percussion_included"],
+                        "percussion_feel": result["percussion_feel"],
+                        "percussion_inclusion_percent": (
+                            percussion_inclusion_percent
+                        ),
+                        "seed": seed + index,
+                        "voicing_summary": result["voicing_summary"],
+                        "no_chord": no_chord,
+                        "track_hashes": {
+                            role: hashlib.sha256(
+                                score_blocks[role][-1].encode("utf-8")
+                            ).hexdigest()
+                            for role in (
+                                "mixed",
+                                "chords",
+                                "bass",
+                                "percussion",
+                            )
+                        },
+                    })
+                    print(
+                        f"Rendered song {index}: {source_dir.name}/{path.name} "
+                        f"({voicer}, chord={result['instrument']} "
+                        f"[I{result['instrument_program']}], "
+                        f"bass={result['bass_instrument']} "
+                        f"[I{result['bass_program']}]"
+                        f"{' (pad collapse)' if result['pad_collapse'] else ''}, "
+                        f"{result['render_mode']})"
+                        f", percussion={'on' if result['percussion_included'] else 'off'}"
+                    )
 
         manifest = {
             "manifest_version": 1,
@@ -746,77 +911,55 @@ def render_directory(
                 }
                 for genre in sorted(no_chord_by_genre)
             },
+            "track_outputs": {
+                "schema_version": 1,
+                "song_count": len(files),
+                "voices": {
+                    "mixed": ["V0", "V1", "V9"],
+                    "chords": ["V0"],
+                    "bass": ["V1"],
+                    "percussion": ["V9"],
+                },
+                "paths": {
+                    role: str(output_paths[role].resolve())
+                    for role in (
+                        "mixed",
+                        "chords",
+                        "bass",
+                        "percussion",
+                    )
+                },
+                "sha256": {
+                    role: hashlib.sha256(
+                        "".join(score_blocks[role]).encode("utf-8")
+                    ).hexdigest()
+                    for role in (
+                        "mixed",
+                        "chords",
+                        "bass",
+                        "percussion",
+                    )
+                },
+                "ordinals": list(range(len(files))),
+                "block_hashes": (
+                    "sha256 of each canonical UTF-8 score block, including "
+                    "START_SONG_N, its score line, END_SONG, and final newline"
+                ),
+            },
             "records": manifest_records,
         }
-        temporary_manifest = tempfile.NamedTemporaryFile(
-            mode="w", encoding="utf-8", dir=manifest_path.parent,
-            prefix=f".{manifest_path.name}.", suffix=".tmp", delete=False,
-        )
-        temporary_manifest_path = Path(temporary_manifest.name)
-        try:
-            with temporary_manifest as manifest_file:
-                json.dump(manifest, manifest_file, indent=2, sort_keys=True)
-                manifest_file.write("\n")
-        except BaseException:
-            if temporary_manifest_path.exists():
-                temporary_manifest_path.unlink()
-            raise
-
-        def reserve_backup(path: Path) -> Path:
-            handle = tempfile.NamedTemporaryFile(
-                mode="w", encoding="utf-8", dir=path.parent,
-                prefix=f".{path.name}.", suffix=".bak", delete=False,
+        for role in ("mixed", "chords", "bass", "percussion"):
+            staged[output_paths[role]] = _stage_text(
+                output_paths[role],
+                "".join(score_blocks[role]),
             )
-            backup = Path(handle.name)
-            handle.close()
-            backup.unlink()
-            return backup
-
-        output_backup = None
-        manifest_backup = None
-        output_backed_up = False
-        manifest_backed_up = False
-        output_installed = False
-        manifest_installed = False
-        try:
-            if output_path.exists():
-                output_backup = reserve_backup(output_path)
-                os.replace(output_path, output_backup)
-                output_backed_up = True
-            if manifest_path.exists():
-                manifest_backup = reserve_backup(manifest_path)
-                os.replace(manifest_path, manifest_backup)
-                manifest_backed_up = True
-            os.replace(temporary_output_path, output_path)
-            output_installed = True
-            os.replace(temporary_manifest_path, manifest_path)
-            manifest_installed = True
-        except BaseException:
-            if manifest_installed and manifest_path.exists():
-                manifest_path.unlink()
-            if output_installed and output_path.exists():
-                output_path.unlink()
-            if manifest_backed_up and manifest_backup is not None:
-                os.replace(manifest_backup, manifest_path)
-                manifest_backed_up = False
-            if output_backed_up and output_backup is not None:
-                os.replace(output_backup, output_path)
-                output_backed_up = False
-            raise
-        finally:
-            if temporary_manifest_path.exists():
-                temporary_manifest_path.unlink()
-            if temporary_output_path.exists():
-                temporary_output_path.unlink()
-            if manifest_backed_up and manifest_backup is not None \
-                    and manifest_backup.exists():
-                manifest_backup.unlink()
-            if output_backed_up and output_backup is not None \
-                    and output_backup.exists():
-                output_backup.unlink()
+        manifest_text = json.dumps(manifest, indent=2, sort_keys=True) + "\n"
+        staged[manifest_path] = _stage_text(manifest_path, manifest_text)
+        _install_output_set(staged)
     except BaseException:
-        if temporary_output_path.exists():
-            temporary_output_path.unlink()
+        for temporary in staged.values():
+            if temporary.exists():
+                temporary.unlink()
         raise
 
     print(f"Rendered {len(files)} song(s) to {output}")

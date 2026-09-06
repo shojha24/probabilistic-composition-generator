@@ -316,6 +316,15 @@ the next voicer is tried. If every policy fails, the raised error repeats the
 complete per-voicer failure list. A voicing failure stops the render; events
 are never silently skipped.
 
+Every directory render also writes synchronized role exports beside the mixed
+score. For `scores.txt`, the additional files are
+`scores_chords.txt`, `scores_bass.txt`, `scores_percussion.txt`, and the
+existing `scores.txt.manifest.json`. They contain the same
+`START_SONG_N`/`END_SONG` blocks and preserve the exact retained JFugue V0,
+V1, and V9 fragments. The manifest records the derived paths, voice mapping,
+complete-file SHA-256 hashes, output ordinals, and per-block hashes. Legacy
+manifests without `track_outputs` remain valid for mixed-only artifacts.
+
 Instrument programs are selected reproducibly when `--seed` is supplied.
 Chord tracks choose from the expanded role-aware catalog in `instruments.py`.
 This includes grand, bright, honky-tonk, Rhodes, DX7, harpsichord, clavinet,

@@ -12,8 +12,20 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import chord_module
-from eda.validate_rendered_corpus import parse_score_blocks, validate_corpus
-from render import _render_mode_plan, _source_files, render_directory
+from eda.validate_rendered_corpus import (
+    parse_score_blocks,
+    validate_corpus,
+    validate_multitrack_outputs,
+)
+from render import (
+    _install_output_set,
+    _render_mode_plan,
+    _source_files,
+    _track_output_paths,
+    render_directory,
+    render_song,
+    render_song_tracks,
+)
 from voicing.dct import compute_dct
 from voicing.engine import Engine, VoicingImpossible
 from voicing.types import ChordEvent, Song, resolve_degrees
@@ -161,6 +173,142 @@ def test_render_directory_records_percussion_inclusion_target(tmp_path):
         and record["percussion_inclusion_percent"] == 0.0
         for record in manifest["records"]
     )
+
+
+def test_directory_render_writes_synchronized_multitrack_outputs(tmp_path):
+    for source_id in (10, 2, 1):
+        progression = _label()
+        progression["chords"][0]["duration_token"] = "q"
+        (tmp_path / f"song_{source_id}.json").write_text(
+            json.dumps(progression)
+        )
+
+    output = tmp_path / "scores.txt"
+    render_directory(
+        tmp_path,
+        str(output),
+        seed=11,
+        mode="pads",
+        percussion_percent=0,
+    )
+    paths = _track_output_paths(output)
+    assert all(path.is_file() for path in paths.values())
+    manifest = json.loads(paths["manifest"].read_text())
+    assert manifest["track_outputs"]["song_count"] == 3
+    assert manifest["track_outputs"]["ordinals"] == [0, 1, 2]
+    assert [
+        record["source_id"] for record in manifest["records"]
+    ] == [1, 2, 10]
+
+    blocks = {
+        role: parse_score_blocks(paths[role])
+        for role in ("mixed", "chords", "bass", "percussion")
+    }
+    assert all(list(blocks[role]) == [0, 1, 2] for role in blocks)
+    for ordinal in range(3):
+        mixed_parts = blocks["mixed"][ordinal].split("  ")
+        assert mixed_parts == [
+            blocks["chords"][ordinal],
+            blocks["bass"][ordinal],
+            blocks["percussion"][ordinal],
+        ]
+    report = validate_multitrack_outputs(
+        paths["mixed"],
+        paths["chords"],
+        paths["bass"],
+        paths["percussion"],
+        paths["manifest"],
+    )
+    assert report["valid"] is True
+    assert report["hard_failure_count"] == 0
+    assert validate_corpus(
+        tmp_path,
+        output,
+        paths["manifest"],
+        expected_genre="pop_rock",
+    )["hard_failure_count"] == 0
+
+
+def test_render_song_tracks_preserves_mixed_render_song_api():
+    tracks = render_song_tracks(
+        _label(),
+        seed=19,
+        mode="pads",
+        percussion_percent=0,
+    )
+    assert tracks.ordinal == 0
+    assert tracks.mixed_line == "  ".join((
+        tracks.chord_track,
+        tracks.bass_track,
+        tracks.percussion_track,
+    ))
+    assert render_song(
+        _label(),
+        seed=19,
+        mode="pads",
+        percussion_percent=0,
+    ) == tracks.mixed_line
+
+
+def test_multitrack_validator_rejects_role_token_change(tmp_path):
+    progression = _label()
+    (tmp_path / "song_0.json").write_text(json.dumps(progression))
+    output = tmp_path / "scores.txt"
+    render_directory(
+        tmp_path,
+        str(output),
+        seed=23,
+        mode="pads",
+        percussion_percent=0,
+    )
+    paths = _track_output_paths(output)
+    percussion = paths["percussion"].read_text()
+    paths["percussion"].write_text(percussion.replace("Rs", "Rh", 1))
+    report = validate_multitrack_outputs(
+        paths["mixed"],
+        paths["chords"],
+        paths["bass"],
+        paths["percussion"],
+        paths["manifest"],
+    )
+    categories = {issue["category"] for issue in report["issues"]}
+    assert "multitrack_role_content_mismatch" in categories
+    assert "multitrack_hash_mismatch" in categories
+
+
+def test_output_install_failure_restores_existing_set(tmp_path, monkeypatch):
+    targets = {
+        tmp_path / "mixed.txt": "old mixed",
+        tmp_path / "chords.txt": "old chords",
+        tmp_path / "bass.txt": "old bass",
+        tmp_path / "percussion.txt": "old percussion",
+        tmp_path / "manifest.json": "old manifest",
+    }
+    staged = {}
+    for target, old_text in targets.items():
+        target.write_text(old_text)
+        temporary = tmp_path / f".{target.name}.tmp"
+        temporary.write_text(f"new {target.name}")
+        staged[target] = temporary
+
+    import render as render_module
+
+    original_replace = render_module.os.replace
+    calls = 0
+
+    def fail_on_third_replace(source, destination):
+        nonlocal calls
+        calls += 1
+        if calls == 8:
+            raise OSError("simulated install failure")
+        return original_replace(source, destination)
+
+    monkeypatch.setattr(render_module.os, "replace", fail_on_third_replace)
+    with pytest.raises(OSError, match="simulated install failure"):
+        _install_output_set(staged)
+    assert {
+        target: target.read_text() for target in targets
+    } == targets
 
 
 def test_manifest_hash_and_score_pairing(tmp_path):

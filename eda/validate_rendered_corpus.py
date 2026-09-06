@@ -256,6 +256,416 @@ def parse_score_blocks(path: str | Path) -> dict[int, str]:
     return blocks
 
 
+def _parse_strict_score_blocks(path: Path) -> list[tuple[int, str]]:
+    """Parse the exact three-line block shape used by multitrack exports."""
+    lines = path.read_text(encoding="utf-8").splitlines()
+    blocks = []
+    cursor = 0
+    while cursor < len(lines):
+        start = lines[cursor]
+        match = re.fullmatch(r"START_SONG_(\d+)", start)
+        if match is None:
+            raise ValueError(f"expected start marker at line {cursor + 1}")
+        if cursor + 2 >= len(lines):
+            raise ValueError(f"truncated score block at line {cursor + 1}")
+        score_line = lines[cursor + 1]
+        if not score_line.strip():
+            raise ValueError(f"blank score line at line {cursor + 2}")
+        if lines[cursor + 2] != "END_SONG":
+            raise ValueError(
+                f"expected END_SONG at line {cursor + 3}"
+            )
+        blocks.append((int(match.group(1)), score_line))
+        cursor += 3
+    return blocks
+
+
+def _voice_token_segments(line: str) -> dict[str, list[str]]:
+    tokens = line.split()
+    positions = [
+        index for index, token in enumerate(tokens)
+        if _VOICE.fullmatch(token)
+    ]
+    if not positions:
+        raise ValueError("score line contains no voice marker")
+    voices: dict[str, list[str]] = {}
+    for position_index, start in enumerate(positions):
+        voice = tokens[start]
+        if voice in voices:
+            raise ValueError(f"score line contains duplicate {voice} track")
+        end = (
+            positions[position_index + 1]
+            if position_index + 1 < len(positions)
+            else len(tokens)
+        )
+        fragment_start = 0 if position_index == 0 else start
+        voices[voice] = tokens[fragment_start:end]
+    return voices
+
+
+def _multitrack_block_hash(ordinal: int, line: str) -> str:
+    canonical = f"START_SONG_{ordinal}\n{line}\nEND_SONG\n"
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _multitrack_source_timeline(record: dict) -> float | None:
+    source_dir = record.get("source_dir")
+    source_file = record.get("source_file")
+    if not isinstance(source_dir, str) or not isinstance(source_file, str):
+        return None
+    source_path = Path(source_dir) / source_file
+    if not source_path.is_file():
+        return None
+    try:
+        progression = json.loads(source_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return None
+    total = 0.0
+    for event in progression.get("chords", ()):
+        duration = event.get("duration_token")
+        if not isinstance(duration, str) or duration not in DURATION_BEATS:
+            return None
+        total += float(DURATION_BEATS[duration]) * 4.0
+    return total
+
+
+def validate_multitrack_outputs(
+    mixed_path: str | Path,
+    chords_path: str | Path,
+    bass_path: str | Path,
+    percussion_path: str | Path,
+    manifest_path: str | Path,
+) -> dict:
+    """Validate synchronized role files and their declared manifest pairing."""
+    paths = {
+        "mixed": Path(mixed_path).resolve(),
+        "chords": Path(chords_path).resolve(),
+        "bass": Path(bass_path).resolve(),
+        "percussion": Path(percussion_path).resolve(),
+        "manifest": Path(manifest_path).resolve(),
+    }
+    report = {
+        "valid": False,
+        "mixed": str(paths["mixed"]),
+        "chords": str(paths["chords"]),
+        "bass": str(paths["bass"]),
+        "percussion": str(paths["percussion"]),
+        "manifest": str(paths["manifest"]),
+        "song_count": 0,
+        "issues": [],
+        "hard_failure_count": 0,
+    }
+
+    def fail(category: str, detail: str) -> None:
+        report["issues"].append({
+            "category": category,
+            "detail": detail,
+        })
+        report["hard_failure_count"] += 1
+
+    file_bytes: dict[str, bytes] = {}
+    file_text: dict[str, str] = {}
+    for role in ("mixed", "chords", "bass", "percussion"):
+        path = paths[role]
+        if not path.is_file():
+            fail("multitrack_missing_file", f"{role}: {path}")
+            continue
+        try:
+            raw = path.read_bytes()
+            file_bytes[role] = raw
+            file_text[role] = raw.decode("utf-8")
+        except (OSError, UnicodeDecodeError) as error:
+            fail("multitrack_missing_file", f"{role}: {error}")
+
+    try:
+        manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        fail("multitrack_manifest_mismatch", str(error))
+        return report
+    if not isinstance(manifest, dict):
+        fail("multitrack_manifest_mismatch", "manifest must be an object")
+        return report
+
+    track_outputs = manifest.get("track_outputs")
+    records = manifest.get("records")
+    if not isinstance(track_outputs, dict) or not isinstance(records, list):
+        fail(
+            "multitrack_manifest_mismatch",
+            "manifest must declare track_outputs and records",
+        )
+        return report
+    if track_outputs.get("schema_version") != 1:
+        fail(
+            "multitrack_manifest_mismatch",
+            f"unsupported track_outputs.schema_version="
+            f"{track_outputs.get('schema_version')!r}",
+        )
+    declared_output = manifest.get("output")
+    if (
+        not isinstance(declared_output, str)
+        or Path(declared_output).resolve() != paths["mixed"]
+    ):
+        fail(
+            "multitrack_manifest_mismatch",
+            "manifest output does not match the mixed score path",
+        )
+    declared_paths = track_outputs.get("paths")
+    expected_voices = {
+        "mixed": ["V0", "V1", "V9"],
+        "chords": ["V0"],
+        "bass": ["V1"],
+        "percussion": ["V9"],
+    }
+    if not isinstance(declared_paths, dict):
+        fail("multitrack_manifest_mismatch", "track_outputs.paths is missing")
+    else:
+        for role in expected_voices:
+            declared = declared_paths.get(role)
+            if (
+                not isinstance(declared, str)
+                or Path(declared).resolve() != paths[role]
+            ):
+                fail(
+                    "multitrack_manifest_mismatch",
+                    f"{role} path does not match the declared output",
+                )
+    if track_outputs.get("voices") != expected_voices:
+        fail(
+            "multitrack_voice_mismatch",
+            f"expected={expected_voices!r} "
+            f"actual={track_outputs.get('voices')!r}",
+        )
+
+    declared_count = track_outputs.get("song_count")
+    if (
+        not isinstance(declared_count, int)
+        or isinstance(declared_count, bool)
+        or declared_count < 0
+    ):
+        fail("multitrack_manifest_mismatch", "invalid track_outputs.song_count")
+        declared_count = len(records)
+    report["song_count"] = declared_count
+    if len(records) != declared_count:
+        fail(
+            "multitrack_song_count_mismatch",
+            f"manifest records={len(records)} declared={declared_count}",
+        )
+
+    parsed: dict[str, list[tuple[int, str]]] = {}
+    for role, text in file_text.items():
+        try:
+            parsed[role] = _parse_strict_score_blocks(paths[role])
+        except ValueError as error:
+            fail("multitrack_marker_mismatch", f"{role}: {error}")
+
+    sequences = {
+        role: [ordinal for ordinal, _line in blocks]
+        for role, blocks in parsed.items()
+    }
+    mixed_ordinals = sequences.get("mixed")
+    if mixed_ordinals is not None:
+        for role, ordinals in sequences.items():
+            if role != "mixed" and ordinals != mixed_ordinals:
+                fail(
+                    "multitrack_marker_mismatch",
+                    f"{role} marker sequence differs from mixed",
+                )
+    declared_ordinals = track_outputs.get("ordinals")
+    manifest_ordinals = [
+        record.get("ordinal") if isinstance(record, dict) else None
+        for record in records
+    ]
+    expected_ordinals = list(range(declared_count))
+    if (
+        declared_ordinals != expected_ordinals
+        or manifest_ordinals != expected_ordinals
+        or any(ordinals != expected_ordinals for ordinals in sequences.values())
+    ):
+        fail(
+            "multitrack_ordinal_mismatch",
+            f"expected={expected_ordinals!r}",
+        )
+    for role in ("mixed", "chords", "bass", "percussion"):
+        blocks = parsed.get(role)
+        if blocks is not None and len(blocks) != declared_count:
+            fail(
+                "multitrack_song_count_mismatch",
+                f"{role} blocks={len(blocks)} declared={declared_count}",
+            )
+
+    complete_hashes = track_outputs.get("sha256")
+    if not isinstance(complete_hashes, dict):
+        fail("multitrack_manifest_mismatch", "track_outputs.sha256 is missing")
+    else:
+        for role, raw in file_bytes.items():
+            actual = hashlib.sha256(raw).hexdigest()
+            if complete_hashes.get(role) != actual:
+                fail(
+                    "multitrack_hash_mismatch",
+                    f"{role}: manifest={complete_hashes.get(role)!r} "
+                    f"actual={actual}",
+                )
+
+    records_by_ordinal = {
+        record.get("ordinal"): record
+        for record in records
+        if isinstance(record, dict)
+    }
+    for role, blocks in parsed.items():
+        if role not in expected_voices:
+            continue
+        required = set(expected_voices[role])
+        for ordinal, line in blocks:
+            try:
+                segments = _voice_token_segments(line)
+            except ValueError as error:
+                fail(
+                    "multitrack_voice_mismatch",
+                    f"{role} ordinal={ordinal}: {error}",
+                )
+                continue
+            if set(segments) != required:
+                fail(
+                    "multitrack_voice_mismatch",
+                    f"{role} ordinal={ordinal}: expected={required!r} "
+                    f"actual={set(segments)!r}",
+                )
+
+    mixed_blocks = dict(parsed.get("mixed", ()))
+    role_blocks = {
+        role: dict(parsed.get(role, ()))
+        for role in ("chords", "bass", "percussion")
+    }
+    for ordinal, mixed_line in mixed_blocks.items():
+        try:
+            mixed_segments = _voice_token_segments(mixed_line)
+        except ValueError:
+            continue
+        for role, voice in (
+            ("chords", "V0"),
+            ("bass", "V1"),
+            ("percussion", "V9"),
+        ):
+            role_line = role_blocks[role].get(ordinal)
+            if role_line is None:
+                continue
+            try:
+                role_segments = _voice_token_segments(role_line)
+            except ValueError:
+                continue
+            if mixed_segments.get(voice) != role_segments.get(voice):
+                fail(
+                    "multitrack_role_content_mismatch",
+                    f"{role} ordinal={ordinal} does not match mixed {voice}",
+                )
+
+    record_hashes = {
+        "mixed": mixed_blocks,
+        "chords": role_blocks["chords"],
+        "bass": role_blocks["bass"],
+        "percussion": role_blocks["percussion"],
+    }
+    for ordinal, record in records_by_ordinal.items():
+        if not isinstance(ordinal, int):
+            continue
+        declared_hashes = record.get("track_hashes")
+        if not isinstance(declared_hashes, dict):
+            fail(
+                "multitrack_manifest_mismatch",
+                f"record {ordinal} is missing track_hashes",
+            )
+            continue
+        for role, blocks in record_hashes.items():
+            line = blocks.get(ordinal)
+            if line is None:
+                continue
+            actual = _multitrack_block_hash(ordinal, line)
+            if declared_hashes.get(role) != actual:
+                fail(
+                    "multitrack_hash_mismatch",
+                    f"record={ordinal} role={role}",
+                )
+
+    for ordinal, mixed_line in mixed_blocks.items():
+        try:
+            mixed_segments = _voice_token_segments(mixed_line)
+            details = {
+                voice: _parse_track_details(mixed_segments[voice])
+                for voice in ("V0", "V1", "V9")
+            }
+        except (KeyError, ValueError) as error:
+            fail(
+                "multitrack_timeline_mismatch",
+                f"mixed ordinal={ordinal}: {error}",
+            )
+            continue
+        timelines = {
+            voice: _track_timeline_sixteenths(
+                tokens,
+                absolute=voice == "V0",
+            )
+            for voice, tokens in details.items()
+        }
+        if len({round(value, 9) for value in timelines.values()}) != 1:
+            fail(
+                "multitrack_timeline_mismatch",
+                f"mixed ordinal={ordinal}: timelines={timelines!r}",
+            )
+        record = records_by_ordinal.get(ordinal)
+        if isinstance(record, dict):
+            expected_timeline = _multitrack_source_timeline(record)
+            if (
+                expected_timeline is not None
+                and not math.isclose(
+                    timelines["V0"],
+                    expected_timeline,
+                    rel_tol=0,
+                    abs_tol=1e-6,
+                )
+            ):
+                fail(
+                    "multitrack_timeline_mismatch",
+                    f"ordinal={ordinal}: expected={expected_timeline} "
+                    f"actual={timelines['V0']}",
+                )
+        for role, voice in (
+            ("chords", "V0"),
+            ("bass", "V1"),
+            ("percussion", "V9"),
+        ):
+            role_line = role_blocks[role].get(ordinal)
+            if role_line is None:
+                continue
+            try:
+                role_segments = _voice_token_segments(role_line)
+                role_details = _parse_track_details(role_segments[voice])
+                role_timeline = _track_timeline_sixteenths(
+                    role_details,
+                    absolute=voice == "V0",
+                )
+                mixed_timeline = timelines[voice]
+            except (KeyError, ValueError) as error:
+                fail(
+                    "multitrack_timeline_mismatch",
+                    f"{role} ordinal={ordinal}: {error}",
+                )
+                continue
+            if not math.isclose(
+                role_timeline,
+                mixed_timeline,
+                rel_tol=0,
+                abs_tol=1e-6,
+            ):
+                fail(
+                    "multitrack_timeline_mismatch",
+                    f"{role} ordinal={ordinal}: mixed={mixed_timeline} "
+                    f"role={role_timeline}",
+                )
+
+    report["valid"] = not report["issues"]
+    return report
+
+
 def _label_dict(chord) -> dict:
     return {
         "is_no_chord": chord.is_no_chord,
@@ -1380,6 +1790,33 @@ def validate_corpus(
         "no_chord_duration_seconds": 0.0,
         "duration_seconds": 0.0,
     }
+    if "track_outputs" in manifest:
+        declared_paths = (
+            manifest.get("track_outputs", {}).get("paths", {})
+            if isinstance(manifest.get("track_outputs"), dict)
+            else {}
+        )
+
+        def declared_or_derived(role: str) -> Path:
+            value = declared_paths.get(role)
+            if isinstance(value, str):
+                return Path(value)
+            if role == "mixed":
+                return score_path
+            return score_path.with_name(
+                f"{score_path.stem}_{role}{score_path.suffix}"
+            )
+
+        multitrack = validate_multitrack_outputs(
+            score_path,
+            declared_or_derived("chords"),
+            declared_or_derived("bass"),
+            declared_or_derived("percussion"),
+            manifest_path,
+        )
+        report["multitrack"] = multitrack
+        report["issues"].extend(multitrack["issues"])
+        report["hard_failure_count"] += multitrack["hard_failure_count"]
     extension_counts = defaultdict(lambda: {
         "events": 0,
         "extension_events": 0,
