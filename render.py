@@ -192,6 +192,47 @@ def _percussion_inclusion_percent(value: float | int | None) -> float:
     return _percentage(value, "percussion_percent")
 
 
+def _percussion_inclusion_plan(
+    file_count: int,
+    inclusion_percent: float,
+    seed: int,
+) -> list[bool]:
+    """Select an exact, deterministic nearest-whole-song percussion quota."""
+    if (
+        isinstance(file_count, bool)
+        or not isinstance(file_count, int)
+        or file_count < 0
+    ):
+        raise ValueError("file_count must be a non-negative integer")
+    if isinstance(seed, bool) or not isinstance(seed, int):
+        raise ValueError("seed must be an integer")
+    inclusion_percent = _percentage(
+        inclusion_percent, "percussion_percent"
+    )
+    inclusion_count = min(
+        file_count,
+        max(
+            0,
+            math.floor(
+                file_count * inclusion_percent / 100.0 + 0.5
+            ),
+        ),
+    )
+    quota_seed = int.from_bytes(
+        hashlib.sha256(
+            f"percussion_quota:{seed!r}".encode("utf-8")
+        ).digest()[:8],
+        "big",
+    )
+    included_indexes = set(
+        random.Random(quota_seed).sample(range(file_count), inclusion_count)
+    )
+    return [
+        index in included_indexes
+        for index in range(file_count)
+    ]
+
+
 def _render_mode_plan(
     mode: str,
     file_count: int,
@@ -491,8 +532,14 @@ def _render_progression(
     preferred_family: str | None = None,
     voicer_order: list[str] | tuple[str, ...] | None = None,
     percussion_percent: float | int | None = None,
+    percussion_included: bool | None = None,
 ) -> dict:
     percussion_percent = _percussion_inclusion_percent(percussion_percent)
+    if (
+        percussion_included is not None
+        and not isinstance(percussion_included, bool)
+    ):
+        raise ValueError("percussion_included must be a boolean or None")
     chord_module = ChordModule(mode=mode, seed=seed)
     if voicer_order is not None:
         chord_track = chord_module.render(
@@ -515,7 +562,13 @@ def _render_progression(
     )
     percussion_module = PercussionModule(
         seed=seed,
-        omission_probability=1.0 - percussion_percent / 100.0,
+        omission_probability=(
+            (
+                0.0 if percussion_included else 1.0
+            )
+            if percussion_included is not None
+            else 1.0 - percussion_percent / 100.0
+        ),
     )
     percussion_track = percussion_module.render(progression)
     tracks = RenderedSongTracks(
@@ -555,6 +608,9 @@ def _render_progression(
 def _render_source(args: tuple) -> dict:
     """Render one source record in an isolated worker."""
     index, raw, seed, mode, *extras = args
+    percussion_included = None
+    if extras and isinstance(extras[-1], bool):
+        percussion_included = extras.pop()
     voicer_orders = extras
     percussion_percent = _DEFAULT_PERCUSSION_PERCENT
     if (
@@ -574,6 +630,7 @@ def _render_source(args: tuple) -> dict:
             mode,
             voicer_order=requested_order,
             percussion_percent=percussion_percent,
+            percussion_included=percussion_included,
         )
     else:
         result = _render_progression(
@@ -587,6 +644,7 @@ def _render_source(args: tuple) -> dict:
                 else progression.get("voicer_family")
             ),
             percussion_percent=percussion_percent,
+            percussion_included=percussion_included,
         )
     return result
 
@@ -718,6 +776,11 @@ def render_directory(
     percussion_inclusion_percent = _percussion_inclusion_percent(
         percussion_percent
     )
+    percussion_inclusion_plan = _percussion_inclusion_plan(
+        len(files),
+        percussion_inclusion_percent,
+        seed,
+    )
     render_mode_counts = Counter(render_modes)
     source_dirs = [
         str(Path(input_dir).resolve()) for input_dir in input_dir_list
@@ -766,6 +829,7 @@ def render_directory(
                         render_modes[batch_start + offset],
                         voicer_order,
                         percussion_inclusion_percent,
+                        percussion_inclusion_plan[batch_start + offset],
                     )
                     for offset, (
                         (_source_id, _path, raw, _progression, _source_dir),
@@ -888,6 +952,11 @@ def render_directory(
             "percussion_inclusion_probability": (
                 percussion_inclusion_percent / 100.0
             ),
+            "percussion_inclusion_target_fraction": (
+                percussion_inclusion_percent / 100.0
+            ),
+            "percussion_selection_mode": "exact_corpus_quota",
+            "percussion_target_count": sum(percussion_inclusion_plan),
             "percussion_included_count": percussion_included_count,
             "percussion_realized_percent": (
                 100.0 * percussion_included_count / len(render_modes)
@@ -1007,7 +1076,7 @@ def main() -> None:
         dest="percussion_percent",
         type=float,
         help=(
-            "Per-song probability percentage for audible percussion; "
+            "Target percentage of songs with audible percussion; "
             "default is 70."
         ),
     )

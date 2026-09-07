@@ -235,7 +235,7 @@ as the complement. The per-song `render_mode` values and aggregate
 are recorded in the manifest. Existing `pads` and `arpeggios` modes remain
 single-mode renders.
 
-Control the per-song probability of audible percussion with
+Control the target percentage of corpus songs with audible percussion using
 `--percussion-percent`; it defaults to `70` to preserve the existing 70/30
 audible/silent split:
 
@@ -248,11 +248,16 @@ python render.py \
   --seed 7
 ```
 
-The value must be between 0 and 100. This is a seeded probability evaluated
-once per song, not an exact corpus quota. A song that fails the draw still
-gets a synchronized silent `V9` track. The requested percentage, probability,
-and realized count are recorded in the manifest. The Python APIs expose the
-same control as `percussion_percent`.
+The value must be between 0 and 100. Directory rendering uses the seeded
+percentage to select the nearest whole-song quota exactly, so a 30% request
+on 10 songs produces percussion on exactly 3 songs. A song outside the
+selected quota still gets a synchronized silent `V9` track. The requested
+percentage, target count, allocation mode, and realized count are recorded in
+the manifest; the legacy `percussion_inclusion_probability` field is retained
+as the requested fraction, while `percussion_selection_mode` identifies the
+exact-quota behavior. The Python directory API exposes the same control as
+`percussion_percent`; single-song rendering retains its seeded one-song
+inclusion behavior because no corpus quota exists.
 
 Directory rendering requires an explicit integer `--seed` and accepts one or
 more `--in-dir` values. Each directory's source files are validated and
@@ -704,7 +709,6 @@ Use a fixed seed when comparing changes to generation or voicing behavior.
 
 The project has these known limits:
 
-- NO_CHORD events are not currently generated.
 - The Java renderer remains a proof of concept and is not invoked by
   `render.py`.
 - Melody tracks are yet to be generated.

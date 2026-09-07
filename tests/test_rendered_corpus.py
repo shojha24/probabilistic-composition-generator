@@ -175,6 +175,57 @@ def test_render_directory_records_percussion_inclusion_target(tmp_path):
     )
 
 
+def test_render_directory_allocates_exact_deterministic_percussion_quota(
+    tmp_path,
+):
+    for index in range(10):
+        (tmp_path / f"song_{index}.json").write_text(
+            json.dumps(_label())
+        )
+
+    output = tmp_path / "scores.txt"
+    render_directory(
+        tmp_path,
+        str(output),
+        seed=7,
+        mode="pads",
+        percussion_percent=30,
+    )
+    first_manifest = json.loads(
+        _track_output_paths(output)["manifest"].read_text()
+    )
+
+    repeated_output = tmp_path / "repeated-scores.txt"
+    render_directory(
+        tmp_path,
+        str(repeated_output),
+        seed=7,
+        mode="pads",
+        percussion_percent=30,
+    )
+    repeated_manifest = json.loads(
+        _track_output_paths(repeated_output)["manifest"].read_text()
+    )
+
+    first_inclusions = [
+        record["percussion_included"]
+        for record in first_manifest["records"]
+    ]
+    repeated_inclusions = [
+        record["percussion_included"]
+        for record in repeated_manifest["records"]
+    ]
+    assert first_inclusions == repeated_inclusions
+    assert sum(first_inclusions) == 3
+    assert first_manifest["percussion_selection_mode"] == (
+        "exact_corpus_quota"
+    )
+    assert first_manifest["percussion_inclusion_target_fraction"] == 0.3
+    assert first_manifest["percussion_target_count"] == 3
+    assert first_manifest["percussion_included_count"] == 3
+    assert first_manifest["percussion_realized_percent"] == 30.0
+
+
 def test_directory_render_writes_synchronized_multitrack_outputs(tmp_path):
     for source_id in (10, 2, 1):
         progression = _label()

@@ -9,8 +9,14 @@
   `specs/14.5-melody-research-justification.md`
 
 This document turns the melody research report into an incremental
-implementation plan. It deliberately separates decisions that are required for
-a first symbolic prototype from later audio experiments.
+implementation plan. It focuses the implementation target on naturalistic
+full-mix data: chord-conditioned melodies with varied instruments, rhythms,
+registers, and melodic behavior. The target is intentionally beyond a
+minimum viable melody generator: phrase-level planning, confidence-aware
+local-key context, and corpus calibration are required before the melody
+defaults are treated as production-ready. The synchronized multitrack
+renderer gives downstream users the option to select or remix V0, V1, V2,
+and V9 without requiring the generator to create matched control variants.
 
 ## 1. Decision summary
 
@@ -29,8 +35,8 @@ ChordEvent labels
 
 The melody stage must never resample, remove, relabel, or shorten a chord
 event. The existing `ChordEvent` sequence remains the recognition label and
-the source of harmonic truth. Melody is a controlled nuisance or exposure
-variable for that label.
+the source of harmonic truth. Melody is a naturalistic full-mix augmentation
+of that label.
 
 The first implementation should use:
 
@@ -38,42 +44,119 @@ The first implementation should use:
    vocabulary;
 2. the song tonic and an optional explicit mode or scale as a weak prior;
 3. a sixteenth-note scheduling grid shared with the existing renderer;
-4. a seeded, bounded chord-centered random walk for the symbolic MVP, with a
-   phrase-level sequence scorer or beam search available as a later decoder;
+4. a seeded, bounded chord-centered random walk as a transparent baseline,
+   followed by a phrase-level sequence scorer/beam decoder as the target
+   production path;
 5. seeded child random streams that cannot perturb voicing, bass, percussion,
    or arpeggio decisions;
-6. a default neutral melody condition plus explicit DCT/extension exposure
-   conditions; and
+6. one naturalistic melody policy whose sampled instruments, rhythms, registers,
+   and melodic behaviors are recorded; and
 7. a separate `V2` track with machine-readable source-event and role
-   provenance.
+   provenance, exported through the synchronized multitrack output.
 
-Per-chord key estimation is not the default. Optional local-key inference may
-be added later as a phrase-level latent context with a persistence cost.
+Per-chord key estimation is not allowed as a hard reset. The target decoder
+must support confidence-aware local-key inference as a phrase-level latent
+context with a persistence cost. When the progression is ambiguous, the
+decoder must fall back to the global tonic/chord-centered candidates rather
+than forcing a local key.
 
 When melody is requested, apply one song-level inclusion gate with a default
-probability of **70%**. Thus, 70% of eligible songs receive a generated melody
-and 30% receive no V2 melody track, matching the existing percussion-style
-song-level inclusion behavior. The gate is evaluated once per song, not once
-per chord or note, and uses its own deterministic random stream. An explicit
-`melody_condition=none` remains a hard disable and bypasses the gate. The
+probability of **70%**. Thus, 70% of eligible songs receive generated melody
+events and 30% receive a synchronized V2 rest track, matching the existing
+percussion-style song-level inclusion behavior. The gate is evaluated once per
+song, not once per chord or note, and uses its own deterministic random stream.
+An explicit `melody_condition=none` remains a hard disable and bypasses the
+gate. The
 inclusion probability must be configurable for tests and corpus experiments,
 with `0.70` as the default.
 
 The research supplement separates evidence-backed design principles from
 repository engineering defaults. In particular, it does not justify a
 universal CT/NCT ratio, melody density, phrase length, or GM-instrument range.
-Initial values must be configurable, included in the manifest, and calibrated
-against a clearly identified melody reference corpus before they are described
-as realism targets.
+Initial values must be configurable, included in the manifest, and treated as
+naturalistic generation defaults rather than universal realism targets.
 
 This specification now resolves most of the previously open implementation
 details: data contracts, candidate roles and provenance, tonal-context
 behavior, range/tessitura policy, rhythm and phrase defaults, bounded search,
-resolution lookahead, deterministic streams, exposure conditions, manifests,
-validation, and phased integration. It remains an implementation contract and
-plan; the melody runtime is not yet implemented.
+resolution lookahead, deterministic streams, naturalistic behavior profiles,
+manifests, validation, and phased integration. It remains an implementation
+contract and plan; the melody runtime is not yet implemented.
 
-### 1.1 ACR label hierarchy and non-interference invariant
+### 1.1 Beyond-MVP implementation target
+
+The implementation must progress beyond a note-by-note greedy/random-walk
+generator before the naturalistic melody corpus is considered complete. The
+random walk remains a deterministic baseline and regression reference, but the
+main implementation target includes the following three capabilities.
+
+#### Phrase-level sequence planning
+
+Generate and score complete phrases or configured phrase windows rather than
+committing permanently to each onset in isolation. A bounded beam (or an
+equivalent top-k phrase search) should retain multiple partial candidates and
+score:
+
+- active chord-degree and extension compatibility;
+- metric stability and duration choices;
+- interval continuity, contour, and tessitura;
+- rests, holds, density, and phrase-level repetition;
+- approach and departure intervals for supported non-chord tones; and
+- phrase endings, cadence direction, and the next harmonic context.
+
+Phrase planning is still symbolic and deterministic. It does not imply a
+learned neural decoder. The effective beam width, candidate cap, phrase
+window, and tie-breaking seed must be recorded in the manifest. The planner
+must preserve all hard source-event and monophonic constraints.
+
+#### Confidence-aware local-key inference
+
+Infer a temporary tonal center and scale context over a phrase or sliding
+window when the surrounding progression provides sufficient evidence. Local
+key context may contribute soft candidate and phrase scores for scale tones,
+passing motion, non-chord tones, and cadential direction. It must not:
+
+- relabel or reinterpret a `ChordEvent`;
+- override an explicit `scale_pcs` value without an explicit policy;
+- force a key decision at every chord change; or
+- make a scale tone outrank an active chord degree solely because it is
+  diatonic.
+
+The inference must expose confidence and persistence/transition costs. Low
+confidence or unstable windows must use the global tonic and active chord as
+the fallback context. The selected context, confidence, and fallback reason
+must be included in melody provenance so local-key behavior is auditable.
+
+#### Extensive corpus calibration
+
+Before finalizing naturalistic defaults, render a fixed, representative
+calibration corpus across genres, chord strata, melody profiles, instruments,
+seeds, and inclusion states. Use symbolic metrics, score inspection, and
+listening to tune the profile weights and decoder defaults. Calibration must
+inspect at least:
+
+- note, rest, hold, and duration density;
+- chord-tone, extension, scale-tone, and supported NCT rates;
+- NCT resolution success and unresolved-tension fallbacks;
+- leap, repeated-note, contour, cadence, and phrase-reuse distributions;
+- hard-range, tessitura, and register coverage;
+- instrument/profile coverage and realized melody inclusion;
+- no-chord violations, source-event mapping, and fallback rates; and
+- representative full-mix and independently selected sidecar renders.
+
+Calibration is generator tuning, not model training, source separation,
+masking analysis, or the deferred Billboard comparison. Its purpose is to
+establish a controlled naturalistic behavior envelope and to prevent the
+default profiles from being accepted solely because the score parses. The
+calibration corpus, effective configuration, summary metrics, and any manual
+adjustments must be reproducible and documented.
+
+The implementation may land these capabilities in phases, but they are
+committed scope for the beyond-MVP melody target. A melody implementation
+that only provides the random walk is an intermediate milestone, not the
+finished naturalistic generator.
+
+### 1.2 ACR label hierarchy and non-interference invariant
 
 The chord hierarchy is authoritative and immutable for automatic chord
 recognition (ACR):
@@ -96,14 +179,14 @@ Melody generation must not:
   or
 - change V0, V1, V9, voicer selection, arpeggio decisions, or their timing.
 
-Melody may expose, withhold, or intentionally distract from chord tones and
-extensions as an explicit experimental condition, but those choices are
-downstream audio/symbolic conditions only. Every variant must retain the
-identical source chord labels, event boundaries, durations, and split
-identity so ACR performance changes can be attributed to the condition rather
-than to label drift.
+Melody may naturally expose chord tones, extensions, passing tones, neighbors,
+and other supported behaviors, but those choices are downstream
+audio/symbolic content only. The generated melody must retain the source chord
+labels, event boundaries, and durations. The multitrack output makes the
+resulting roles independently selectable without requiring separate matched
+renders.
 
-### 1.2 Per-timepoint label safety
+### 1.3 Per-timepoint label safety
 
 There are two different guarantees:
 
@@ -111,101 +194,70 @@ There are two different guarantees:
    active source interval and its complete `ChordEvent` tuple are unchanged.
    A melody event must reference the source event(s) it covers, and a held
    note may not silently become a new chord event.
-2. **Audio ACR stability is measurable, not absolute.** A MIDI-level rule
-   cannot guarantee the same recognizer output across soundfonts, mixes,
-   instruments, and model front ends. Melody conditions must therefore state
-   whether they are intended to be transparent or a labeled stress case.
+2. **Audio ACR stability is not guaranteed.** A MIDI-level rule cannot
+   guarantee the same recognizer output across soundfonts, mixes, instruments,
+   and model front ends. Naturalistic output should be musically plausible and
+   chord-conditioned, but it must not be described as audio-level label
+   transparency.
 
-The default `transparent` label-safety policy applies these symbolic proxies
+The default `naturalistic` label-safety policy applies these symbolic proxies
 at every source event:
 
 - strong-position melody onsets use an active source degree or stable
   extension, unless they are a short, explicitly resolved NCT;
 - every NCT has a role, target, and resolution within the configured
   `nct_resolution_horizon`; an unsupported sustained chromatic pitch is not
-  transparent;
+  naturalistic;
 - a held note that becomes non-chordal after a playable boundary is labeled
   as a suspension/hold and must resolve within the same horizon;
 - no melody pitch is emitted during a default no-chord interval; and
 - melody remains on V2 and never contributes its pitch to V0, V1, V9, or the
   source label tuple.
 
-The `stress` label-safety policy may permit chromatic, dense, or
-same-register material that can change ACR predictions. It still preserves
-the source label and event timeline, but its purpose is to measure robustness,
-not to claim transparent recognition. The selected policy, per-event
-violations/fallbacks, and source-event mapping must be recorded in the
-manifest. Both policies must retain the same source label hash.
+The naturalistic policy may include chromatic, dense, or same-register
+material when those behaviors are musically supported by the local chord,
+phrase, register, and resolution context. The selected behavior, any
+fallback, and source-event mapping must be recorded in the manifest. The
+policy preserves the source label and timeline but does not claim that every
+full mix will be equally easy for ACR.
 
-### 1.3 ACR training integrity and false-signal control
+### 1.4 Full-mix output and part selection
 
-Adding melody creates a composite acoustic example. Preserving the
-`ChordEvent` label does not, by itself, prove that a model will learn the
-chord rather than a melody shortcut. The data protocol must distinguish:
+The naturalistic training artifact is a full mix containing the existing
+accompaniment plus the generated V2 melody. Spec 13.5 exports the same render
+as synchronized mixed, chords, bass, percussion, and, once V2 is enabled,
+melody tracks. Consumers may train on the mixed file or choose any subset of
+the exported parts and remix them for a particular experiment.
 
-```text
-source ChordEvent -> accompaniment and label
-source ChordEvent -> optional melody condition
-```
+The melody implementation therefore does not need to generate a separate
+accompaniment-only control or matched melody variants. It must instead:
 
-The following rules apply when generated audio is used to train or evaluate
-ACR:
+- preserve the immutable `ChordEvent` label and source-event timeline;
+- keep V0, V1, and V9 decisions unchanged when V2 is enabled;
+- record the selected melody instrument, rhythm, register, behavior counts,
+  and generation seed; and
+- keep V2 independently inspectable and mechanically pairable with the other
+  tracks.
 
-- keep an accompaniment-only control for every source progression;
-- create melody-on variants from the identical source label, voicing,
-  accompaniment decisions, event timing, and source split;
-- balance melody presence, instrument, register, density, exposure condition,
-  and label-safety policy within each label/genre/rare-feature stratum;
-- never use a melody note to replace missing or omitted chord evidence;
-- keep `transparent` variants in the core ACR distribution and place
-  `stress`, dense, chromatic, and intentionally exposed variants in a
-  separately identified robustness distribution; and
-- split by source progression before creating variants so matched versions
-  cannot cross train/validation/test boundaries.
+Track selection is an output-consumer decision, not a second melody-generation
+path. No audio-level ACR stability claim may be inferred from the symbolic
+label-preservation checks.
 
-The melody-on examples are therefore an augmentation of the chord corpus, not
-a new definition of what the chord sounds like. A model trained only on
-melody-on data, or on an imbalanced exposure condition, may learn the
-instrument, register, or a melody pitch correlated with a chord label. Such
-data must not be used as evidence that the melody is label-neutral.
+### 1.5 Naturalistic coverage
 
-ACR evaluation must include at least:
+Increasing the corpus beyond 250,000 chord events can improve long-tail
+coverage, but raw event count is not a substitute for varied melody content.
+The corpus should accumulate independent variation across melody instrument,
+rhythm, register, density, contour, rests, holds, chord-tone roles,
+extensions, and supported non-chord behaviors.
 
-- accompaniment-only training/testing;
-- accompaniment-only training with transparent melody-on testing;
-- balanced mixed-condition training with held-out melody conditions; and
-- separate robustness reporting for stress conditions.
-
-Report condition-conditional accuracy and confusion, not only aggregate
-accuracy. A substantial cross-condition change is a dataset confound or an
-intentional robustness result to investigate; it must not be silently
-attributed to a change in the underlying chord label.
-
-### 1.4 Data volume is not a substitute for balance
-
-Increasing the corpus beyond 250,000 chord events can reduce estimation
-variance and improve long-tail coverage, but it cannot remove a systematic
-melody confound. If an instrument, register, density, or melody pitch remains
-correlated with a label, more examples teach that shortcut more reliably.
-
-Corpus sizing must therefore be evaluated by independent coverage of
-`label x genre x accompaniment condition x melody condition`, including
-instrument, register, density, and exposure strata. Raw event count is not
-enough, and variants copied from one source progression do not count as
-independent source evidence.
-
-The 70% melody inclusion probability is a rendering behavior, not a guarantee
-of training balance. The corpus builder must inspect realized counts and
-stratify, resample, or weight examples so that melody presence and its
-attributes are not predictive of the ACR label. More data is warranted for a
-rare stratum only when it adds independent chord, voicing, timing, and
-accompaniment variation; duplicating the same progression or melody pattern
-does not provide equivalent coverage.
-
-Before treating a larger corpus as a remedy, compare a melody-only predictor
-with the intended ACR baseline and run the cross-condition tests in section
-1.3. A larger dataset is a successful remedy only when it improves coverage
-without increasing label predictability from melody-only features.
+The 70% melody inclusion probability remains a rendering behavior, not a
+guarantee that every corpus subset contains a desired melody rate. Record the
+realized inclusion state and inspect aggregate counts, but do not require
+matched controls or a factorial cross-condition balance for the first
+implementation. Additional generation is most useful when it adds new chord
+progressions and naturalistic melody realizations rather than duplicating one
+melody pattern.
 
 ## 2. Goals and non-goals
 
@@ -221,14 +273,20 @@ The implementation should:
   held tones;
 - preserve bounded contour, register, density, phrase repetition, and
   cadence behavior;
-- expose or withhold DCT and active extensions independently from chord
-  rarity;
-- provide sparse, dense, high-register, same-register, and chromatic
-  conditions for recognition and masking experiments;
+- plan phrases with a bounded sequence scorer/beam rather than relying only
+  on note-by-note decisions;
+- use confidence-aware local-key context as a soft phrase-level prior with a
+  safe global/chord-centered fallback;
+- vary chord-tone, extension, scale-tone, chromatic, rhythmic, register, and
+  contour behavior without creating separate matched conditions;
+- provide sparse, moderate, active, high-register, and mid-register
+  realizations within one naturalistic distribution;
 - preserve exact source-event timing and label provenance;
 - keep accompaniment behavior unchanged when melody is disabled or enabled
   with the same source seed; and
-- provide a separately inspectable melody stem and symbolic event map.
+- provide a separately inspectable melody stem and symbolic event map; and
+- calibrate decoder and profile defaults against a reproducible representative
+  corpus before declaring the naturalistic path production-ready.
 
 ### 2.2 Non-goals
 
@@ -244,9 +302,9 @@ The first implementation must not:
 - claim that a high melody is always perceptually transparent; or
 - change the existing pad, arpeggio, bass, or percussion algorithms.
 
-Source separation, masking models, and audio recognizers belong to the
-experiment phase. They must consume the original mix and explicit stems rather
-than overwrite symbolic labels.
+Source separation, masking models, and audio recognizers are outside the first
+implementation. If used later, they must consume the original mix and explicit
+stems rather than overwrite symbolic labels.
 
 ## 3. Current repository seam
 
@@ -282,8 +340,8 @@ merged-role provenance.
 - source-to-realized extension mismatch.
 
 The source `ChordEvent` remains authoritative. If a requested extension was
-omitted by the voicer, the melody may still target it in an exposure variant,
-but the manifest must distinguish:
+omitted by the voicer, the melody may still target it as a naturalistic
+behavior, but the manifest must distinguish:
 
 ```text
 source_degree_evidence
@@ -416,6 +474,8 @@ class MelodyProfile:
     base_velocity: int
     max_leap_semitones: int
     density_weights: Mapping[str, float]
+    rhythm_weights: Mapping[str, float]
+    behavior_weights: Mapping[str, float]
     rest_probability: float
     hold_probability: float
 ```
@@ -434,23 +494,32 @@ class MelodyGenerationConfig:
     beam_width: int = 32
     candidate_limit_per_onset: int = 24
     decoder: str = "chord_centered_random_walk"
-    label_safety_policy: str = "transparent"
+    local_key_policy: str = "confidence_aware"
+    local_key_window_bars: int = 8
+    local_key_persistence_cost: float = 1.0
+    local_key_confidence_floor: float = 0.5
+    label_safety_policy: str = "naturalistic"
     masking_cost_enabled: bool = False
 ```
 
 These defaults are repository-level engineering choices, not universal
 musical measurements. Validate positive integer limits at construction and
 restrict `decoder` to `chord_centered_random_walk` or `sequence_beam`.
-Restrict `label_safety_policy` to `transparent` or `stress`. Record the
-effective configuration in the render manifest.
+Restrict `local_key_policy` to `none` or `confidence_aware`; the latter is
+the required policy for the calibrated naturalistic corpus. The random-walk
+decoder is the transparent bootstrap default, while the calibrated
+naturalistic path must use `sequence_beam` with the configured local-key
+policy unless a manifest explicitly identifies an intermediate baseline.
+Restrict `label_safety_policy` to `naturalistic`. Record the effective
+configuration in the render manifest.
 
 The initial catalog should contain at least:
 
 | Profile | Intended register | Initial use |
 |---|---|---|
-| `lead-high-sparse` | above most chord voicings | neutral, transparent melody |
+| `lead-high-sparse` | above most chord voicings | sparse, singing melody |
 | `lead-mid-neutral` | overlaps the upper accompaniment range | ordinary augmentation |
-| `lead-mid-dense` | chord-register overlap | masking stress condition |
+| `lead-mid-active` | chord-register overlap | more active rhythms and contour |
 
 Program numbers and exact weights should be centralized in
 `instruments.py`, validated at startup, and selected with a deterministic
@@ -497,7 +566,7 @@ Use the catalog with the following initial profile guidance:
 |---|---|
 | `lead-high-sparse` | `violin`, `fiddle`, `flute`, `pan-flute`, `alto-sax`, `clarinet`, `shakuhachi` |
 | `lead-mid-neutral` | `viola`, `trumpet`, `electric-guitar-clean`, `clarinet`, `tenor-sax`, `fiddle` |
-| `lead-mid-dense` | `overdriven-guitar`, `distortion-guitar`, `trombone`, `tenor-sax`, `synth-lead-square`, `viola` |
+| `lead-mid-active` | `overdriven-guitar`, `distortion-guitar`, `trombone`, `tenor-sax`, `synth-lead-square`, `viola` |
 
 The profile is allowed to reject a preferred patch when its configured MIDI
 range or tessitura would make the requested melody infeasible. Such a choice
@@ -562,7 +631,7 @@ meter field is added to `Song`, use 4/4 with sixteen sixteenth units per bar:
 | offbeats | scale, approach, passing, neighbor, rest |
 
 These are weights, not hard rules. A chromatic approach on a strong position
-is allowed when it resolves promptly and the selected condition permits it.
+is allowed when it resolves promptly and the naturalistic profile permits it.
 
 ### 5.3 Rare and altered events
 
@@ -574,9 +643,10 @@ active source pitch classes = A, C#, E, G, Bb
 global key scaffold          = C-major, if supplied
 ```
 
-`C#` and `Bb` may be favored as explicit exposure targets without declaring a
-new D-major key for that event. Neighboring context and phrase resolution
-should determine whether the tension is musically plausible.
+`C#` and `Bb` may be favored as naturalistic extension or tension targets
+without declaring a new D-major key for that event. Neighboring context and
+phrase resolution should determine whether the tension is musically
+plausible.
 
 ### 5.4 No-chord handling
 
@@ -591,6 +661,44 @@ An `is_no_chord` event is a harmonic boundary:
 A later profile may allow a conservative held-note policy across a no-chord
 event, but it must be explicit and separately labeled. The default should
 protect chord-recognition interpretation.
+
+### 5.5 Local-key context
+
+When `local_key_policy=confidence_aware`, infer tonal context over a phrase
+window rather than independently at every chord. Candidate contexts may use:
+
+- the song tonic and explicit mode or `scale_pcs`;
+- recurring chord roots and qualities;
+- dominant-to-tonic or other cadence evidence;
+- phrase boundaries and metric emphasis; and
+- persistence from the preceding phrase context.
+
+The inference should produce a bounded context record such as:
+
+```python
+@dataclass(frozen=True)
+class LocalKeyContext:
+    start_sixteenths: int
+    end_sixteenths: int
+    tonic_pc: int
+    scale_pcs: tuple[int, ...]
+    confidence: float
+    transition_cost: float
+    source: str                 # explicit, inferred, global_fallback
+```
+
+Use a persistence/transition cost so a local key changes only when the
+surrounding progression provides enough evidence. A low-confidence or unstable
+window must use `global_fallback`; it must not force scale-based candidates.
+An explicit `scale_pcs` remains the configured global scaffold unless an
+explicit future policy permits a locally inferred replacement.
+
+Local-key context is a soft scoring feature only. At every onset, an active
+source chord degree remains eligible and authoritative even when it is
+non-diatonic in the inferred context. A scale tone may supplement the
+candidate pool, but may not displace an active chord degree solely because it
+belongs to the inferred scale. Record the context, confidence, transition
+cost, and fallback reason in the melody manifest and event diagnostics.
 
 ## 6. Sequence generation
 
@@ -624,7 +732,7 @@ profile controls density rather than forcing one fixed rhythm:
 
 - sparse profiles should prefer eighth-note or longer durations;
 - neutral profiles may use eighths with occasional sixteenths;
-- dense profiles may activate adjacent sixteenth slots;
+- active profiles may activate adjacent sixteenth slots;
 - rests are explicit events, not missing data; and
 - a held note may continue through playable chord changes.
 
@@ -650,28 +758,34 @@ This is not a random walk over all MIDI pitches. At each onset it:
 2. resolves those candidates to the nearest legal octave(s) around the
    previous melody pitch;
 3. weights active chord degrees and stable extensions by metric position and
-   exposure condition;
+   naturalistic profile behavior;
 4. applies a distance/maximum-leap transition weight so nearby candidates are
    preferred without forcing a fixed contour; and
 5. samples one candidate, hold, or rest from the seeded melody RNG.
 
-In `transparent` core output, chord-tone candidates are preferred and
-unsupported non-chord tones are not proposed by default. A controlled NCT may
-be enabled only when it has an explicit target and resolves within the
-configured horizon. `stress` output may relax this policy, but must remain
-separately identified.
+In naturalistic output, chord-tone candidates are preferred and unsupported
+non-chord tones are not proposed by default. A supported NCT may be enabled
+when it has an explicit target and resolves within the configured horizon.
+Profiles may vary how often these behaviors occur, but the generator does not
+create a separate robustness condition.
 
-The random walk is the production MVP because its transition choices,
-candidate pool, and failure cases are straightforward to inspect. A bounded
-beam search or equivalent phrase-level decoder remains a later
-`sequence_beam` option and an ablation; it is not required to implement the
-first symbolic melody path.
+The random walk is the transparent bootstrap decoder because its transition
+choices, candidate pool, and failure cases are straightforward to inspect.
+It remains selectable as a baseline and regression reference. It is not the
+finished naturalistic corpus decoder.
+
+The required beyond-MVP path is a bounded phrase-level `sequence_beam`
+decoder, or an equivalent top-k phrase search. Partition the timeline into
+configured phrase windows, retain the best partial paths at each onset, and
+score complete paths using the terms below. The decoder must look ahead far
+enough to evaluate NCT resolution, cadence direction, phrase contour, and the
+next harmonic context rather than choosing every note independently.
 
 The sequence score should combine:
 
 ```text
 + active chord-degree compatibility
-+ DCT/extension exposure according to condition
++ DCT/extension preference according to profile behavior
 + global scale or phrase-key fit
 + metrical stability
 + short-horizon tension followed by resolution
@@ -694,17 +808,18 @@ heuristic.
 Apply scoring in this priority order:
 
 1. hard validity and label-preserving constraints;
-2. active chord-degree compatibility, exposure condition, and short-horizon
-   NCT resolution;
+2. active chord-degree compatibility, profile behavior, and short-horizon NCT
+   resolution;
 3. interval/contour continuity, held-note continuity, phrase repetition,
    cadence, and soft tessitura;
 4. global-scale fit, realized-voicing overlap, density, and optional masking.
 
-The later `sequence_beam` decoder uses a configurable beam width of 32 and
-keeps at most 24 octave-resolved candidates per onset by default. These are
+The `sequence_beam` decoder uses a configurable beam width of 32 and keeps at
+most 24 octave-resolved candidates per onset by default. These are
 performance defaults rather than research measurements; record effective
-values in the manifest. The random-walk MVP does not need a beam, but the
-configuration remains available for the later decoder.
+values in the manifest. The random-walk baseline does not need a beam, but
+the same candidate and scoring machinery should be reused so the two paths
+can be compared without changing source labels or track integration.
 
 Hard constraints are limited to:
 
@@ -739,34 +854,38 @@ or arpeggio RNGs. With the same progression, render seed, voicing order,
 profile, condition, and inclusion probability, the inclusion decision and
 melody output must be byte-reproducible.
 
-## 7. Exposure conditions
+## 7. Naturalistic melody variation
 
-The condition is an explicit parameter independent of chord rarity:
+The required melody condition is `naturalistic`. It is a distribution of
+musically supported behaviors rather than a matrix of matched experimental
+variants. Sample the following dimensions independently where feasible, while
+allowing the active chord and phrase context to constrain the result:
 
-| Condition | Intended behavior |
+| Dimension | Required variation |
 |---|---|
-| `neutral` | ordinary chord-aware melody with moderate DCT/extension preference |
-| `dct_exposed` | favor the active DCT or differentiating extension on strong positions when feasible |
-| `dct_withheld` | avoid intentionally targeting the DCT/differentiating extension, especially on strong positions |
-| `chromatic` | permit a controlled, measurable increase in approach/passing/enclosure tones |
-| `dense_overlap` | increase activity and move the melody toward accompaniment register |
-| `oracle_stem` | not a pitch policy; evaluate separately separated melody/accompaniment stems |
+| Instrument | multiple melody-only GM programs selected from the profile catalog |
+| Rhythm | rests, holds, eighth-note phrases, sixteenth-note activity, and longer tones |
+| Register | high, mid, and profile-centered realizations within hard range |
+| Harmonic behavior | chord tones, stable extensions, scale tones, passing tones, neighbors, approaches, enclosures, suspensions, and appoggiaturas |
+| Contour | repeated tones, stepwise motion, bounded leaps, phrase arcs, and cadential motion |
+| Density | sparse, moderate, and active passages controlled by profile weights |
 
-`dct_exposed` and `dct_withheld` must record whether the requested condition
-was feasible for each event. A withheld condition may still contain a
-non-chord tone or a weak incidental extension when required by contour; it
-must not deliberately target the withheld differentiator.
+`rhythm_weights` and `behavior_weights` are configurable profile inputs.
+Their effective values and realized counts must be recorded in the manifest.
+Naturalistic generation may produce a dense or chromatic passage when it is
+supported by its profile and local resolution; that passage is not a separate
+robustness dataset.
 
-The initial implementation order is:
+The only required condition values are:
 
-1. `neutral`;
-2. `dct_exposed`;
-3. `dct_withheld`; and
-4. `chromatic` and `dense_overlap`.
+```text
+none
+naturalistic
+```
 
-Condition selection must not be inferred from a chord's rarity. The same base
-progression should be renderable under multiple conditions, and all variants
-must stay in the same train/validation/test split.
+`none` disables V2. `naturalistic` enables one chord-conditioned melody path.
+Future experiments may add named conditions, but they are not part of the
+initial implementation contract.
 
 ## 8. Rendering integration
 
@@ -789,9 +908,9 @@ For directory rendering, add equivalent options:
 
 ```text
 --melody-condition
-    none | neutral | dct_exposed | dct_withheld | chromatic | dense_overlap
+    none | naturalistic
 --melody-profile
-    lead-high-sparse | lead-mid-neutral | lead-mid-dense
+    lead-high-sparse | lead-mid-neutral | lead-mid-active
 --melody-inclusion-probability
     floating-point value from 0.0 to 1.0; default 0.70
 ```
@@ -800,12 +919,13 @@ For directory rendering, add equivalent options:
 Melody configuration is independent of `--mode mixed` and its
 `--arpeggio-percent`/`--pad-percent` allocation.
 
-For any condition other than `none`, the inclusion probability is evaluated
-once for each source song. If the song is not selected, render no V2 track and
-record `omission_reason=probability_gate`; do not generate or partially
-serialize a melody. A probability of `1.0` is the deterministic way to
-request melody for every song, and `0.0` is equivalent to an intentional
-omission while retaining the requested condition in provenance.
+For `naturalistic`, the inclusion probability is evaluated once for each
+source song. If the song is not selected, render no V2 track and record
+`omission_reason=probability_gate`; do not generate melody events or partially
+serialize a melody. Emit a synchronized V2 rest track for the song in the
+multitrack output. A probability of `1.0` is the deterministic way to request
+melody for every song, and `0.0` is equivalent to an intentional omission
+while retaining the requested condition in provenance.
 
 ### 8.2 Score tracks
 
@@ -823,8 +943,10 @@ melody serializer should reuse the renderer's absolute-time and numeric
 duration conventions so notes can span source chord boundaries without
 recovering timing from audio.
 
-When disabled, no V2 track is emitted. Existing score blocks, V0/V1/V9
-content, and single-mode/mixed-mode behavior remain unchanged.
+When `melody_condition=none`, no V2 track is emitted and existing score
+blocks, V0/V1/V9 content, and single-mode/mixed-mode behavior remain
+unchanged. For `naturalistic`, an omitted song has no melody events but keeps
+its synchronized V2 rest track and block ordinal.
 
 ### 8.3 MIDI humanization
 
@@ -848,9 +970,8 @@ Add a `melody` field to each render manifest record:
   "melody": {
     "enabled": true,
     "included": true,
-    "condition": "neutral",
+    "condition": "naturalistic",
     "profile": "lead-high-sparse",
-    "acr_dataset_role": "core_acr",
     "inclusion_probability": 0.7,
     "omission_reason": null,
     "instrument": "flute",
@@ -863,7 +984,17 @@ Add a `melody` field to each render manifest record:
     "chord_tone_count": 24,
     "extension_count": 8,
     "chromatic_count": 4,
-    "dct_exposure_count": 3,
+    "behavior_counts": {
+      "scale_tone": 3,
+      "passing": 2,
+      "neighbor": 1,
+      "approach": 2
+    },
+    "rhythm_counts": {
+      "sixteenth": 8,
+      "eighth": 24,
+      "quarter_or_longer": 10
+    },
     "range": [67, 88],
     "hard_range": [55, 105],
     "tessitura": [67, 96],
@@ -877,8 +1008,12 @@ Add a `melody` field to each render manifest record:
       "nct_resolution_horizon": 2,
       "beam_width": 32,
       "candidate_limit_per_onset": 24,
-      "decoder": "chord_centered_random_walk",
-      "label_safety_policy": "transparent",
+      "decoder": "sequence_beam",
+      "local_key_policy": "confidence_aware",
+      "local_key_window_bars": 8,
+      "local_key_persistence_cost": 1.0,
+      "local_key_confidence_floor": 0.5,
+      "label_safety_policy": "naturalistic",
       "masking_cost_enabled": false
     },
     "fallback_count": 0,
@@ -910,7 +1045,6 @@ The manifest must also record:
 
 - source label hash and source ordinal already used by the renderer;
 - melody condition and profile;
-- ACR dataset role (`core_acr` or `acr_robustness`);
 - requested and realized inclusion state;
 - configured inclusion probability and omission reason;
 - deterministic seed derivation version;
@@ -920,9 +1054,17 @@ The manifest must also record:
 - hard range, soft tessitura, and preferred center;
 - effective phrase, resolution, and search configuration;
 - label-safety policy and per-event safety diagnostics;
-- DCT/extension availability and exposure;
+- realized instrument, rhythm, register, density, and melodic behavior
+  summaries;
 - no-chord decisions; and
-- any optional local-key posterior or masking condition.
+- local-key context, confidence, transition cost, and fallback diagnostics;
+  and
+- any optional masking diagnostic.
+
+When multitrack rendering is enabled, the corpus manifest must also identify
+the V2 melody sidecar and the mixed/chords/bass/percussion files according to
+spec 13.5. The melody record must not require a separate matched render:
+track selection and remixing are performed by the consumer.
 
 If manifest size becomes a practical problem, move full `events` arrays to a
 line-addressable `.melody.jsonl` sidecar while retaining a hash and summary in
@@ -964,8 +1106,8 @@ For each non-rest melody event:
 - realized-voicing claims must match the corresponding `VoicedChord` data;
 - chromatic roles must have a permitted approach, passing, neighbor, or
   enclosure explanation;
-- a withheld condition must not intentionally target its withheld
-  differentiator on a strong position; and
+- naturalistic non-chord roles must have an explicit target and resolution
+  where required by the role; and
 - melody validation must never mutate or re-interpret the chord label.
 
 ### 10.3 Regression and isolation checks
@@ -978,7 +1120,7 @@ For the same source, seed, voicer order, and bass-active context:
 - enabling melody does not change arpeggio scheduling or fallback diagnostics;
 - separate melody RNG streams produce repeatable output; and
 - source label hashes, event count, duration tokens, and chord boundaries are
-  identical across melody conditions.
+  identical between melody-disabled and naturalistic-enabled renders.
 
 ## 11. Test plan
 
@@ -998,10 +1140,15 @@ Create `tests/test_melody.py` covering:
 7. rest and hold behavior;
 8. phrase reset at no-chord events;
 9. source-event mapping for notes held across playable chord boundaries;
-10. DCT/extension exposed and withheld conditions;
+10. naturalistic behavior weights for chord tones, extensions, rests, holds,
+    and supported non-chord roles;
 11. the 70% song-level inclusion gate and its `0.0`/`1.0` boundaries;
 12. deterministic inclusion and melody output for equal seeds; and
-13. explicit fallback diagnostics when no legal candidate remains.
+13. explicit fallback diagnostics when no legal candidate remains;
+14. phrase-level beam retention, deterministic tie-breaking, cadence scoring,
+    and parity of hard constraints with the random-walk baseline; and
+15. local-key confidence, persistence costs, explicit-scale precedence, and
+    global-context fallback for ambiguous progressions.
 
 Include rare examples such as:
 
@@ -1016,15 +1163,18 @@ Include rare examples such as:
 
 Extend `tests/test_rendered_corpus.py` to verify:
 
-- a melody-enabled render contains V2 and its manifest record;
-- a requested melody render omits V2 and records a probability-gate omission
-  when the seeded 70% inclusion decision rejects a song;
+- a naturalistic melody render contains V2 and its manifest record;
+- a naturalistic melody render records a probability-gate omission and a
+  synchronized V2 rest block when the seeded 70% inclusion decision rejects a
+  song;
 - a melody-disabled render remains backward compatible;
 - V0/V1/V9 are invariant under melody enablement;
 - mixed pad/arpeggio allocation is unchanged when melody is enabled;
 - the V2 track is synchronized with the source timeline;
 - the melody metadata and score tokens pair one-to-one; and
-- validation accepts both legacy records and melody records.
+- validation accepts both legacy records and melody records;
+- the sequence-beam path preserves V0/V1/V9 and source-label invariants; and
+- local-key context diagnostics are present for inferred and fallback windows.
 
 ### 11.3 Property-style checks
 
@@ -1040,70 +1190,71 @@ all non-rest events have a valid role and source mapping
 
 Use fixed seeds in tests. Do not use audio analysis as the only test oracle.
 
-## 12. Evaluation and ablations
+## 12. Evaluation scope
 
-The implementation is not complete when a melody string merely parses. Report
-symbolic and acoustic results separately.
+The implementation is not complete when a melody string merely parses. The
+initial evaluation is symbolic validation plus inspection of the naturalistic
+full-mix output and its synchronized tracks. A full cross-condition ACR
+ablation is deferred and is not an implementation acceptance criterion.
 
-### 12.1 Symbolic metrics
+### 12.1 Symbolic and corpus metrics
 
-Report by genre, chord type, render mode, and rare-feature stratum:
+Report by genre, chord type, melody profile, and rare-feature stratum:
 
 - note/rest density;
+- rhythm and duration distributions;
 - range and leap distributions;
 - repeated-note and phrase-reuse rates;
-- chord-tone rate by metric strength;
-- stable-extension and DCT exposure rate;
+- chord-tone, extension, and supported non-chord behavior by metric strength;
 - non-chord resolution rate within a short horizon;
-- unresolved chromatic rate;
 - held-note and cross-boundary rate;
 - cadence completion;
 - no-chord violation rate;
 - source-degree versus realized-voicing mismatch;
 - fallback rate; and
-- condition-specific density and exposure.
+- instrument, register, density, and behavior coverage.
 
-Compare at least:
+Report metrics for both the seeded chord-centered random walk and the
+phrase-level sequence decoder. The random walk is the transparent baseline
+and regression reference; the calibrated naturalistic corpus must use the
+sequence decoder with confidence-aware local-key context. A decoder
+comparison is not a model ablation and does not change the source-label
+contract.
 
-1. chord-aware candidate sampling;
-2. independent slot sampling;
-3. chord tones only;
-4. chord tones plus global scale;
-5. controlled chromatic candidates; and
-6. sequence scoring with phrase/resolution terms.
+Calibration is complete only when the selected profile defaults have a
+reproducible report covering the metrics above, representative full-mix and
+sidecar inspection, realized inclusion/profile/instrument coverage, and
+documented adjustments to rhythm, behavior, register, contour, and decoder
+weights. Do not accept defaults solely because generated scores parse.
 
-### 12.2 Recognition and masking experiment
+### 12.2 Full-mix and multitrack inspection
 
-For matched chord labels and timing, render:
+Validate and inspect:
 
-1. accompaniment only;
-2. sparse high-register melody;
-3. neutral melody;
-4. dense same-register melody;
-5. controlled chromatic melody;
-6. oracle accompaniment and melody stems; and
-7. estimated separated stems from an explicitly recorded baseline.
+1. the full V0/V1/V2/V9 mix;
+2. the synchronized V2 melody track;
+3. the chords, bass, and percussion sidecars;
+4. naturalistic instrument, rhythm, register, and behavior variation; and
+5. melody-disabled output as a regression reference.
 
-Measure independently:
+The mixed file and sidecars are the available experiment controls. A consumer
+can select accompaniment, melody, or any other track combination without
+requiring the generator to emit matched variants. Any later audio
+recognition, listening, or masking study should record which tracks were
+selected and how they were mixed.
 
-- root, triad, seventh, and full-extension chord accuracy;
-- frame and event boundary errors;
-- key/context stability;
-- melody F0 or multi-F0 quality;
-- spectral-overlap or masking proxies;
-- source-separation quality; and
-- human ratings of salience, clarity, tension, and plausibility.
+### 12.3 Deferred model comparison
 
-The original unseparated mix must remain a baseline. Separation results must
-record the model, version, and stems and must not overwrite symbolic labels.
+When model-level evaluation is undertaken, the planned comparison is:
 
-### 12.3 Leakage controls
+1. a model trained on the preexisting Billboard data;
+2. Billboard data plus the chord corpus; and
+3. Billboard data plus the chord corpus with naturalistic melody included.
 
-All variants made from the same base progression must remain in one dataset
-split. Exposure condition, melody density, and register must be sampled
-independently of rare-chord quotas. Otherwise a recognizer could learn that a
-rare label always has a particular melody pitch or density instead of learning
-the chord evidence.
+This comparison is separate from melody generation and does not require a
+full cross-condition study. It should use the multitrack files to document
+which parts were included, while preserving the source chord labels and
+manifest provenance.
 
 ## 13. Phased implementation order
 
@@ -1111,56 +1262,76 @@ the chord evidence.
 
 - Add optional tonal-context fields and parsing rules.
 - Add `MelodyEvent` and `MelodyProfile` data contracts.
-- Add `MelodyGenerationConfig`, including the random-walk decoder and
-  label-safety controls.
+- Add `MelodyGenerationConfig`, including decoder selection, phrase-search,
+  local-key, and label-safety controls.
 - Add stable child-seed helpers.
 - Add unit tests for contracts, source-degree enumeration, and no-chord
   boundaries.
 - Confirm that melody-disabled rendering is unchanged.
 
-### Phase 1 - Neutral symbolic melody
+### Phase 1 - Naturalistic symbolic melody
 
 - Implement `melody_module.py` candidate generation.
 - Implement sixteenth-grid rhythm and phrase segmentation.
 - Implement the seeded, bounded chord-centered random walk.
-- Implement `neutral` with chord-tone, scale-tone, rest, hold, and controlled
-  approach/passing candidates.
+- Implement `naturalistic` with chord-tone, scale-tone, rest, hold, and
+  supported approach/passing candidates.
 - Add V2 serialization and compact manifest provenance.
 - Add structural validation and rendering integration tests.
 
-### Phase 2 - Exposure conditions
+### Phase 2 - Phrase planning and tonal context
 
-- Add `dct_exposed` and `dct_withheld`.
+- Implement the bounded `sequence_beam` phrase decoder using the same
+  candidate and scoring machinery as the random-walk baseline.
+- Implement phrase-window local-key inference with confidence, persistence
+  cost, and global-context fallback.
+- Add deterministic beam tie-breaking and provenance for retained/selected
+  phrase paths.
+- Add unit and integration tests for phrase cadence, NCT lookahead, local-key
+  transitions, ambiguous progressions, and source-label invariance.
+- Keep `chord_centered_random_walk` available as a baseline and regression
+  reference.
+
+### Phase 3 - Naturalistic variation
+
+- Add melody-only instrument selection across the curated catalog.
+- Add profile-specific rhythm, register, density, contour, and behavior
+  weights.
 - Add source-versus-realized extension diagnostics.
-- Add fallback and feasibility counts.
-- Add rare-chord stratified symbolic metrics.
+- Add fallback counts and naturalistic coverage metrics.
 
-### Phase 3 - Instrument and interference conditions
+### Phase 4 - Multitrack integration
 
-- Add `lead-mid-neutral`, `lead-mid-dense`, and high sparse profiles.
-- Add `chromatic` and `dense_overlap`.
+- Add `lead-mid-neutral`, `lead-mid-active`, and high sparse profiles.
 - Update Java melody humanization behavior.
-- Add matched-stem export or sidecar support.
+- Extend spec 13.5 sidecar output for V2.
 - Keep masking costs disabled by default until an audio baseline exists.
 
-### Phase 4 - Corpus and curation integration
+### Phase 5 - Corpus calibration and curation
 
-- Generate matched melody variants without changing the base labels.
-- Keep all variants in the same split.
+- Generate naturalistic full-mix songs without changing the base labels.
 - Extend `tools/curate_target_corpus.py` to preserve V2 and melody metadata.
-- Add curation coverage for conditions, profiles, density, exposure, and
-  fallback cases.
+- Add curation coverage for profiles, instrument, rhythm, register, density,
+  behavior, and fallback cases.
 - Validate source hashes and score/MIDI/manifest mappings for curated samples.
+- Render a fixed calibration corpus across genres, chord strata, profiles,
+  instruments, seeds, and inclusion states.
+- Produce a reproducible calibration report with symbolic metrics, sidecar
+  checks, representative score/audio inspection, and documented weight
+  adjustments.
+- Do not designate the naturalistic defaults as production-ready until the
+  sequence-beam/local-key path and calibration report are complete.
 
-### Phase 5 - Audio experiments
+### Phase 6 - Deferred model evaluation
 
-- Render accompaniment-only and full-mix controls.
-- Add oracle-stem measurements.
-- Evaluate one or more source-separation baselines as optional experiments.
-- Report recognition, melody extraction, masking, and separation metrics as
-  separate outcomes.
+- Train the planned Billboard baseline.
+- Add the chord corpus, then the naturalistic melody corpus, as separate
+  incremental training inputs.
+- Use the multitrack manifest to record selected parts and render settings.
 
 ## 14. Acceptance criteria
+
+### 14.1 Baseline and integration acceptance
 
 The first implementation phase is accepted only when:
 
@@ -1168,29 +1339,57 @@ The first implementation phase is accepted only when:
 2. A requested melody condition applies exactly one seeded song-level inclusion
    decision, defaulting to 70% inclusion.
 3. A fixed seed produces byte-identical inclusion, melody score, and metadata.
-4. Different conditions preserve the same chord labels, source hashes, timing,
+4. Melody enablement preserves the same chord labels, source hashes, timing,
    voicer choices, V0, V1, and V9 decisions.
 5. Every included melody note has valid range, timing, role, pitch-source, and source
    event provenance.
-6. Omitted songs contain no V2 track and retain an auditable omission reason.
+6. Omitted naturalistic songs contain no melody events, retain a synchronized
+   V2 rest block, and retain an auditable omission reason.
 7. No-chord events are synchronized rests and phrase resets by default.
 8. The MVP decoder is the seeded chord-centered random walk, and its effective
     decoder is recorded in the manifest.
-9. Transparent-policy events satisfy per-timepoint source-degree/NCT resolution
-    checks, while stress-policy events are explicitly marked as robustness
-    conditions.
+9. Naturalistic events satisfy per-timepoint source-degree/NCT resolution
+    checks and record any supported non-chord behavior.
 10. Non-diatonic and extension-rich events can produce legal candidates without
     a per-chord hard key reset.
 11. A melody note may cross playable chord boundaries only with explicit
     source-event mapping and valid duration.
-12. DCT/extension exposure and withholding are measurable rather than inferred
-    from final audio.
-13. Core and stress melody variants are distinguishable in manifests and
-    evaluation, with matched accompaniment-only controls.
+12. Instrument, rhythm, register, density, contour, and melodic behavior
+    variation are recorded in the manifest rather than inferred from final
+    audio.
+13. The mixed score and V2 sidecar are synchronized with the V0/V1/V9
+    multitrack output.
 14. The validator reports melody-specific failures without weakening existing
     chord, arpeggio, bass, percussion, or no-chord checks.
 15. Focused unit and integration tests cover both new behavior and regressions.
 
+### 14.2 Beyond-MVP completion acceptance
+
+The naturalistic melody implementation is not considered complete until:
+
+1. `sequence_beam` or an equivalent bounded phrase-level decoder is
+   implemented, deterministic, selectable, and used for calibrated
+   naturalistic output.
+2. The random walk remains available as a transparent baseline and regression
+   reference, using the same source-event and label-safety contracts.
+3. Confidence-aware local-key inference is implemented over phrase windows,
+   includes persistence and confidence handling, and falls back safely for
+   ambiguous or unstable progressions.
+4. Local-key context never relabels a source chord, overrides explicit
+   `scale_pcs` without policy, or displaces an active chord degree solely
+   because it is diatonic.
+5. Manifests record decoder, beam/search settings, local-key context and
+   confidence, fallback diagnostics, and deterministic seed derivation.
+6. A reproducible calibration corpus and report demonstrate coverage across
+   genres, chord strata, profiles, instruments, seeds, and melody inclusion
+   states.
+7. Calibration includes symbolic distribution checks, phrase/cadence and NCT
+   resolution checks, source-event/sidecar validation, and representative
+   full-mix inspection.
+8. Profile and decoder defaults have documented adjustments based on the
+   calibration evidence; parsing success alone is not used as the realism
+   acceptance criterion.
+
 Realism and recognition utility remain empirical outcomes. The generator should
-ship with a controlled realism envelope and explicit variants, not with a
-claim that one melody policy is universally correct.
+ship with a controlled realism envelope and explicit profile/behavior
+metadata, not with a claim that one melody policy is universally correct.
