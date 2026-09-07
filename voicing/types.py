@@ -113,15 +113,41 @@ class Song:
     bpm: int
     num_chords: int
     chords: tuple  # tuple[ChordEvent, ...]
+    mode: Optional[str] = None
+    scale_pcs: Optional[tuple] = None
 
     @staticmethod
     def from_dict(d: dict) -> "Song":
+        mode = d.get("mode")
+        if mode is not None and (
+            not isinstance(mode, str) or not mode.strip()
+        ):
+            raise ValueError("mode must be a non-empty string or None")
+        scale_pcs = d.get("scale_pcs")
+        if scale_pcs is not None:
+            if (
+                not isinstance(scale_pcs, (list, tuple))
+                or not scale_pcs
+                or any(
+                    isinstance(value, bool)
+                    or not isinstance(value, int)
+                    or not 0 <= value < 12
+                    for value in scale_pcs
+                )
+                or len(set(scale_pcs)) != len(scale_pcs)
+            ):
+                raise ValueError(
+                    "scale_pcs must contain unique integers from 0 to 11"
+                )
+            scale_pcs = tuple(scale_pcs)
         return Song(
             genre=d["genre"],
             tonic_pc=d["tonic_pc"],
             bpm=d.get("bpm", 120),
             num_chords=d.get("num_chords", len(d["chords"])),
             chords=tuple(ChordEvent.from_dict(c) for c in d["chords"]),
+            mode=mode,
+            scale_pcs=scale_pcs,
         )
 
 

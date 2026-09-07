@@ -51,7 +51,10 @@ _ARPEGGIO_MIN_SUSTAIN_SIXTEENTHS = 2
 
 def _parse_note(token: str) -> int | None:
     if token.startswith("R"):
-        if token[1:] not in {*DURATION_BEATS, "s"}:
+        if (
+            token[1:] not in {*DURATION_BEATS, "s"}
+            and re.fullmatch(r"/\d+(?:\.\d+)?", token[1:]) is None
+        ):
             raise ValueError(f"invalid rest token {token!r}")
         return None
     match = _NOTE.fullmatch(token)
@@ -89,10 +92,15 @@ def _parse_track_details(tokens: list[str]) -> list[dict]:
             continue
         if token.startswith("R"):
             _parse_note(token)
+            rest_duration = token[1:]
             events.append({
                 "midis": [],
-                "duration": token[1:],
-                "duration_sixteenths": _standard_duration_sixteenths(token[1:]),
+                "duration": rest_duration,
+                "duration_sixteenths": (
+                    _standard_duration_sixteenths(rest_duration)
+                    if not rest_duration.startswith("/")
+                    else float(rest_duration[1:]) * 16
+                ),
                 "velocity": None,
                 "onset_sixteenths": pending_onset,
                 "is_rest": True,
@@ -298,7 +306,13 @@ def _voice_token_segments(line: str) -> dict[str, list[str]]:
             if position_index + 1 < len(positions)
             else len(tokens)
         )
-        fragment_start = 0 if position_index == 0 else start
+        fragment_start = (
+            start - 1
+            if position_index > 0
+            and start > 0
+            and tokens[start - 1].startswith("T")
+            else (0 if position_index == 0 else start)
+        )
         voices[voice] = tokens[fragment_start:end]
     return voices
 
@@ -335,6 +349,7 @@ def validate_multitrack_outputs(
     bass_path: str | Path,
     percussion_path: str | Path,
     manifest_path: str | Path,
+    melody_path: str | Path | None = None,
 ) -> dict:
     """Validate synchronized role files and their declared manifest pairing."""
     paths = {
@@ -344,6 +359,8 @@ def validate_multitrack_outputs(
         "percussion": Path(percussion_path).resolve(),
         "manifest": Path(manifest_path).resolve(),
     }
+    if melody_path is not None:
+        paths["melody"] = Path(melody_path).resolve()
     report = {
         "valid": False,
         "mixed": str(paths["mixed"]),
@@ -355,6 +372,8 @@ def validate_multitrack_outputs(
         "issues": [],
         "hard_failure_count": 0,
     }
+    if "melody" in paths:
+        report["melody"] = str(paths["melody"])
 
     def fail(category: str, detail: str) -> None:
         report["issues"].append({
@@ -365,7 +384,12 @@ def validate_multitrack_outputs(
 
     file_bytes: dict[str, bytes] = {}
     file_text: dict[str, str] = {}
-    for role in ("mixed", "chords", "bass", "percussion"):
+    file_roles = (
+        ("mixed", "chords", "bass", "melody", "percussion")
+        if "melody" in paths
+        else ("mixed", "chords", "bass", "percussion")
+    )
+    for role in file_roles:
         path = paths[role]
         if not path.is_file():
             fail("multitrack_missing_file", f"{role}: {path}")
@@ -410,16 +434,40 @@ def validate_multitrack_outputs(
             "manifest output does not match the mixed score path",
         )
     declared_paths = track_outputs.get("paths")
+    has_melody = (
+        "melody" in paths
+        or (
+            isinstance(declared_paths, dict)
+            and "melody" in declared_paths
+        )
+        or (
+            isinstance(track_outputs.get("voices"), dict)
+            and "melody" in track_outputs["voices"]
+        )
+    )
+    if has_melody and "melody" not in paths:
+        fail(
+            "multitrack_missing_file",
+            "melody: no V2 sidecar path was supplied",
+        )
     expected_voices = {
-        "mixed": ["V0", "V1", "V9"],
+        "mixed": (
+            ["V0", "V1", "V2", "V9"]
+            if has_melody
+            else ["V0", "V1", "V9"]
+        ),
         "chords": ["V0"],
         "bass": ["V1"],
         "percussion": ["V9"],
     }
+    if has_melody:
+        expected_voices["melody"] = ["V2"]
     if not isinstance(declared_paths, dict):
         fail("multitrack_manifest_mismatch", "track_outputs.paths is missing")
     else:
         for role in expected_voices:
+            if role not in paths:
+                continue
             declared = declared_paths.get(role)
             if (
                 not isinstance(declared, str)
@@ -485,7 +533,7 @@ def validate_multitrack_outputs(
             "multitrack_ordinal_mismatch",
             f"expected={expected_ordinals!r}",
         )
-    for role in ("mixed", "chords", "bass", "percussion"):
+    for role in file_roles:
         blocks = parsed.get(role)
         if blocks is not None and len(blocks) != declared_count:
             fail(
@@ -534,7 +582,8 @@ def validate_multitrack_outputs(
     mixed_blocks = dict(parsed.get("mixed", ()))
     role_blocks = {
         role: dict(parsed.get(role, ()))
-        for role in ("chords", "bass", "percussion")
+        for role in ("chords", "bass", "melody", "percussion")
+        if role in file_roles
     }
     for ordinal, mixed_line in mixed_blocks.items():
         try:
@@ -544,6 +593,11 @@ def validate_multitrack_outputs(
         for role, voice in (
             ("chords", "V0"),
             ("bass", "V1"),
+            *(
+                (("melody", "V2"),)
+                if has_melody
+                else ()
+            ),
             ("percussion", "V9"),
         ):
             role_line = role_blocks[role].get(ordinal)
@@ -553,7 +607,15 @@ def validate_multitrack_outputs(
                 role_segments = _voice_token_segments(role_line)
             except ValueError:
                 continue
-            if mixed_segments.get(voice) != role_segments.get(voice):
+            mixed_content = [
+                token for token in mixed_segments.get(voice, [])
+                if not token.startswith("T")
+            ]
+            role_content = [
+                token for token in role_segments.get(voice, [])
+                if not token.startswith("T")
+            ]
+            if mixed_content != role_content:
                 fail(
                     "multitrack_role_content_mismatch",
                     f"{role} ordinal={ordinal} does not match mixed {voice}",
@@ -563,6 +625,11 @@ def validate_multitrack_outputs(
         "mixed": mixed_blocks,
         "chords": role_blocks["chords"],
         "bass": role_blocks["bass"],
+        **(
+            {"melody": role_blocks["melody"]}
+            if has_melody
+            else {}
+        ),
         "percussion": role_blocks["percussion"],
     }
     for ordinal, record in records_by_ordinal.items():
@@ -591,7 +658,11 @@ def validate_multitrack_outputs(
             mixed_segments = _voice_token_segments(mixed_line)
             details = {
                 voice: _parse_track_details(mixed_segments[voice])
-                for voice in ("V0", "V1", "V9")
+                for voice in (
+                    ("V0", "V1", "V2", "V9")
+                    if has_melody
+                    else ("V0", "V1", "V9")
+                )
             }
         except (KeyError, ValueError) as error:
             fail(
@@ -631,6 +702,11 @@ def validate_multitrack_outputs(
         for role, voice in (
             ("chords", "V0"),
             ("bass", "V1"),
+            *(
+                (("melody", "V2"),)
+                if has_melody
+                else ()
+            ),
             ("percussion", "V9"),
         ):
             role_line = role_blocks[role].get(ordinal)
@@ -660,6 +736,19 @@ def validate_multitrack_outputs(
                     "multitrack_timeline_mismatch",
                     f"{role} ordinal={ordinal}: mixed={mixed_timeline} "
                     f"role={role_timeline}",
+                )
+        if has_melody:
+            record = records_by_ordinal.get(ordinal)
+            melody_failures = _validate_melody_events(
+                details.get("V2", []),
+                record if isinstance(record, dict) else {},
+                mixed_segments.get("V2", []),
+                _track_program(mixed_segments.get("V0", [])),
+            )
+            for category, detail in melody_failures:
+                fail(
+                    category,
+                    f"ordinal={ordinal}: {detail}",
                 )
 
     report["valid"] = not report["issues"]
@@ -722,6 +811,425 @@ def _issue(
         "rendered_midi": midi,
         "detail": detail,
     })
+
+
+_MELODY_ROLES = {
+    "chord_tone",
+    "extension",
+    "scale_tone",
+    "approach",
+    "passing",
+    "neighbor",
+    "enclosure",
+    "suspension",
+    "appoggiatura",
+    "held",
+    "rest",
+    "fallback",
+}
+_MELODY_PITCH_SOURCES = {
+    "source_degree",
+    "realized_voicing",
+    "global_scale",
+    "chromatic_neighbor",
+    "previous_melody",
+    "rest",
+}
+_MELODY_NCT_ROLES = {
+    "approach",
+    "passing",
+    "neighbor",
+    "enclosure",
+    "suspension",
+    "appoggiatura",
+}
+_MELODY_DEGREE_ROLES = {
+    "root",
+    "3rd",
+    "5th",
+    "7th",
+    "9th",
+    "11th",
+    "13th",
+}
+
+
+def _track_program(tokens: list[str]) -> int | None:
+    for token in tokens:
+        if token.startswith("I") and token[1:].isdigit():
+            return int(token[1:])
+    return None
+
+
+def _validate_melody_events(
+    details: list[dict],
+    record: dict,
+    tokens: list[str] | None = None,
+    chord_program: int | None = None,
+) -> list[tuple[str, str]]:
+    """Validate V2 events against the record and immutable source labels."""
+    failures: list[tuple[str, str]] = []
+
+    def fail(category: str, detail: str) -> None:
+        failures.append((category, detail))
+
+    melody = record.get("melody")
+    if not isinstance(melody, dict):
+        if any(event.get("midis") for event in details):
+            fail(
+                "melody_manifest_missing",
+                "V2 contains pitched events without a melody manifest record",
+            )
+        return failures
+
+    event_details = [
+        event for event in details
+        if not event.get("is_timeline_marker")
+    ]
+    condition = melody.get("condition")
+    included = melody.get("included") is True
+    manifest_events = melody.get("events")
+    if not isinstance(manifest_events, list):
+        fail("melody_manifest_events_invalid", "melody.events must be a list")
+        manifest_events = []
+
+    if not included:
+        if any(event.get("midis") for event in event_details):
+            fail(
+                "melody_omission_has_notes",
+                "omitted melody records must contain only V2 rests",
+            )
+        if melody.get("omission_reason") != "corpus_quota" and condition == "naturalistic":
+            fail(
+                "melody_omission_reason_missing",
+                "naturalistic omitted melody is missing corpus_quota reason",
+            )
+    elif len(event_details) != len(manifest_events):
+        fail(
+            "melody_event_count_mismatch",
+            f"score={len(event_details)} manifest={len(manifest_events)}",
+        )
+
+    source_dir = record.get("source_dir")
+    source_file = record.get("source_file")
+    song = None
+    if isinstance(source_dir, str) and isinstance(source_file, str):
+        source_path = Path(source_dir) / source_file
+        try:
+            song = Song.from_dict(
+                json.loads(source_path.read_text(encoding="utf-8"))
+            )
+        except (OSError, UnicodeError, json.JSONDecodeError, ValueError):
+            song = None
+    starts: list[int] = []
+    ends: list[int] = []
+    if song is not None:
+        cursor = 0
+        for chord in song.chords:
+            try:
+                duration = DURATION_BEATS[chord.duration_token] * 4
+            except KeyError:
+                song = None
+                break
+            starts.append(cursor)
+            cursor += int(duration)
+            ends.append(cursor)
+    total = ends[-1] if ends else None
+
+    score_program = _track_program(tokens or [])
+    instrument_source = melody.get("instrument_source")
+    if instrument_source not in {"melody_catalog", "chord_collapse", "omitted"}:
+        fail(
+            "melody_instrument_source_invalid",
+            f"source={instrument_source!r}",
+        )
+    instrument_program = melody.get("instrument_program")
+    if included and (
+        isinstance(instrument_program, bool)
+        or not isinstance(instrument_program, int)
+        or not 0 <= instrument_program <= 127
+    ):
+        fail(
+            "melody_instrument_manifest_invalid",
+            f"program={instrument_program!r}",
+        )
+    if included and score_program != instrument_program:
+        fail(
+            "melody_instrument_mismatch",
+            f"score={score_program!r} manifest={instrument_program!r}",
+        )
+    collapsed = melody.get("collapsed_to_chord")
+    if included and collapsed is True:
+        if (
+            melody.get("chord_instrument_program") is None
+            or chord_program != instrument_program
+            or instrument_source != "chord_collapse"
+        ):
+            fail(
+                "melody_collapse_metadata_invalid",
+                "collapsed V2 program does not match the selected V0 program",
+            )
+    elif included and collapsed is False:
+        if instrument_source != "melody_catalog":
+            fail(
+                "melody_collapse_metadata_invalid",
+                "non-collapsed melody must use the melody catalog",
+            )
+        try:
+            from instruments import MELODY_INSTRUMENTS
+            melody_programs = {
+                instrument.program for instrument in MELODY_INSTRUMENTS
+            }
+        except ImportError:
+            melody_programs = set()
+        if instrument_program not in melody_programs:
+            fail(
+                "melody_instrument_catalog_mismatch",
+                f"program={instrument_program!r}",
+            )
+
+    previous_end = 0.0
+    resolution_horizon = 2
+    generation_config = melody.get("generation_config")
+    if isinstance(generation_config, dict):
+        value = generation_config.get("nct_resolution_horizon")
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            resolution_horizon = value
+    for event_index, detail in enumerate(event_details):
+        onset = detail.get("onset_sixteenths")
+        duration = detail.get("duration_sixteenths")
+        if (
+            isinstance(onset, bool)
+            or not isinstance(onset, (int, float))
+            or isinstance(duration, bool)
+            or not isinstance(duration, (int, float))
+        ):
+            fail(
+                "melody_timing_invalid",
+                f"event={event_index} onset={onset!r} duration={duration!r}",
+            )
+            continue
+        onset = float(onset)
+        duration = float(duration)
+        if not math.isfinite(onset) or not math.isfinite(duration) or duration <= 0:
+            fail("melody_timing_invalid", f"event={event_index}")
+            continue
+        if onset < previous_end - 1e-9:
+            fail("melody_overlap", f"event={event_index}")
+        previous_end = max(previous_end, onset + duration)
+        if total is not None and (
+            onset < -1e-9 or onset + duration > total + 1e-9
+        ):
+            fail(
+                "melody_timing_out_of_range",
+                f"event={event_index} end={onset + duration} total={total}",
+            )
+        raw_midis = detail.get("midis")
+        if raw_midis is None:
+            midis = []
+        elif isinstance(raw_midis, list):
+            midis = raw_midis
+        else:
+            fail("melody_midi_invalid", f"event={event_index}")
+            midis = []
+        if len(midis) > 1:
+            fail("melody_not_monophonic", f"event={event_index}")
+        if any(
+            isinstance(midi, bool) or not isinstance(midi, int) or not 0 <= midi <= 127
+            for midi in midis
+        ):
+            fail("melody_midi_invalid", f"event={event_index}")
+        if not included:
+            continue
+        if event_index >= len(manifest_events):
+            continue
+        manifest_event = manifest_events[event_index]
+        if not isinstance(manifest_event, dict):
+            fail("melody_manifest_event_invalid", f"event={event_index}")
+            continue
+        expected_midi = manifest_event.get("midi")
+        actual_midi = midis[0] if midis else None
+        if expected_midi != actual_midi:
+            fail(
+                "melody_score_manifest_mismatch",
+                f"event={event_index} midi={actual_midi!r}/{expected_midi!r}",
+            )
+        expected_onset = manifest_event.get("onset_sixteenths")
+        expected_onset_valid = (
+            isinstance(expected_onset, int)
+            and not isinstance(expected_onset, bool)
+        )
+        expected_duration = manifest_event.get("duration_sixteenths")
+        expected_duration_valid = (
+            isinstance(expected_duration, (int, float))
+            and not isinstance(expected_duration, bool)
+            and math.isfinite(float(expected_duration))
+        )
+        if (
+            not expected_duration_valid
+            or not expected_onset_valid
+            or expected_onset != int(onset)
+            or not (
+                expected_duration_valid
+                and math.isclose(
+                    float(expected_duration),
+                    duration,
+                    rel_tol=0,
+                    abs_tol=1e-6,
+                )
+            )
+        ):
+            fail(
+                "melody_score_manifest_mismatch",
+                f"event={event_index} timing",
+            )
+        role = manifest_event.get("role")
+        pitch_source = manifest_event.get("pitch_source")
+        if role not in _MELODY_ROLES:
+            fail("melody_role_invalid", f"event={event_index} role={role!r}")
+        if pitch_source not in _MELODY_PITCH_SOURCES:
+            fail(
+                "melody_pitch_source_invalid",
+                f"event={event_index} source={pitch_source!r}",
+            )
+        indices = manifest_event.get("source_event_indices")
+        if (
+            song is None
+            or not isinstance(indices, list)
+            or not indices
+            or any(
+                isinstance(index, bool)
+                or not isinstance(index, int)
+                or not 0 <= index < len(song.chords)
+                for index in indices
+            )
+        ):
+            fail("melody_source_mapping_invalid", f"event={event_index}")
+            continue
+        if indices != list(range(indices[0], indices[-1] + 1)):
+            fail(
+                "melody_source_mapping_invalid",
+                f"event={event_index} indices={indices!r}",
+            )
+        if (
+            starts[indices[0]] > onset + 1e-6
+            or ends[indices[-1]] < onset + duration - 1e-6
+        ):
+            fail(
+                "melody_source_mapping_invalid",
+                f"event={event_index} span={onset}:{onset + duration}",
+            )
+        source_events = [song.chords[index] for index in indices]
+        if actual_midi is not None and (
+            isinstance(actual_midi, bool)
+            or not isinstance(actual_midi, int)
+            or not 0 <= actual_midi <= 127
+        ):
+            continue
+        if any(event.is_no_chord for event in source_events):
+            if actual_midi is not None:
+                fail(
+                    "melody_no_chord_pitch",
+                    f"event={event_index} indices={indices!r}",
+                )
+            if role != "rest" or pitch_source != "rest":
+                fail(
+                    "melody_rest_metadata_invalid",
+                    f"event={event_index}",
+                )
+            continue
+        if actual_midi is None:
+            if role != "rest" or pitch_source != "rest":
+                fail(
+                    "melody_rest_metadata_invalid",
+                    f"event={event_index}",
+                )
+            continue
+        degree_role = manifest_event.get("degree_role")
+        if degree_role is not None and degree_role not in _MELODY_DEGREE_ROLES:
+            fail(
+                "melody_degree_role_invalid",
+                f"event={event_index} degree_role={degree_role!r}",
+            )
+        merged_from = manifest_event.get("merged_from")
+        if merged_from is not None and (
+            not isinstance(merged_from, list)
+            or any(role not in _MELODY_DEGREE_ROLES for role in merged_from)
+        ):
+            fail(
+                "melody_merged_role_invalid",
+                f"event={event_index} merged_from={merged_from!r}",
+            )
+        if pitch_source == "source_degree":
+            degree_sets = []
+            for chord in source_events:
+                root_pc = (song.tonic_pc + chord.root_interval) % 12
+                degree_sets.append({
+                    (root_pc + degree.semitone) % 12
+                    for degree in resolve_degrees(chord)
+                })
+            if any(actual_midi % 12 not in active_pcs for active_pcs in degree_sets):
+                fail(
+                    "melody_source_degree_mismatch",
+                    f"event={event_index} pc={actual_midi % 12} "
+                    f"active={sorted(set.intersection(*degree_sets))}",
+                )
+            if merged_from is not None and degree_role in _MELODY_DEGREE_ROLES:
+                degrees = resolve_degrees(source_events[0])
+                expected_merged = next(
+                    (
+                        list(degree.merged_from)
+                        for degree in degrees
+                        if degree.role == degree_role
+                    ),
+                    None,
+                )
+                if expected_merged is None or merged_from != expected_merged:
+                    fail(
+                        "melody_merged_role_mismatch",
+                        f"event={event_index} expected={expected_merged!r} "
+                        f"actual={merged_from!r}",
+                    )
+        elif pitch_source == "realized_voicing":
+            evidence = melody.get("realized_voicing_evidence")
+            realized_midis = []
+            if isinstance(evidence, list):
+                source_index = indices[0]
+                if source_index < len(evidence):
+                    source_evidence = evidence[source_index]
+                    if isinstance(source_evidence, dict):
+                        values = source_evidence.get("realized_midis")
+                        if isinstance(values, list):
+                            realized_midis.extend(values)
+            if actual_midi not in realized_midis:
+                fail(
+                    "melody_realized_voicing_mismatch",
+                    f"event={event_index} midi={actual_midi!r}",
+                )
+        if role in _MELODY_NCT_ROLES:
+            target = manifest_event.get("resolution_target")
+            if (
+                isinstance(target, bool)
+                or not isinstance(target, int)
+                or not 0 <= target <= 127
+            ):
+                fail(
+                    "melody_nct_target_missing",
+                    f"event={event_index}",
+                )
+            else:
+                resolved = False
+                for future in event_details[event_index + 1:event_index + 1 + resolution_horizon]:
+                    future_midis = future.get("midis") or []
+                    if future_midis and future_midis[0] % 12 == target % 12:
+                        resolved = True
+                        break
+                if not resolved:
+                    fail(
+                        "melody_nct_unresolved",
+                        f"event={event_index} target={target!r}",
+                    )
+    return failures
 
 
 def _load_manifest(path: Path) -> dict:
@@ -1807,12 +2315,19 @@ def validate_corpus(
                 f"{score_path.stem}_{role}{score_path.suffix}"
             )
 
+        melody_declared = (
+            declared_or_derived("melody")
+            if isinstance(declared_paths, dict)
+            and "melody" in declared_paths
+            else None
+        )
         multitrack = validate_multitrack_outputs(
             score_path,
             declared_or_derived("chords"),
             declared_or_derived("bass"),
             declared_or_derived("percussion"),
             manifest_path,
+            melody_declared,
         )
         report["multitrack"] = multitrack
         report["issues"].extend(multitrack["issues"])
@@ -1907,7 +2422,14 @@ def validate_corpus(
                 issues, "genre_mismatch", record,
                 detail=f"expected={expected_genre} actual={actual_genre}",
             )
-        for field in ("genre", "tonic_pc", "bpm", "num_chords"):
+        for field in (
+            "genre",
+            "tonic_pc",
+            "bpm",
+            "num_chords",
+            "mode",
+            "scale_pcs",
+        ):
             expected = len(song.chords) if field == "num_chords" and field not in progression \
                 else progression.get(field, 120 if field == "bpm" else None)
             if record.get(field) != expected:

@@ -50,7 +50,8 @@ The first implementation should use:
 5. seeded child random streams that cannot perturb voicing, bass, percussion,
    or arpeggio decisions;
 6. one naturalistic melody policy whose sampled instruments, rhythms, registers,
-   and melodic behaviors are recorded; and
+   and melodic behaviors are recorded, including an optional collapse to the
+   selected chord instrument; and
 7. a separate `V2` track with machine-readable source-event and role
    provenance, exported through the synchronized multitrack output.
 
@@ -60,15 +61,29 @@ context with a persistence cost. When the progression is ambiguous, the
 decoder must fall back to the global tonic/chord-centered candidates rather
 than forcing a local key.
 
-When melody is requested, apply one song-level inclusion gate with a default
-probability of **70%**. Thus, 70% of eligible songs receive generated melody
-events and 30% receive a synchronized V2 rest track, matching the existing
-percussion-style song-level inclusion behavior. The gate is evaluated once per
-song, not once per chord or note, and uses its own deterministic random stream.
-An explicit `melody_condition=none` remains a hard disable and bypasses the
-gate. The
-inclusion probability must be configurable for tests and corpus experiments,
-with `0.70` as the default.
+When melody is requested for a corpus or directory render, apply one
+deterministic **corpus-wide inclusion quota** with a default target of
+**70%**. For `N` eligible source songs and a requested `melody_percent`, select
+exactly the nearest whole-song count:
+
+```text
+min(N, max(0, floor(N * melody_percent / 100 + 0.5)))
+```
+
+This matches the existing percussion and mixed pad/arpeggio allocation
+behavior. Select the quota using stable numeric source ordering and a
+dedicated deterministic `melody-inclusion` stream so worker scheduling cannot
+change which songs are included. Selected songs receive generated melody
+events; unselected songs receive synchronized V2 rest tracks and an auditable
+`omission_reason=corpus_quota`. This is an exact quota, not an independent
+per-song Bernoulli probability. An explicit `melody_condition=none` remains a
+hard disable and bypasses the quota. `melody_percent` must be configurable
+from `0.0` through `100.0`, with `70.0` as the default.
+
+Direct single-song rendering has no corpus quota. It must accept the
+corpus-planner's resolved `melody_included` decision (defaulting to included
+for an explicit naturalistic single-song request) rather than silently
+claiming that a corpus percentage was enforced.
 
 The research supplement separates evidence-backed design principles from
 repository engineering defaults. In particular, it does not justify a
@@ -251,10 +266,10 @@ The corpus should accumulate independent variation across melody instrument,
 rhythm, register, density, contour, rests, holds, chord-tone roles,
 extensions, and supported non-chord behaviors.
 
-The 70% melody inclusion probability remains a rendering behavior, not a
-guarantee that every corpus subset contains a desired melody rate. Record the
-realized inclusion state and inspect aggregate counts, but do not require
-matched controls or a factorial cross-condition balance for the first
+The 70% melody inclusion target is an exact nearest-whole-song corpus quota,
+not an independent probability. Record the requested percentage, eligible
+song count, target count, and realized count in the corpus manifest. Do not
+require matched controls or a factorial cross-condition balance for the first
 implementation. Additional generation is most useful when it adds new chord
 progressions and naturalistic melody realizations rather than duplicating one
 melody pattern.
@@ -500,6 +515,7 @@ class MelodyGenerationConfig:
     local_key_confidence_floor: float = 0.5
     label_safety_policy: str = "naturalistic"
     masking_cost_enabled: bool = False
+    melody_collapse_probability: float = 0.25
 ```
 
 These defaults are repository-level engineering choices, not universal
@@ -511,7 +527,11 @@ decoder is the transparent bootstrap default, while the calibrated
 naturalistic path must use `sequence_beam` with the configured local-key
 policy unless a manifest explicitly identifies an intermediate baseline.
 Restrict `label_safety_policy` to `naturalistic`. Record the effective
-configuration in the render manifest.
+configuration in the render manifest. Validate
+`melody_collapse_probability` as a finite value from `0.0` through `1.0`.
+This probability is evaluated once per included melody song after the V0 chord
+instrument has been selected; `0.25` matches the existing bass pad-collapse
+default.
 
 The initial catalog should contain at least:
 
@@ -525,6 +545,13 @@ Program numbers and exact weights should be centralized in
 `instruments.py`, validated at startup, and selected with a deterministic
 child RNG. A profile must never modify chord instrument selection.
 
+When melody is included, the selected melody instrument may collapse to the
+already-selected V0 chord instrument with
+`melody_collapse_probability`. This is a post-selection timbre decision, not a
+change to chord voicing or instrument eligibility. A collapse draw of `0.0`
+never collapses; `1.0` always collapses. When collapse is not selected, use
+the separate melody-only catalog.
+
 ### 4.4 Melody-only instrument catalog
 
 The melody catalog is additive and must remain separate from
@@ -533,6 +560,13 @@ existing chord or bass entry, change an existing program number, or change the
 weights or eligibility of any non-melody module. A future implementation may
 define a separate `MELODY_INSTRUMENTS` tuple or mapping in `instruments.py`;
 the existing catalogs remain unchanged.
+
+The catalog separation does not prohibit the explicit collapse path above. A
+collapsed melody may reuse the selected V0 chord instrument, including a
+program outside `MELODY_INSTRUMENTS`, but must record
+`instrument_source=chord_collapse` rather than counting that program as
+melody-catalog coverage. The collapse path must preserve the melody profile's
+symbolic range, tessitura, timing, and event constraints.
 
 The repository stores `Instrument.program` as a **zero-based raw MIDI/GM
 program ID**. The 1-based patch number is included below only to prevent
@@ -844,15 +878,22 @@ domain labels, never Python's process-randomized `hash()`:
 render seed
     -> melody-inclusion
     -> melody-profile
+    -> melody-instrument
+    -> melody-collapse
     -> melody-rhythm
     -> melody-candidate
     -> melody-tie-break
 ```
 
 The melody streams must not consume the voicing, bass, percussion, instrument,
-or arpeggio RNGs. With the same progression, render seed, voicing order,
-profile, condition, and inclusion probability, the inclusion decision and
-melody output must be byte-reproducible.
+or arpeggio RNGs. For directory rendering, the `melody-inclusion` stream
+drives the deterministic corpus quota; per-song melody streams then derive
+from the selected source seed. The `melody-collapse` stream must be consumed
+only for the one per-song collapse decision and must not perturb melody-only
+instrument selection or note generation. With the same source set, progression
+order, render seed, voicing order, profile, condition, inclusion percentage,
+and collapse probability, the selected set, melody output, and metadata must
+be byte-reproducible.
 
 ## 7. Naturalistic melody variation
 
@@ -863,7 +904,7 @@ allowing the active chord and phrase context to constrain the result:
 
 | Dimension | Required variation |
 |---|---|
-| Instrument | multiple melody-only GM programs selected from the profile catalog |
+| Instrument | multiple melody-only GM programs selected from the profile catalog, plus controlled reuse of the V0 chord instrument through the collapse policy |
 | Rhythm | rests, holds, eighth-note phrases, sixteenth-note activity, and longer tones |
 | Register | high, mid, and profile-centered realizations within hard range |
 | Harmonic behavior | chord tones, stable extensions, scale tones, passing tones, neighbors, approaches, enclosures, suspensions, and appoggiaturas |
@@ -900,7 +941,8 @@ render_song(
     mode="pads",
     melody_condition="none",
     melody_profile="lead-high-sparse",
-    melody_inclusion_probability=0.70,
+    melody_included=True,
+    melody_collapse_probability=0.25,
 )
 ```
 
@@ -911,21 +953,31 @@ For directory rendering, add equivalent options:
     none | naturalistic
 --melody-profile
     lead-high-sparse | lead-mid-neutral | lead-mid-active
---melody-inclusion-probability
-    floating-point value from 0.0 to 1.0; default 0.70
+--melody-percent
+    floating-point percentage from 0.0 to 100.0; default 70.0
+--melody-collapse-probability
+    floating-point value from 0.0 to 1.0; default 0.25
 ```
 
 `none` is the default and must preserve existing accompaniment behavior.
 Melody configuration is independent of `--mode mixed` and its
 `--arpeggio-percent`/`--pad-percent` allocation.
 
-For `naturalistic`, the inclusion probability is evaluated once for each
-source song. If the song is not selected, render no V2 track and record
-`omission_reason=probability_gate`; do not generate melody events or partially
+For directory rendering with `naturalistic`, compute the exact corpus quota
+before dispatching source songs to workers. If a song is not selected, render
+no melody events and record `omission_reason=corpus_quota`; do not partially
 serialize a melody. Emit a synchronized V2 rest track for the song in the
-multitrack output. A probability of `1.0` is the deterministic way to request
-melody for every song, and `0.0` is equivalent to an intentional omission
-while retaining the requested condition in provenance.
+multitrack output. A `melody_percent` of `100.0` selects every eligible song,
+and `0.0` intentionally omits every song while retaining the requested
+condition in provenance. The resolved inclusion decision is passed to
+single-song workers through `melody_included`.
+
+For an included song, draw melody collapse once after V0 instrument selection.
+When the draw is below `melody_collapse_probability`, the V2 prefix uses the
+same instrument program as V0 and records `instrument_source=chord_collapse`.
+Otherwise, select from the profile's melody-only catalog and record
+`instrument_source=melody_catalog`. This decision is independent of the V1
+pad-collapse draw, V0 mode allocation, and all melody note-generation draws.
 
 ### 8.2 Score tracks
 
@@ -972,10 +1024,16 @@ Add a `melody` field to each render manifest record:
     "included": true,
     "condition": "naturalistic",
     "profile": "lead-high-sparse",
-    "inclusion_probability": 0.7,
+    "inclusion_percent": 70.0,
+    "selection_mode": "corpus_exact_quota",
     "omission_reason": null,
     "instrument": "flute",
     "instrument_program": 73,
+    "instrument_source": "melody_catalog",
+    "collapsed_to_chord": false,
+    "chord_instrument": "acoustic-grand-piano",
+    "chord_instrument_program": 0,
+    "melody_collapse_probability": 0.25,
     "track": "V2",
     "seed": 12345,
     "note_count": 42,
@@ -1014,7 +1072,8 @@ Add a `melody` field to each render manifest record:
       "local_key_persistence_cost": 1.0,
       "local_key_confidence_floor": 0.5,
       "label_safety_policy": "naturalistic",
-      "masking_cost_enabled": false
+      "masking_cost_enabled": false,
+      "melody_collapse_probability": 0.25
     },
     "fallback_count": 0,
     "no_chord_policy": "rest_and_reset",
@@ -1034,25 +1093,52 @@ Add a `melody` field to each render manifest record:
 }
 ```
 
+`instrument_source` must be one of `melody_catalog`, `chord_collapse`, or
+`omitted`. For an omitted song, `instrument`, `instrument_program`,
+`chord_instrument`, `chord_instrument_program`, and `collapsed_to_chord` may
+be `null`; no collapse draw is made.
+
 When `melody_condition=none`, `melody` is `null` or an equivalent explicit
-disabled record. When a requested melody is omitted by the 70% gate, retain an
-explicit disabled record with `included=false`, the requested condition and
-profile, the configured `inclusion_probability`, and
-`omission_reason=probability_gate`. The chosen representation must be
-consistent across all manifests.
+disabled record. When a requested melody is omitted by the corpus quota, retain
+an explicit disabled record with `included=false`, the requested condition and
+profile, the configured `inclusion_percent`, and
+`omission_reason=corpus_quota`. The chosen representation must be consistent
+across all manifests.
+
+The corpus-level manifest must also contain an inclusion summary such as:
+
+```jsonc
+{
+  "melody_inclusion": {
+    "requested_percent": 70.0,
+    "eligible_song_count": 10,
+    "target_song_count": 7,
+    "realized_song_count": 7,
+    "realized_percent": 70.0,
+    "selection_mode": "exact_quota"
+  }
+}
+```
+
+For a direct single-song render, record `selection_mode` as
+`single_song_resolved` and do not report a corpus target or realized
+percentage.
 
 The manifest must also record:
 
 - source label hash and source ordinal already used by the renderer;
 - melody condition and profile;
 - requested and realized inclusion state;
-- configured inclusion probability and omission reason;
+- configured inclusion percentage, quota counts, selection mode, and omission
+  reason;
 - deterministic seed derivation version;
 - source-degree versus realized-voicing evidence;
 - fallback reasons;
 - requested versus realized density;
 - hard range, soft tessitura, and preferred center;
 - effective phrase, resolution, and search configuration;
+- melody instrument source, collapse probability, collapse decision, and the
+  selected V0 chord instrument/program;
 - label-safety policy and per-event safety diagnostics;
 - realized instrument, rhythm, register, density, and melodic behavior
   summaries;
@@ -1094,6 +1180,9 @@ For enabled melody output, validate:
 - note roles and pitch-source values are from the supported vocabularies;
 - score events match manifest melody events;
 - the melody instrument program matches the manifest; and
+- `instrument_source` and collapse metadata are valid; when
+  `collapsed_to_chord=true`, the V2 program matches the selected V0 chord
+  program, and otherwise the V2 program belongs to the melody catalog; and
 - no-chord intervals contain no melody pitch under the default policy.
 
 ### 10.2 Harmonic checks
@@ -1142,13 +1231,16 @@ Create `tests/test_melody.py` covering:
 9. source-event mapping for notes held across playable chord boundaries;
 10. naturalistic behavior weights for chord tones, extensions, rests, holds,
     and supported non-chord roles;
-11. the 70% song-level inclusion gate and its `0.0`/`1.0` boundaries;
-12. deterministic inclusion and melody output for equal seeds; and
+11. the exact corpus-wide melody quota, nearest-whole allocation, and its
+    `0.0`/`100.0` boundaries;
+12. deterministic quota selection and melody output for equal seeds; and
 13. explicit fallback diagnostics when no legal candidate remains;
 14. phrase-level beam retention, deterministic tie-breaking, cadence scoring,
     and parity of hard constraints with the random-walk baseline; and
 15. local-key confidence, persistence costs, explicit-scale precedence, and
     global-context fallback for ambiguous progressions.
+16. melody instrument selection, `0.0`/`1.0` collapse boundaries, V0 program
+    pairing when collapsed, and RNG isolation from V0/V1/V9.
 
 Include rare examples such as:
 
@@ -1164,14 +1256,16 @@ Include rare examples such as:
 Extend `tests/test_rendered_corpus.py` to verify:
 
 - a naturalistic melody render contains V2 and its manifest record;
-- a naturalistic melody render records a probability-gate omission and a
-  synchronized V2 rest block when the seeded 70% inclusion decision rejects a
+- a naturalistic directory render records a corpus-quota omission and a
+  synchronized V2 rest block when the deterministic 70% quota excludes a
   song;
 - a melody-disabled render remains backward compatible;
 - V0/V1/V9 are invariant under melody enablement;
 - mixed pad/arpeggio allocation is unchanged when melody is enabled;
 - the V2 track is synchronized with the source timeline;
 - the melody metadata and score tokens pair one-to-one; and
+- collapsed melodies reuse the selected V0 chord instrument/program while
+  non-collapsed melodies use the separate melody catalog;
 - validation accepts both legacy records and melody records;
 - the sequence-beam path preserves V0/V1/V9 and source-label invariants; and
 - local-key context diagnostics are present for inferred and fallback windows.
@@ -1295,6 +1389,8 @@ manifest provenance.
 ### Phase 3 - Naturalistic variation
 
 - Add melody-only instrument selection across the curated catalog.
+- Add deterministic per-song melody-to-chord-instrument collapse with the
+  configured probability and provenance.
 - Add profile-specific rhythm, register, density, contour, and behavior
   weights.
 - Add source-versus-realized extension diagnostics.
@@ -1311,8 +1407,8 @@ manifest provenance.
 
 - Generate naturalistic full-mix songs without changing the base labels.
 - Extend `tools/curate_target_corpus.py` to preserve V2 and melody metadata.
-- Add curation coverage for profiles, instrument, rhythm, register, density,
-  behavior, and fallback cases.
+- Add curation coverage for profiles, instrument source, collapse state,
+  rhythm, register, density, behavior, and fallback cases.
 - Validate source hashes and score/MIDI/manifest mappings for curated samples.
 - Render a fixed calibration corpus across genres, chord strata, profiles,
   instruments, seeds, and inclusion states.
@@ -1336,8 +1432,8 @@ manifest provenance.
 The first implementation phase is accepted only when:
 
 1. `melody_condition=none` preserves existing rendering behavior.
-2. A requested melody condition applies exactly one seeded song-level inclusion
-   decision, defaulting to 70% inclusion.
+2. A requested naturalistic melody condition applies one deterministic
+   corpus-wide nearest-whole quota, defaulting to 70% inclusion.
 3. A fixed seed produces byte-identical inclusion, melody score, and metadata.
 4. Melody enablement preserves the same chord labels, source hashes, timing,
    voicer choices, V0, V1, and V9 decisions.
@@ -1362,6 +1458,9 @@ The first implementation phase is accepted only when:
 14. The validator reports melody-specific failures without weakening existing
     chord, arpeggio, bass, percussion, or no-chord checks.
 15. Focused unit and integration tests cover both new behavior and regressions.
+16. Included melodies have a deterministic, manifest-recorded collapse decision;
+    collapsed V2 uses the selected V0 chord program, while non-collapsed V2
+    uses the separate melody catalog, without changing V0/V1/V9.
 
 ### 14.2 Beyond-MVP completion acceptance
 
@@ -1381,8 +1480,8 @@ The naturalistic melody implementation is not considered complete until:
 5. Manifests record decoder, beam/search settings, local-key context and
    confidence, fallback diagnostics, and deterministic seed derivation.
 6. A reproducible calibration corpus and report demonstrate coverage across
-   genres, chord strata, profiles, instruments, seeds, and melody inclusion
-   states.
+   genres, chord strata, profiles, instruments, collapse states, seeds, and
+   melody inclusion states.
 7. Calibration includes symbolic distribution checks, phrase/cadence and NCT
    resolution checks, source-event/sidecar validation, and representative
    full-mix inspection.

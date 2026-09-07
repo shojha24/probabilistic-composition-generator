@@ -80,12 +80,15 @@ def _track_parts(score_line: str) -> dict[str, str]:
     tokens = score_line.split()
     voices = {}
     indexes = {}
-    for voice in ("V0", "V1", "V9"):
+    for voice in ("V0", "V1", "V2", "V9"):
         try:
             indexes[voice] = tokens.index(voice)
         except ValueError as exc:
-            raise ValueError(f"score line is missing {voice}") from exc
+            if voice != "V2":
+                raise ValueError(f"score line is missing {voice}") from exc
     if not indexes["V0"] < indexes["V1"] < indexes["V9"]:
+        raise ValueError("score voices are out of order")
+    if "V2" in indexes and not indexes["V1"] < indexes["V2"] < indexes["V9"]:
         raise ValueError("score voices are out of order")
     for voice, start in indexes.items():
         end = min(
@@ -232,6 +235,11 @@ def _candidate(
     tracks = _track_parts(score_line)
     chord_program = _program(tracks["V0"])
     bass_program = _program(tracks["V1"])
+    melody_program = (
+        _program(tracks["V2"])
+        if "V2" in tracks
+        else None
+    )
     chord_names = {
         instrument.program: instrument.name
         for instruments in CHORD_INSTRUMENTS.values()
@@ -300,6 +308,23 @@ def _candidate(
             else "no_chord:no"
         ),
     }
+    melody = record.get("melody")
+    if isinstance(melody, dict):
+        features.update({
+            f"melody_condition:{melody.get('condition')}",
+            f"melody_profile:{melody.get('profile')}",
+            f"melody_included:{melody.get('included')}",
+            f"melody_instrument_source:{melody.get('instrument_source')}",
+            f"melody_collapse:{melody.get('collapsed_to_chord')}",
+        })
+        features.update(
+            f"melody_role:{value}"
+            for value in (melody.get("behavior_counts") or {})
+        )
+        features.update(
+            f"melody_rhythm:{value}"
+            for value in (melody.get("rhythm_counts") or {})
+        )
     features.update(_voicing_features(record))
     if record.get("arpeggio") is not None:
         arpeggio = record["arpeggio"]
@@ -352,6 +377,8 @@ def _candidate(
         "chord_program": chord_program,
         "chord_name": chord_names[chord_program],
         "bass_program": bass_program,
+        "melody_program": melody_program,
+        "melody": melody,
         "bass_name": rendered_bass_name,
         "pad_collapse": collapsed,
         "percussion": _percussion_summary(tracks["V9"]),
@@ -411,6 +438,13 @@ def _mandatory_features(candidates: list[dict]) -> set[str]:
             "arpeggio_fallback:",
             "arpeggio_eighth:",
             "arpeggio_sixteenth:",
+            "melody_condition:",
+            "melody_profile:",
+            "melody_included:",
+            "melody_instrument_source:",
+            "melody_collapse:",
+            "melody_role:",
+            "melody_rhythm:",
         ))
     }
     return mandatory
@@ -551,6 +585,25 @@ def _coverage_map(selected: list[dict], sample_ids: dict[int, str]) -> dict:
         add("percussion_included", record["percussion_included"], candidate)
         add("percussion_feel", record["percussion_feel"], candidate)
         add("pad_collapse_inferred", candidate["pad_collapse"], candidate)
+        melody = candidate.get("melody")
+        if isinstance(melody, dict):
+            add("melody_condition", melody.get("condition"), candidate)
+            add("melody_profile", melody.get("profile"), candidate)
+            add("melody_included", melody.get("included"), candidate)
+            add(
+                "melody_instrument_source",
+                melody.get("instrument_source"),
+                candidate,
+            )
+            add(
+                "melody_collapse",
+                melody.get("collapsed_to_chord"),
+                candidate,
+            )
+            for value in (melody.get("behavior_counts") or {}):
+                add("melody_roles", value, candidate)
+            for value in (melody.get("rhythm_counts") or {}):
+                add("melody_rhythms", value, candidate)
         for category in (
             "triads",
             "extensions",
@@ -658,6 +711,16 @@ def _counts(selected: list[dict]) -> dict:
         "pad_collapse_inferred": count_values(
             candidate["pad_collapse"] for candidate in selected
         ),
+        "melody_profiles": count_values(
+            (candidate.get("melody") or {}).get("profile")
+            for candidate in selected
+            if isinstance(candidate.get("melody"), dict)
+        ),
+        "melody_instrument_sources": count_values(
+            (candidate.get("melody") or {}).get("instrument_source")
+            for candidate in selected
+            if isinstance(candidate.get("melody"), dict)
+        ),
     }
 
 
@@ -725,6 +788,15 @@ def _metadata(candidate: dict, sample_id: str, files: dict) -> dict:
             "feel": record["percussion_feel"],
             **candidate["percussion"],
         },
+        "melody": (
+            None
+            if not isinstance(candidate.get("melody"), dict)
+            else {
+                "track_file": files.get("melody_track"),
+                "program": candidate.get("melody_program"),
+                "record": candidate["melody"],
+            }
+        ),
         "voicing_style": {
             "voicer": record["voicer"],
             "voicer_genre": record["voicer_genre"],
@@ -750,11 +822,28 @@ def _metadata(candidate: dict, sample_id: str, files: dict) -> dict:
                 "feel": record["percussion_feel"],
                 "track": "V9",
             },
+            "melody": (
+                None
+                if not isinstance(candidate.get("melody"), dict)
+                else {
+                    "program": candidate.get("melody_program"),
+                    "track": "V2",
+                    "instrument_source": candidate["melody"].get(
+                        "instrument_source"
+                    ),
+                    "profile": candidate["melody"].get("profile"),
+                }
+            ),
         },
         "track_programs": {
             "V0": candidate["chord_program"],
             "V1": candidate["bass_program"],
             "V9": 9,
+            **(
+                {"V2": candidate["melody_program"]}
+                if candidate.get("melody_program") is not None
+                else {}
+            ),
         },
         "files": files,
         "selection_features": sorted(candidate["features"]),
@@ -838,6 +927,11 @@ def curate(
                 "midi": "midi/song.mid",
                 "chord_track": "tracks/chord.txt",
                 "bass_track": "tracks/bass.txt",
+                "melody_track": (
+                    "tracks/melody.txt"
+                    if "V2" in candidate["tracks"]
+                    else None
+                ),
                 "percussion_track": "tracks/percussion.txt",
                 "arpeggio_track": None,
             }
@@ -849,6 +943,11 @@ def curate(
                 candidate["tracks"]["V1"] + "\n",
                 encoding="utf-8",
             )
+            if "V2" in candidate["tracks"]:
+                (tracks_dir / "melody.txt").write_text(
+                    candidate["tracks"]["V2"] + "\n",
+                    encoding="utf-8",
+                )
             (tracks_dir / "percussion.txt").write_text(
                 candidate["tracks"]["V9"] + "\n",
                 encoding="utf-8",
@@ -871,6 +970,23 @@ def curate(
                 "source_file": record["source_file"],
                 "render_mode": record["render_mode"],
                 "voicer": record["voicer"],
+                "melody": (
+                    None
+                    if not isinstance(candidate.get("melody"), dict)
+                    else {
+                        "included": candidate["melody"].get("included"),
+                        "profile": candidate["melody"].get("profile"),
+                        "instrument_program": candidate.get("melody_program"),
+                        "instrument_source": candidate["melody"].get(
+                            "instrument_source"
+                        ),
+                        "track_file": (
+                            f"{sample_id}/{files['melody_track']}"
+                            if files["melody_track"] is not None
+                            else None
+                        ),
+                    }
+                ),
                 "files": {
                     key: f"{sample_id}/{value}"
                     if value is not None else None

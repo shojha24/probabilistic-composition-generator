@@ -373,6 +373,41 @@ BASS_INSTRUMENTS = (
     Instrument("basslead", 87, frozenset(("bass",))),
 )
 
+# Melody patches are intentionally separate from the chord and bass catalogs.
+# ``Instrument.program`` is the zero-based raw GM program used by JFugue.
+MELODY_INSTRUMENTS = (
+    Instrument("violin", 40, frozenset(("melody",))),
+    Instrument("viola", 41, frozenset(("melody",))),
+    Instrument("fiddle", 110, frozenset(("melody",))),
+    Instrument("trumpet", 56, frozenset(("melody",))),
+    Instrument("trombone", 57, frozenset(("melody",))),
+    Instrument("flute", 73, frozenset(("melody",))),
+    Instrument("pan-flute", 75, frozenset(("melody",))),
+    Instrument("shakuhachi", 77, frozenset(("melody",))),
+    Instrument("electric-guitar-clean", 27, frozenset(("melody",))),
+    Instrument("overdriven-guitar", 29, frozenset(("melody",))),
+    Instrument("distortion-guitar", 30, frozenset(("melody",))),
+    Instrument("alto-sax", 65, frozenset(("melody",))),
+    Instrument("tenor-sax", 66, frozenset(("melody",))),
+    Instrument("clarinet", 71, frozenset(("melody",))),
+    Instrument("synth-lead-square", 80, frozenset(("melody",))),
+)
+
+MELODY_PROFILE_PREFERRED_INSTRUMENTS = {
+    "lead-high-sparse": (
+        "violin", "fiddle", "flute", "pan-flute", "alto-sax",
+        "clarinet", "shakuhachi",
+    ),
+    "lead-mid-neutral": (
+        "viola", "trumpet", "electric-guitar-clean", "clarinet",
+        "tenor-sax", "fiddle",
+    ),
+    "lead-mid-active": (
+        "overdriven-guitar", "distortion-guitar", "trombone",
+        "tenor-sax", "synth-lead-square", "viola",
+    ),
+}
+
 
 def validate_arpeggio_instrument_catalog() -> None:
     """Validate profile references on every arpeggio-capable instrument."""

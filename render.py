@@ -20,6 +20,18 @@ from pathlib import Path
 from bass_module import BassModule
 from chord_module import ChordModule, POLICIES
 from instruments import ARPEGGIO_PROFILES
+from melody_module import (
+    MelodyGenerationConfig,
+    build_melody_manifest,
+    disabled_melody_record,
+    derive_child_seed,
+    generate_melody,
+    get_melody_profile,
+    melody_inclusion_plan,
+    rest_melody_events,
+    select_melody_instrument,
+    serialize_melody_events,
+)
 from percussion_module import (
     PERCUSSION_OMISSION_PROBABILITY,
     PercussionModule,
@@ -60,6 +72,7 @@ class RenderedSongTracks:
     bass_track: str
     percussion_track: str
     mixed_line: str
+    melody_track: str | None = None
 
 
 def _input_dir_list(
@@ -135,6 +148,7 @@ def _generator_revision() -> tuple[str, bool]:
             [
                 "git", "status", "--porcelain", "--untracked-files=normal",
                 "--", "chord_module.py", "instruments.py", "render.py",
+                "melody_module.py",
                 "voicing", "eda", "percussion_module.py",
                 "HumanizedMidiRenderer.java",
             ],
@@ -153,7 +167,11 @@ def _manifest_path(output: str | Path) -> Path:
     return output_path.with_name(output_path.name + ".manifest.json")
 
 
-def _track_output_paths(output: str | Path) -> dict[str, Path]:
+def _track_output_paths(
+    output: str | Path,
+    *,
+    include_melody: bool = False,
+) -> dict[str, Path]:
     """Derive and validate the complete score output set."""
     output_path = Path(output)
     paths = {
@@ -164,11 +182,15 @@ def _track_output_paths(output: str | Path) -> dict[str, Path]:
         "bass": output_path.with_name(
             f"{output_path.stem}_bass{output_path.suffix}"
         ),
-        "percussion": output_path.with_name(
-            f"{output_path.stem}_percussion{output_path.suffix}"
-        ),
-        "manifest": _manifest_path(output_path),
     }
+    if include_melody:
+        paths["melody"] = output_path.with_name(
+            f"{output_path.stem}_melody{output_path.suffix}"
+        )
+    paths["percussion"] = output_path.with_name(
+        f"{output_path.stem}_percussion{output_path.suffix}"
+    )
+    paths["manifest"] = _manifest_path(output_path)
     resolved = [path.resolve() for path in paths.values()]
     if len(set(resolved)) != len(resolved):
         raise ValueError("derived render output paths must be unique")
@@ -190,6 +212,34 @@ def _percussion_inclusion_percent(value: float | int | None) -> float:
     if value is None:
         return _DEFAULT_PERCUSSION_PERCENT
     return _percentage(value, "percussion_percent")
+
+
+def _melody_condition(value: str) -> str:
+    if value not in {"none", "naturalistic"}:
+        raise ValueError("melody_condition must be 'none' or 'naturalistic'")
+    return value
+
+
+def _melody_decoder(value: str) -> str:
+    if value not in {"chord_centered_random_walk", "sequence_beam"}:
+        raise ValueError(
+            "melody_decoder must be 'chord_centered_random_walk' "
+            "or 'sequence_beam'"
+        )
+    return value
+
+
+def _melody_collapse_probability(value: float | int) -> float:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(float(value))
+        or not 0 <= float(value) <= 1
+    ):
+        raise ValueError(
+            "melody_collapse_probability must be a finite value from 0 to 1"
+        )
+    return float(value)
 
 
 def _percussion_inclusion_plan(
@@ -313,6 +363,11 @@ def _render_command(
     mode: str,
     render_mode_percentages: dict[str, float] | None = None,
     percussion_percent: float = _DEFAULT_PERCUSSION_PERCENT,
+    melody_condition: str = "none",
+    melody_profile: str = "lead-high-sparse",
+    melody_percent: float = 70.0,
+    melody_collapse_probability: float = 0.25,
+    melody_decoder: str = "sequence_beam",
 ) -> str:
     percussion_percent = _percussion_inclusion_percent(percussion_percent)
     command = [
@@ -320,6 +375,15 @@ def _render_command(
         "--out", output, "--mode", mode, "--seed", str(seed),
         "--percussion-percent", f"{percussion_percent:g}",
     ]
+    if melody_condition != "none":
+        command.extend([
+            "--melody-condition", melody_condition,
+            "--melody-profile", melody_profile,
+            "--melody-percent", f"{melody_percent:g}",
+            "--melody-collapse-probability",
+            f"{melody_collapse_probability:g}",
+            "--melody-decoder", melody_decoder,
+        ])
     if mode == "mixed":
         if render_mode_percentages is None:
             raise ValueError("mixed render commands require percentage targets")
@@ -533,8 +597,22 @@ def _render_progression(
     voicer_order: list[str] | tuple[str, ...] | None = None,
     percussion_percent: float | int | None = None,
     percussion_included: bool | None = None,
+    melody_condition: str = "none",
+    melody_profile: str = "lead-high-sparse",
+    melody_included: bool | None = None,
+    melody_percent: float | int | None = None,
+    melody_selection_mode: str = "single_song_resolved",
+    melody_omission_reason: str | None = None,
+    melody_collapse_probability: float = 0.25,
+    melody_decoder: str = "sequence_beam",
 ) -> dict:
     percussion_percent = _percussion_inclusion_percent(percussion_percent)
+    melody_condition = _melody_condition(melody_condition)
+    profile_obj = get_melody_profile(melody_profile)
+    melody_collapse_probability = _melody_collapse_probability(
+        melody_collapse_probability
+    )
+    melody_decoder = _melody_decoder(melody_decoder)
     if (
         percussion_included is not None
         and not isinstance(percussion_included, bool)
@@ -571,14 +649,93 @@ def _render_progression(
         ),
     )
     percussion_track = percussion_module.render(progression)
+
+    melody_track = None
+    melody_record = None
+    if melody_condition == "none":
+        melody_included = False
+    else:
+        if melody_included is None:
+            melody_included = True
+        if not isinstance(melody_included, bool):
+            raise ValueError("melody_included must be a boolean or None")
+        melody_seed = (
+            derive_child_seed(seed, "melody-profile")
+            if isinstance(seed, int) and not isinstance(seed, bool)
+            else random.SystemRandom().getrandbits(128)
+        )
+        if melody_included:
+            generation_config = MelodyGenerationConfig(
+                decoder=melody_decoder,
+                melody_collapse_probability=melody_collapse_probability,
+            )
+            realized_voicings = [
+                {
+                    "midi": midis,
+                    "roles": roles,
+                }
+                for midis, roles in zip(
+                    chord_module.last_voiced_midis,
+                    chord_module.last_voiced_roles,
+                )
+            ]
+            melody_result = generate_melody(
+                progression,
+                seed=melody_seed,
+                profile=profile_obj,
+                config=generation_config,
+                realized_voicings=realized_voicings,
+            )
+            instrument_selection = select_melody_instrument(
+                profile_obj,
+                melody_seed,
+                chord_instrument=chord_module.selected_instrument,
+                collapse_probability=melody_collapse_probability,
+            )
+            melody_track = serialize_melody_events(
+                melody_result.events,
+                progression.get("bpm", 120),
+                int(instrument_selection["instrument_program"]),
+            )
+            melody_record = build_melody_manifest(
+                melody_result,
+                profile_obj,
+                included=True,
+                inclusion_percent=melody_percent,
+                selection_mode=melody_selection_mode,
+                instrument_selection=instrument_selection,
+                collapse_probability=melody_collapse_probability,
+            )
+            melody_record["render_seed"] = seed
+        else:
+            rest_events = rest_melody_events(progression)
+            melody_track = serialize_melody_events(
+                rest_events,
+                progression.get("bpm", 120),
+                profile_obj.instrument_program,
+            )
+            melody_record = disabled_melody_record(
+                condition=melody_condition,
+                profile=profile_obj.name,
+                inclusion_percent=melody_percent,
+                included=False,
+                selection_mode=melody_selection_mode,
+                omission_reason=melody_omission_reason or "corpus_quota",
+                collapse_probability=melody_collapse_probability,
+            )
     tracks = RenderedSongTracks(
         ordinal=ordinal,
         chord_track=chord_track,
         bass_track=bass_track,
         percussion_track=percussion_track,
         mixed_line="  ".join(
-            (chord_track, bass_track, percussion_track)
+            (
+                (chord_track, bass_track, melody_track, percussion_track)
+                if melody_track is not None
+                else (chord_track, bass_track, percussion_track)
+            )
         ),
+        melody_track=melody_track,
     )
     return {
         "tracks": tracks,
@@ -588,6 +745,9 @@ def _render_progression(
         "percussion_included": percussion_module.last_included,
         "percussion_feel": percussion_module.last_feel,
         "percussion_inclusion_percent": percussion_percent,
+        "melody_track": tracks.melody_track,
+        "melody": melody_record,
+        "melody_included": melody_included,
         "voicer": chord_module.last_voicer or "unknown",
         "voicer_genre": chord_module.last_voicer_genre,
         "voicer_family": chord_module.last_voicer_family,
@@ -607,21 +767,35 @@ def _render_progression(
 
 def _render_source(args: tuple) -> dict:
     """Render one source record in an isolated worker."""
-    index, raw, seed, mode, *extras = args
-    percussion_included = None
-    if extras and isinstance(extras[-1], bool):
-        percussion_included = extras.pop()
-    voicer_orders = extras
-    percussion_percent = _DEFAULT_PERCUSSION_PERCENT
-    if (
-        extras
-        and isinstance(extras[-1], (int, float))
-        and not isinstance(extras[-1], bool)
-    ):
-        percussion_percent = _percussion_inclusion_percent(extras[-1])
-        voicer_orders = extras[:-1]
+    if len(args) == 8:
+        (
+            index,
+            raw,
+            seed,
+            mode,
+            requested_order,
+            percussion_percent,
+            percussion_included,
+            melody_options,
+        ) = args
+    else:
+        index, raw, seed, mode, *extras = args
+        percussion_included = None
+        if extras and isinstance(extras[-1], bool):
+            percussion_included = extras.pop()
+        voicer_orders = extras
+        percussion_percent = None
+        if (
+            extras
+            and isinstance(extras[-1], (int, float))
+            and not isinstance(extras[-1], bool)
+        ):
+            percussion_percent = extras[-1]
+            voicer_orders = extras[:-1]
+        requested_order = voicer_orders[0] if voicer_orders else None
+        melody_options = {}
     progression = json.loads(raw.decode("utf-8"))
-    requested_order = voicer_orders[0] if voicer_orders else None
+    melody_options = dict(melody_options)
     if isinstance(requested_order, (list, tuple)):
         result = _render_progression(
             progression,
@@ -631,6 +805,7 @@ def _render_source(args: tuple) -> dict:
             voicer_order=requested_order,
             percussion_percent=percussion_percent,
             percussion_included=percussion_included,
+            **melody_options,
         )
     else:
         result = _render_progression(
@@ -645,6 +820,7 @@ def _render_source(args: tuple) -> dict:
             ),
             percussion_percent=percussion_percent,
             percussion_included=percussion_included,
+            **melody_options,
         )
     return result
 
@@ -655,6 +831,11 @@ def render_song_tracks(
     mode: str = "pads",
     *,
     percussion_percent: float | int | None = None,
+    melody_condition: str = "none",
+    melody_profile: str = "lead-high-sparse",
+    melody_included: bool = True,
+    melody_collapse_probability: float = 0.25,
+    melody_decoder: str = "sequence_beam",
 ) -> RenderedSongTracks:
     """Render one progression once and retain all synchronized role strings."""
     result = _render_progression(
@@ -664,6 +845,12 @@ def render_song_tracks(
         mode,
         preferred_family=progression.get("voicer_family"),
         percussion_percent=percussion_percent,
+        melody_condition=melody_condition,
+        melody_profile=melody_profile,
+        melody_included=melody_included,
+        melody_selection_mode="single_song_resolved",
+        melody_collapse_probability=melody_collapse_probability,
+        melody_decoder=melody_decoder,
     )
     return result["tracks"]
 
@@ -674,12 +861,22 @@ def render_song(
     mode: str = "pads",
     *,
     percussion_percent: float | int | None = None,
+    melody_condition: str = "none",
+    melody_profile: str = "lead-high-sparse",
+    melody_included: bool = True,
+    melody_collapse_probability: float = 0.25,
+    melody_decoder: str = "sequence_beam",
 ) -> str:
     return render_song_tracks(
         progression,
         seed=seed,
         mode=mode,
         percussion_percent=percussion_percent,
+        melody_condition=melody_condition,
+        melody_profile=melody_profile,
+        melody_included=melody_included,
+        melody_collapse_probability=melody_collapse_probability,
+        melody_decoder=melody_decoder,
     ).mixed_line
 
 
@@ -721,12 +918,19 @@ def _reserve_backup(path: Path) -> Path:
     return backup
 
 
-def _install_output_set(staged: dict[Path, Path]) -> None:
+def _install_output_set(
+    staged: dict[Path, Path],
+    *,
+    remove_paths: tuple[Path, ...] = (),
+) -> None:
     """Install all staged files together and restore the previous set on error."""
     backups: dict[Path, Path] = {}
     installed: list[Path] = []
+    all_targets = [*staged, *remove_paths]
+    if len(set(all_targets)) != len(all_targets):
+        raise ValueError("staged and removed output paths must be unique")
     try:
-        for target in staged:
+        for target in all_targets:
             if target.exists():
                 backup = _reserve_backup(target)
                 backups[target] = backup
@@ -760,12 +964,24 @@ def render_directory(
     arpeggio_percent: float | None = None,
     pad_percent: float | None = None,
     percussion_percent: float | int | None = None,
+    melody_condition: str = "none",
+    melody_profile: str = "lead-high-sparse",
+    melody_percent: float | int = 70.0,
+    melody_collapse_probability: float = 0.25,
+    melody_decoder: str = "sequence_beam",
 ) -> None:
     if not isinstance(seed, int) or isinstance(seed, bool):
         raise ValueError("render_directory requires an explicit integer seed")
     output = str(output)
     input_dir_list = _input_dir_list(input_dir)
     files = _source_files(input_dir_list)
+    melody_condition = _melody_condition(melody_condition)
+    profile_obj = get_melody_profile(melody_profile)
+    melody_percent = _percentage(melody_percent, "melody_percent")
+    melody_collapse_probability = _melody_collapse_probability(
+        melody_collapse_probability
+    )
+    melody_decoder = _melody_decoder(melody_decoder)
     render_modes, effective_mode, render_mode_targets = _render_mode_plan(
         mode,
         len(files),
@@ -781,12 +997,25 @@ def render_directory(
         percussion_inclusion_percent,
         seed,
     )
+    melody_inclusion_plan_values = (
+        melody_inclusion_plan(
+            len(files),
+            melody_percent,
+            seed,
+            source_ids=[item[0] for item in files],
+        )
+        if melody_condition == "naturalistic"
+        else [False] * len(files)
+    )
     render_mode_counts = Counter(render_modes)
     source_dirs = [
         str(Path(input_dir).resolve()) for input_dir in input_dir_list
     ]
     revision, dirty = _generator_revision()
-    output_paths = _track_output_paths(output)
+    output_paths = _track_output_paths(
+        output,
+        include_melody=melody_condition == "naturalistic",
+    )
     output_path = output_paths["mixed"]
     manifest_path = output_paths["manifest"]
     voicer_counts = Counter()
@@ -802,6 +1031,8 @@ def render_directory(
         "bass": [],
         "percussion": [],
     }
+    if melody_condition == "naturalistic":
+        score_blocks["melody"] = []
     staged: dict[Path, Path] = {}
     try:
         workers = min(8, len(files), os.cpu_count() or 1)
@@ -830,6 +1061,30 @@ def render_directory(
                         voicer_order,
                         percussion_inclusion_percent,
                         percussion_inclusion_plan[batch_start + offset],
+                        {
+                            "melody_condition": melody_condition,
+                            "melody_profile": profile_obj.name,
+                            "melody_included": melody_inclusion_plan_values[
+                                batch_start + offset
+                            ],
+                            "melody_percent": melody_percent,
+                            "melody_selection_mode": (
+                                "exact_quota"
+                                if melody_condition == "naturalistic"
+                                else "disabled"
+                            ),
+                            "melody_omission_reason": (
+                                None
+                                if melody_inclusion_plan_values[
+                                    batch_start + offset
+                                ]
+                                else "corpus_quota"
+                            ),
+                            "melody_collapse_probability": (
+                                melody_collapse_probability
+                            ),
+                            "melody_decoder": melody_decoder,
+                        },
                     )
                     for offset, (
                         (_source_id, _path, raw, _progression, _source_dir),
@@ -860,6 +1115,12 @@ def render_directory(
                         "bass": tracks.bass_track,
                         "percussion": tracks.percussion_track,
                     }
+                    if melody_condition == "naturalistic":
+                        if tracks.melody_track is None:
+                            raise RuntimeError(
+                                "naturalistic rendering did not produce V2"
+                            )
+                        role_lines["melody"] = tracks.melody_track
                     for role, line in role_lines.items():
                         score_blocks[role].append(
                             _canonical_score_block(index, line)
@@ -872,6 +1133,8 @@ def render_directory(
                         "source_sha256": hashlib.sha256(raw).hexdigest(),
                         "genre": progression.get("genre"),
                         "tonic_pc": progression.get("tonic_pc"),
+                        "mode": progression.get("mode"),
+                        "scale_pcs": progression.get("scale_pcs"),
                         "bpm": progression.get("bpm", 120),
                         "num_chords": progression.get(
                             "num_chords", len(progression.get("chords", ()))
@@ -891,6 +1154,7 @@ def render_directory(
                         "percussion_inclusion_percent": (
                             percussion_inclusion_percent
                         ),
+                        "melody": result["melody"],
                         "seed": seed + index,
                         "voicing_summary": result["voicing_summary"],
                         "no_chord": no_chord,
@@ -902,6 +1166,11 @@ def render_directory(
                                 "mixed",
                                 "chords",
                                 "bass",
+                                *(
+                                    ("melody",)
+                                    if melody_condition == "naturalistic"
+                                    else ()
+                                ),
                                 "percussion",
                             )
                         },
@@ -926,6 +1195,11 @@ def render_directory(
                 effective_mode,
                 render_mode_targets if effective_mode == "mixed" else None,
                 percussion_inclusion_percent,
+                melody_condition,
+                melody_profile,
+                melody_percent,
+                melody_collapse_probability,
+                melody_decoder,
             ),
             "seed": seed,
             "source_dir": source_dirs[0] if len(source_dirs) == 1 else None,
@@ -962,6 +1236,26 @@ def render_directory(
                 100.0 * percussion_included_count / len(render_modes)
                 if render_modes else 0.0
             ),
+            "melody_inclusion": (
+                {
+                    "requested_percent": melody_percent,
+                    "eligible_song_count": len(files),
+                    "target_song_count": sum(melody_inclusion_plan_values),
+                    "realized_song_count": sum(
+                        bool(record.get("melody", {}).get("included"))
+                        if isinstance(record.get("melody"), dict)
+                        else False
+                        for record in manifest_records
+                    ),
+                    "realized_percent": (
+                        100.0 * sum(melody_inclusion_plan_values) / len(files)
+                        if files else 0.0
+                    ),
+                    "selection_mode": "exact_quota",
+                }
+                if melody_condition == "naturalistic"
+                else None
+            ),
             "voicer_counts": {
                 voicer: voicer_counts.get(voicer, 0)
                 for voicer in _VOICER_IDS
@@ -984,9 +1278,18 @@ def render_directory(
                 "schema_version": 1,
                 "song_count": len(files),
                 "voices": {
-                    "mixed": ["V0", "V1", "V9"],
+                    "mixed": (
+                        ["V0", "V1", "V2", "V9"]
+                        if melody_condition == "naturalistic"
+                        else ["V0", "V1", "V9"]
+                    ),
                     "chords": ["V0"],
                     "bass": ["V1"],
+                    **(
+                        {"melody": ["V2"]}
+                        if melody_condition == "naturalistic"
+                        else {}
+                    ),
                     "percussion": ["V9"],
                 },
                 "paths": {
@@ -995,6 +1298,11 @@ def render_directory(
                         "mixed",
                         "chords",
                         "bass",
+                        *(
+                            ("melody",)
+                            if melody_condition == "naturalistic"
+                            else ()
+                        ),
                         "percussion",
                     )
                 },
@@ -1006,6 +1314,11 @@ def render_directory(
                         "mixed",
                         "chords",
                         "bass",
+                        *(
+                            ("melody",)
+                            if melody_condition == "naturalistic"
+                            else ()
+                        ),
                         "percussion",
                     )
                 },
@@ -1017,14 +1330,22 @@ def render_directory(
             },
             "records": manifest_records,
         }
-        for role in ("mixed", "chords", "bass", "percussion"):
+        for role in score_blocks:
             staged[output_paths[role]] = _stage_text(
                 output_paths[role],
                 "".join(score_blocks[role]),
             )
         manifest_text = json.dumps(manifest, indent=2, sort_keys=True) + "\n"
         staged[manifest_path] = _stage_text(manifest_path, manifest_text)
-        _install_output_set(staged)
+        stale_outputs = ()
+        if melody_condition == "none":
+            stale_outputs = (
+                _track_output_paths(
+                    output,
+                    include_melody=True,
+                )["melody"],
+            )
+        _install_output_set(staged, remove_paths=stale_outputs)
     except BaseException:
         for temporary in staged.values():
             if temporary.exists():
@@ -1080,6 +1401,34 @@ def main() -> None:
             "default is 70."
         ),
     )
+    parser.add_argument(
+        "--melody-condition",
+        choices=("none", "naturalistic"),
+        default="none",
+        help="Disable melody or add a chord-conditioned V2 melody.",
+    )
+    parser.add_argument(
+        "--melody-profile",
+        choices=("lead-high-sparse", "lead-mid-neutral", "lead-mid-active"),
+        default="lead-high-sparse",
+    )
+    parser.add_argument(
+        "--melody-percent",
+        type=float,
+        default=70.0,
+        help="Exact naturalistic melody inclusion target percentage.",
+    )
+    parser.add_argument(
+        "--melody-collapse-probability",
+        type=float,
+        default=0.25,
+        help="Probability of reusing the selected V0 chord instrument on V2.",
+    )
+    parser.add_argument(
+        "--melody-decoder",
+        choices=("chord_centered_random_walk", "sequence_beam"),
+        default="sequence_beam",
+    )
     args = parser.parse_args()
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     render_directory(
@@ -1090,6 +1439,11 @@ def main() -> None:
         arpeggio_percent=args.arpeggio_percent,
         pad_percent=args.pad_percent,
         percussion_percent=args.percussion_percent,
+        melody_condition=args.melody_condition,
+        melody_profile=args.melody_profile,
+        melody_percent=args.melody_percent,
+        melody_collapse_probability=args.melody_collapse_probability,
+        melody_decoder=args.melody_decoder,
     )
 
 

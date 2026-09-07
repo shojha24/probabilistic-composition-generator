@@ -259,6 +259,26 @@ exact-quota behavior. The Python directory API exposes the same control as
 `percussion_percent`; single-song rendering retains its seeded one-song
 inclusion behavior because no corpus quota exists.
 
+Enable the opt-in naturalistic melody layer with a deterministic corpus quota:
+
+```bash
+python render.py \
+  --in-dir ./gen/pop-rock-labels \
+  --out ./gen/melody_scores.txt \
+  --mode pads \
+  --melody-condition naturalistic \
+  --melody-percent 70 \
+  --melody-profile lead-high-sparse \
+  --seed 7
+```
+
+Naturalistic rendering adds a synchronized `V2` melody sidecar and records
+per-event source mapping, role, pitch-source, local-key diagnostics, and
+instrument-collapse provenance in the manifest. A song outside the exact
+melody quota receives a synchronized V2 rest track with
+`omission_reason=corpus_quota`. `--melody-percent 0` and
+`--melody-percent 100` are supported explicitly.
+
 Directory rendering requires an explicit integer `--seed` and accepts one or
 more `--in-dir` values. Each directory's source files are validated and
 sorted by numeric ID before rendering, so `song_10.json` follows
@@ -266,12 +286,15 @@ sorted by numeric ID before rendering, so `song_10.json` follows
 Malformed filenames, duplicate numeric IDs within one directory, and
 duplicate input directories fail the render.
 
-`render.py` combines three tracks for each song:
+`render.py` combines three accompaniment tracks for each song by default and
+adds a synchronized fourth track when naturalistic melody is enabled:
 
 - `chord_module.py` tries the renderer's six-voicer order, prioritizing the
   song's genre, and renders either voiced block chords or profile-driven
   arpeggios from those same selected voicings;
 - `bass_module.py` renders the generated bass pitch in a low register.
+- `melody_module.py` optionally renders a chord-conditioned monophonic
+  melody on voice `V2`.
 - `percussion_module.py` repeats a seeded kick, snare, and cymbal groove on
   voice `V9` (the General MIDI percussion channel). Each song has a configurable
   chance of audible percussion, defaulting to 70%; the remaining songs retain
@@ -280,8 +303,8 @@ duplicate input directories fail the render.
   121–180 BPM have a 20% chance of a half-time feel. The selected feel and
   inclusion result are recorded in the manifest.
 
-The output uses `START_SONG_N` and `END_SONG` markers. All three tracks use
-the chord duration timeline, so they remain synchronized. In arpeggio mode,
+The output uses `START_SONG_N` and `END_SONG` markers. All tracks use the
+chord duration timeline, so they remain synchronized. In arpeggio mode,
 each playable source event emits every selected V0 pitch exactly once on a
 profile-selected sixteenth or eighth-note grid. A pair of adjacent pitches may
 share an onset, and every arpeggiated note ends at the source-event boundary
@@ -678,6 +701,7 @@ The current responsibilities are:
 | `chord_module.py` | Select a voicer and render pad or arpeggio chord tracks |
 | `bass_module.py` | Render bass tracks |
 | `percussion_module.py` | Render optional voice-9 percussion tracks |
+| `melody_module.py` | Generate opt-in chord-aware voice-2 melody tracks |
 | `render.py` | Combine tracks into JFugue score text and manifests |
 | `eda/validate_rendered_corpus.py` | Validate manifest-paired rendered corpora |
 | `voicing/` | Select and realize MIDI voicings |
@@ -711,7 +735,8 @@ The project has these known limits:
 
 - The Java renderer remains a proof of concept and is not invoked by
   `render.py`.
-- Melody tracks are yet to be generated.
+- Melody tracks are opt-in; use `--melody-condition naturalistic` to emit
+  synchronized V2 melody output and provenance.
 - Statistical distribution targets need larger calibration reports.
 - Extended guitar shapes use an explicit programmatic derivation because
   complete canonical coverage is not available in the reviewed sources.

@@ -65,7 +65,7 @@ public class HumanizedMidiRenderer {
     static {
         CHANNEL_BIAS_MS.put(0,  0.0);    // Pad        -- on the beat
         CHANNEL_BIAS_MS.put(1,  8.0);    // Bass       -- slightly behind (pocket feel)
-        CHANNEL_BIAS_MS.put(2, -4.0);    // Extensions -- slightly ahead (airy)
+        CHANNEL_BIAS_MS.put(2, -4.0);    // Melody -- slightly ahead (airy)
         CHANNEL_BIAS_MS.put(3, -6.0);    // Arp        -- rushing slightly
         CHANNEL_BIAS_MS.put(9,  2.0);    // Drums      -- fractionally late (groove)
     }
@@ -265,9 +265,13 @@ public class HumanizedMidiRenderer {
                 int ch   = sm.getChannel();
                 long tick = event.getTick();
                 int key  = (ch << 7) | sm.getData1();
-                sourceBoundaryByOn.put(
-                    event, nextSourceBoundary(sourceBoundaries, tick)
-                );
+                // V2 melody notes use their own symbolic durations and must
+                // not be clipped by V0 arpeggio source boundaries.
+                if (ch != 2) {
+                    sourceBoundaryByOn.put(
+                        event, nextSourceBoundary(sourceBoundaries, tick)
+                    );
+                }
 
                 Long prevTick  = lastOnTick.get(ch);
                 Long prevDelta = lastOnDelta.get(ch);
