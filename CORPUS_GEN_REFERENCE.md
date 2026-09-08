@@ -8,8 +8,7 @@ Assuming distributions have already been calculated:
 python3 target_corpus_gen.py \
   --target-events 500000 \
   --target-songs 2500 \
-  --tonic C \
-  --bpm 120 \
+  --debug \
   --seed 15001 \
   --dist-dir ./distributions \
   --out-dir ./gen/acr-target-500k
