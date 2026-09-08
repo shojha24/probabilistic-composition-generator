@@ -284,18 +284,27 @@ melody quota receives a synchronized V2 rest track with
 The score manifest is a closed-world sound-design record: it identifies the
 selected roles, derived humanization seeds, reference render profile, source
 checksums, and explicitly records `audio_rendered: false` until an approved
-audio adapter is used. Generate one of the fixed ACR condition views without
-regenerating the underlying song:
+audio adapter is used. Generate one canonical all-role score first, then
+project condition views without regenerating the underlying song:
 
 ```bash
-python render.py --in-dir ./gen/pop-rock-labels --out ./gen/cbm.txt \
-  --seed 7 --condition cbm
+python render.py --in-dir ./gen/pop-rock-labels --out ./gen/all_roles.txt \
+  --seed 7 --melody-condition naturalistic --melody-percent 100 \
+  --percussion-percent 100
+
+python tools/project_condition_corpus.py \
+  --canonical ./gen/all_roles.txt \
+  --out-dir ./gen/conditions \
+  --conditions cb cbp cbm cbmp naturalistic \
+  --seed 7
 ```
 
 Supported condition IDs are `cb`, `cbp`, `cbm`, `cbmp`, and `naturalistic`.
 Fixed condition views force only their declared V0/V1/V2/V9 role inclusion;
-the manifest retains each role's provenance and hash. To produce deterministic
-MIDI as a separately stoppable stage, use:
+the manifest retains each role's provenance and hash. The legacy
+`render.py --condition` option remains useful for a one-off direct render, but
+it is not the efficient matched-cohort projection path. To produce
+deterministic MIDI as a separately stoppable stage, use:
 
 ```bash
 python render.py --in-dir ./gen/pop-rock-labels --out ./gen/scores.txt \

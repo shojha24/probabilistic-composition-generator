@@ -252,6 +252,14 @@ produce a condition manifest that records `condition_id`, `selected_roles`,
 `selected_voices`, `role_presence`, source-manifest hash, role hashes, and
 render-profile hash.
 
+The reference implementation should render the all-role score once and then
+invoke `tools/project_condition_corpus.py` for the requested condition IDs.
+That projector reads the canonical role sidecars and manifest, applies only
+the declared role mask, and records the canonical source linkage. Calling
+`render.py --condition` separately for each arm is not an equivalent
+implementation: it repeats symbolic generation even when the seed and source
+cohort are unchanged.
+
 The implementation must support three independently stoppable stages:
 
 1. **Score-only:** write canonical and condition-specific JFugue scores and

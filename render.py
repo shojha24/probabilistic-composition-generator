@@ -1610,8 +1610,9 @@ def main() -> None:
         "--condition",
         choices=tuple(CONDITION_ROLES),
         help=(
-            "Render a fixed role ablation from the canonical symbolic roles. "
-            "This controls role selection and does not regenerate the song."
+            "Render a fixed role view directly from the source corpus. "
+            "Use tools/project_condition_corpus.py for matched-cohort "
+            "projections from a canonical all-role render."
         ),
     )
     parser.add_argument(

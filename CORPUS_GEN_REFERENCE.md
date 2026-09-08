@@ -33,76 +33,41 @@ python3 render.py \
   --stage midi \
   --midi-output ./gen/midi/acr-canonical-all-roles
 
-# 3. CB projection: V0 chords/arpeggios + V1 bass.
-python3 render.py \
-  --in-dir ./gen/acr-target-500k/pop-rock-labels \
-  --in-dir ./gen/acr-target-500k/jazz-labels \
-  --out ./gen/acr-condition-cb.txt \
+# 3. Project all five condition views from the canonical role files.
+#    This does not call the symbolic generator again. It reuses the canonical
+#    V0/V1/V2/V9 blocks, voicing decisions, timing, and provenance.
+python3 tools/project_condition_corpus.py \
+  --canonical ./gen/acr-canonical-all-roles.txt \
+  --out-dir ./gen/acr-conditions \
+  --conditions cb cbp cbm cbmp naturalistic \
   --seed 25001 \
-  --mode mixed \
-  --arpeggio-percent 30 \
-  --pad-percent 70 \
-  --condition cb \
-  --stage midi \
-  --midi-output ./gen/midi/acr-condition-cb
-
-# 4. CBP projection: V0 + V1 + V9 percussion.
-python3 render.py \
-  --in-dir ./gen/acr-target-500k/pop-rock-labels \
-  --in-dir ./gen/acr-target-500k/jazz-labels \
-  --out ./gen/acr-condition-cbp.txt \
-  --seed 25001 \
-  --mode mixed \
-  --arpeggio-percent 30 \
-  --pad-percent 70 \
-  --condition cbp \
-  --stage midi \
-  --midi-output ./gen/midi/acr-condition-cbp
-
-# 5. CBM projection: V0 + V1 + V2 melody.
-python3 render.py \
-  --in-dir ./gen/acr-target-500k/pop-rock-labels \
-  --in-dir ./gen/acr-target-500k/jazz-labels \
-  --out ./gen/acr-condition-cbm.txt \
-  --seed 25001 \
-  --mode mixed \
-  --arpeggio-percent 30 \
-  --pad-percent 70 \
-  --condition cbm \
-  --stage midi \
-  --midi-output ./gen/midi/acr-condition-cbm
-
-# 6. CBMP projection: V0 + V1 + V2 melody + V9 percussion.
-python3 render.py \
-  --in-dir ./gen/acr-target-500k/pop-rock-labels \
-  --in-dir ./gen/acr-target-500k/jazz-labels \
-  --out ./gen/acr-condition-cbmp.txt \
-  --seed 25001 \
-  --mode mixed \
-  --arpeggio-percent 30 \
-  --pad-percent 70 \
-  --condition cbmp \
-  --stage midi \
-  --midi-output ./gen/midi/acr-condition-cbmp
-
-# 7. Naturalistic projection.
-#    V0/V1 are always present. The 100% values preserve the requested
-#    always-on melody and percussion setup while retaining naturalistic
-#    condition-manifest semantics.
-python3 render.py \
-  --in-dir ./gen/acr-target-500k/pop-rock-labels \
-  --in-dir ./gen/acr-target-500k/jazz-labels \
-  --out ./gen/acr-condition-naturalistic.txt \
-  --seed 25001 \
-  --mode mixed \
-  --arpeggio-percent 30 \
-  --pad-percent 70 \
-  --percussion-percent 70 \
-  --condition naturalistic \
   --melody-percent 70 \
-  --melody-profile lead-high-sparse \
-  --melody-decoder sequence_beam \
-  --stage midi \
-  --midi-output ./gen/midi/acr-condition-naturalistic
+  --percussion-percent 70 \
+  --stage score
 
-All projections use the identical render seed ( 25001 ) and source corpus, preserving the deterministic 30/70 mode allocation and symbolic identity across outputs.
+# The projected scores are written to:
+#   ./gen/acr-conditions/cb/scores.txt
+#   ./gen/acr-conditions/cbp/scores.txt
+#   ./gen/acr-conditions/cbm/scores.txt
+#   ./gen/acr-conditions/cbmp/scores.txt
+#   ./gen/acr-conditions/naturalistic/scores.txt
+#
+# Each directory also contains a condition manifest that links back to the
+# canonical manifest and records the per-song role mask.
+
+# 4. Optional: convert projected condition scores to MIDI when condition-
+#    specific MIDI is required. This performs MIDI conversion only; it does
+#    not repeat chord, voicing, melody, or percussion generation.
+python3 tools/project_condition_corpus.py \
+  --canonical ./gen/acr-canonical-all-roles.txt \
+  --out-dir ./gen/acr-conditions-midi \
+  --conditions cb cbp cbm cbmp naturalistic \
+  --seed 25001 \
+  --melody-percent 70 \
+  --percussion-percent 70 \
+  --stage midi
+
+All projections reuse the canonical source cohort and render seed. The
+canonical render pays the symbolic-generation cost once; projection is a
+role-mask operation, and MIDI conversion is an independently stoppable
+follow-up stage.
