@@ -36,6 +36,12 @@ from percussion_module import (
     PERCUSSION_OMISSION_PROBABILITY,
     PercussionModule,
 )
+from sound_design import (
+    CONDITION_ROLES,
+    REFERENCE_RENDER_PROFILE,
+    derive_seed,
+    parameter_manifest,
+)
 
 
 _SONG_FILENAME = re.compile(r"^song_(\d+)\.json$")
@@ -218,6 +224,30 @@ def _melody_condition(value: str) -> str:
     if value not in {"none", "naturalistic"}:
         raise ValueError("melody_condition must be 'none' or 'naturalistic'")
     return value
+
+
+def _condition(value: str | None) -> str | None:
+    if value is not None and value not in CONDITION_ROLES:
+        raise ValueError(
+            f"condition must be one of {', '.join(CONDITION_ROLES)}"
+        )
+    return value
+
+
+def _condition_options(
+    condition: str | None,
+    melody_condition: str,
+    melody_percent: float | int,
+    percussion_percent: float | int | None,
+) -> tuple[str, float | int, float | int | None]:
+    """Resolve a condition without allowing it to regenerate symbolic roles."""
+    if condition is None:
+        return melody_condition, melody_percent, percussion_percent
+    roles = CONDITION_ROLES[condition]
+    if condition != "naturalistic":
+        melody_percent = 100.0 if "V2" in roles else 0.0
+        percussion_percent = 100.0 if "V9" in roles else 0.0
+    return "naturalistic", melody_percent, percussion_percent
 
 
 def _melody_decoder(value: str) -> str:
@@ -955,6 +985,59 @@ def _install_output_set(
                 backup.unlink()
 
 
+def render_midi_scores(
+    score_path: str | Path,
+    output_dir: str | Path,
+    *,
+    seed: int,
+) -> dict[str, dict[str, str]]:
+    """Convert score blocks to deterministic MIDI using the pinned Java renderer."""
+    repo_root = Path(__file__).resolve().parent
+    score_path = Path(score_path)
+    output_dir = Path(output_dir)
+    jar = repo_root / "jfugue-5.0.9.jar"
+    source = repo_root / "HumanizedMidiRenderer.java"
+    class_file = repo_root / "HumanizedMidiRenderer.class"
+    if not jar.is_file():
+        raise FileNotFoundError(f"Missing JFugue dependency: {jar}")
+    if not class_file.is_file() or class_file.stat().st_mtime < source.stat().st_mtime:
+        subprocess.run(
+            ["javac", "-cp", str(jar), str(source)],
+            cwd=repo_root,
+            check=True,
+        )
+    output_dir.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        [
+            "java", "-cp", os.pathsep.join((".", str(jar))),
+            "HumanizedMidiRenderer", str(score_path.resolve()),
+            str(output_dir.resolve()), str(seed),
+        ],
+        cwd=repo_root,
+        check=True,
+    )
+    records = {}
+    for ordinal in parse_score_ordinals(score_path):
+        midi_path = output_dir / f"START_SONG_{ordinal}.mid"
+        if not midi_path.is_file():
+            raise RuntimeError(f"MIDI renderer did not produce {midi_path.name}")
+        records[str(ordinal)] = {
+            "path": str(midi_path.resolve()),
+            "sha256": hashlib.sha256(midi_path.read_bytes()).hexdigest(),
+            "humanization_seed": str(derive_seed(seed, "humanization", ordinal)),
+        }
+    return records
+
+
+def parse_score_ordinals(score_path: str | Path) -> list[int]:
+    """Read score ordinals without importing the corpus validator."""
+    ordinals = []
+    for line in Path(score_path).read_text(encoding="utf-8").splitlines():
+        if line.startswith("START_SONG_"):
+            ordinals.append(int(line.removeprefix("START_SONG_")))
+    return ordinals
+
+
 def render_directory(
     input_dir: str | Path | list[str] | tuple[str, ...],
     output: str,
@@ -969,12 +1052,23 @@ def render_directory(
     melody_percent: float | int = 70.0,
     melody_collapse_probability: float = 0.25,
     melody_decoder: str = "sequence_beam",
+    condition: str | None = None,
+    stage: str = "score",
+    midi_output: str | Path | None = None,
 ) -> None:
     if not isinstance(seed, int) or isinstance(seed, bool):
         raise ValueError("render_directory requires an explicit integer seed")
+    if stage not in {"score", "midi"}:
+        raise ValueError("stage must be 'score' or 'midi'")
+    if stage == "midi" and midi_output is None:
+        midi_output = Path(output).with_name(f"{Path(output).stem}_midi")
     output = str(output)
     input_dir_list = _input_dir_list(input_dir)
     files = _source_files(input_dir_list)
+    condition = _condition(condition)
+    melody_condition, melody_percent, percussion_percent = _condition_options(
+        condition, melody_condition, melody_percent, percussion_percent
+    )
     melody_condition = _melody_condition(melody_condition)
     profile_obj = get_melody_profile(melody_profile)
     melody_percent = _percentage(melody_percent, "melody_percent")
@@ -1110,7 +1204,6 @@ def render_directory(
                         percussion_included_count += 1
                     tracks = result["tracks"]
                     role_lines = {
-                        "mixed": tracks.mixed_line,
                         "chords": tracks.chord_track,
                         "bass": tracks.bass_track,
                         "percussion": tracks.percussion_track,
@@ -1121,6 +1214,19 @@ def render_directory(
                                 "naturalistic rendering did not produce V2"
                             )
                         role_lines["melody"] = tracks.melody_track
+                    if condition is None:
+                        role_lines["mixed"] = tracks.mixed_line
+                    else:
+                        voice_to_track = {
+                            "V0": tracks.chord_track,
+                            "V1": tracks.bass_track,
+                            "V2": tracks.melody_track,
+                            "V9": tracks.percussion_track,
+                        }
+                        role_lines["mixed"] = "  ".join(
+                            voice_to_track[voice]
+                            for voice in CONDITION_ROLES[condition]
+                        )
                     for role, line in role_lines.items():
                         score_blocks[role].append(
                             _canonical_score_block(index, line)
@@ -1156,6 +1262,28 @@ def render_directory(
                         ),
                         "melody": result["melody"],
                         "seed": seed + index,
+                        "randomness": {
+                            "seed_derivation_version": "fnv1a64-v1",
+                            "humanization_seed": derive_seed(
+                                seed, "humanization", index
+                            ),
+                            "sound_design_seed": derive_seed(
+                                seed, "sound-design", index
+                            ),
+                        },
+                        "condition_id": condition or "all_roles",
+                        "selected_roles": list(
+                            CONDITION_ROLES[condition]
+                            if condition is not None
+                            else ("V0", "V1", "V2", "V9")
+                        ),
+                        "role_presence": {
+                            "V0": True,
+                            "V1": True,
+                            "V2": bool(result["melody_included"]),
+                            "V9": bool(result["percussion_included"]),
+                        },
+                        "audio_rendered": False,
                         "voicing_summary": result["voicing_summary"],
                         "no_chord": no_chord,
                         "track_hashes": {
@@ -1186,8 +1314,18 @@ def render_directory(
                         f", percussion={'on' if result['percussion_included'] else 'off'}"
                     )
 
+        effective_config = {
+            "condition": condition or "all_roles",
+            "render_mode": effective_mode,
+            "percussion_percent": percussion_inclusion_percent,
+            "melody_condition": melody_condition,
+            "melody_percent": melody_percent,
+            "melody_profile": melody_profile,
+            "melody_decoder": melody_decoder,
+            "render_profile": REFERENCE_RENDER_PROFILE["profile_id"],
+        }
         manifest = {
-            "manifest_version": 1,
+            "manifest_version": 2,
             "command": _render_command(
                 input_dir_list,
                 output,
@@ -1207,6 +1345,27 @@ def render_directory(
             "output": str(output_path.resolve()),
             "generator_revision": revision,
             "generator_revision_dirty": dirty,
+            "parameter_manifest": parameter_manifest(
+                config=effective_config,
+                source_manifests=[
+                    {
+                        "path": str(path.resolve()),
+                        "sha256": hashlib.sha256(raw).hexdigest(),
+                    }
+                    for _source_id, path, raw, _progression, _source_dir in files
+                ],
+            ),
+            "sound_design": {
+                "render_profile": REFERENCE_RENDER_PROFILE,
+                "audio_rendered": False,
+                "stage": "score",
+            },
+            "condition_id": condition or "all_roles",
+            "selected_roles": list(
+                CONDITION_ROLES[condition]
+                if condition is not None
+                else ("V0", "V1", "V2", "V9")
+            ),
             "render_mode": effective_mode,
             "render_mode_counts": {
                 render_mode: render_mode_counts.get(render_mode, 0)
@@ -1279,6 +1438,8 @@ def render_directory(
                 "song_count": len(files),
                 "voices": {
                     "mixed": (
+                        list(CONDITION_ROLES[condition])
+                        if condition is not None else
                         ["V0", "V1", "V2", "V9"]
                         if melody_condition == "naturalistic"
                         else ["V0", "V1", "V9"]
@@ -1351,6 +1512,22 @@ def render_directory(
             if temporary.exists():
                 temporary.unlink()
         raise
+
+    if stage == "midi":
+        midi_records = render_midi_scores(output_path, midi_output, seed=seed)
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["sound_design"]["stage"] = "midi"
+        manifest["sound_design"]["midi"] = {
+            "renderer": "HumanizedMidiRenderer.java",
+            "seed_derivation_version": "fnv1a64-v1",
+            "records": midi_records,
+        }
+        _install_output_set({
+            manifest_path: _stage_text(
+                manifest_path,
+                json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+            )
+        })
 
     print(f"Rendered {len(files)} song(s) to {output}")
     print("Voicer summary:")
@@ -1429,6 +1606,24 @@ def main() -> None:
         choices=("chord_centered_random_walk", "sequence_beam"),
         default="sequence_beam",
     )
+    parser.add_argument(
+        "--condition",
+        choices=tuple(CONDITION_ROLES),
+        help=(
+            "Render a fixed role ablation from the canonical symbolic roles. "
+            "This controls role selection and does not regenerate the song."
+        ),
+    )
+    parser.add_argument(
+        "--stage",
+        choices=("score", "midi"),
+        default="score",
+        help="Stop after score generation or also create deterministic MIDI.",
+    )
+    parser.add_argument(
+        "--midi-output",
+        help="Directory for MIDI output when --stage midi is selected.",
+    )
     args = parser.parse_args()
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     render_directory(
@@ -1444,6 +1639,9 @@ def main() -> None:
         melody_percent=args.melody_percent,
         melody_collapse_probability=args.melody_collapse_probability,
         melody_decoder=args.melody_decoder,
+        condition=args.condition,
+        stage=args.stage,
+        midi_output=args.midi_output,
     )
 
 

@@ -57,6 +57,7 @@ public class HumanizedMidiRenderer {
 
     private static String INPUT_FILE = "gen/generated_scores.txt";
     private static String OUTPUT_DIR = "gen/midi_output";        
+    private static long ROOT_SEED = 0L;
 
     private static final double TARGET_JITTER_MS = 15.0;
     private static final double VELOCITY_JITTER_SIGMA = 8.0;
@@ -77,6 +78,9 @@ public class HumanizedMidiRenderer {
         if (args.length >= 2) {
             INPUT_FILE = args[0];
             OUTPUT_DIR = args[1];
+        }
+        if (args.length >= 3) {
+            ROOT_SEED = Long.parseLong(args[2]);
         }
 
         new File(OUTPUT_DIR).mkdirs();
@@ -124,7 +128,7 @@ public class HumanizedMidiRenderer {
             Pattern  pattern  = new Pattern(jfugueString);
             Sequence sequence = new Player().getSequence(pattern);
 
-            humanizeSequence(sequence, new Random());
+            humanizeSequence(sequence, new Random(deriveSongSeed(name)));
 
             File outFile = new File(OUTPUT_DIR, name + ".mid");
             MidiSystem.write(sequence, 1, outFile);
@@ -134,6 +138,19 @@ public class HumanizedMidiRenderer {
             System.err.println("  ERROR rendering " + name + ": " + e.getMessage());
             e.printStackTrace();
         }
+    }
+
+    private static long deriveSongSeed(String name) {
+        String ordinal = name.startsWith("START_SONG_")
+            ? name.substring("START_SONG_".length())
+            : name;
+        String input = ROOT_SEED + ":humanization:" + ordinal;
+        long hash = 0xcbf29ce484222325L;
+        for (byte value : input.getBytes(StandardCharsets.UTF_8)) {
+            hash ^= (value & 0xff);
+            hash *= 0x100000001b3L;
+        }
+        return hash & Long.MAX_VALUE;
     }
 
     // ── Tempo helper ──────────────────────────────────────────────────────────

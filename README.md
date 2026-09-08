@@ -279,6 +279,35 @@ melody quota receives a synchronized V2 rest track with
 `omission_reason=corpus_quota`. `--melody-percent 0` and
 `--melody-percent 100` are supported explicitly.
 
+### Reproducible sound-design stages
+
+The score manifest is a closed-world sound-design record: it identifies the
+selected roles, derived humanization seeds, reference render profile, source
+checksums, and explicitly records `audio_rendered: false` until an approved
+audio adapter is used. Generate one of the fixed ACR condition views without
+regenerating the underlying song:
+
+```bash
+python render.py --in-dir ./gen/pop-rock-labels --out ./gen/cbm.txt \
+  --seed 7 --condition cbm
+```
+
+Supported condition IDs are `cb`, `cbp`, `cbm`, `cbmp`, and `naturalistic`.
+Fixed condition views force only their declared V0/V1/V2/V9 role inclusion;
+the manifest retains each role's provenance and hash. To produce deterministic
+MIDI as a separately stoppable stage, use:
+
+```bash
+python render.py --in-dir ./gen/pop-rock-labels --out ./gen/scores.txt \
+  --seed 7 --stage midi --midi-output ./gen/midi
+```
+
+The MIDI stage compiles and invokes the project-owned `HumanizedMidiRenderer`
+with a seed derived from the render seed and song ordinal. It records each
+MIDI checksum in the manifest. Audio rendering remains deliberately explicit:
+only a versioned renderer, asset registry, and mix profile may mark
+`audio_rendered` true.
+
 Directory rendering requires an explicit integer `--seed` and accepts one or
 more `--in-dir` values. Each directory's source files are validated and
 sorted by numeric ID before rendering, so `song_10.json` follows
