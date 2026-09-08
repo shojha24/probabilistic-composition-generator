@@ -1,0 +1,9 @@
+# Runtime and data-analysis dependencies
+jams
+numpy
+pandas
+scipy
+
+# Test dependencies
+pytest
+pytest-xdist
