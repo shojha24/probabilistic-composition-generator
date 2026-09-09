@@ -54,17 +54,27 @@ python3 tools/project_condition_corpus.py \
 # Each directory also contains a condition manifest that links back to the
 # canonical manifest and records the per-song role mask.
 
-# 4. Optional: convert projected condition scores to MIDI when condition-
-#    specific MIDI is required. This performs MIDI conversion only; it does
-#    not repeat chord, voicing, melody, or percussion generation.
-python3 tools/project_condition_corpus.py \
-  --canonical ./gen/acr-canonical-all-roles.txt \
-  --out-dir ./gen/acr-conditions-midi \
-  --conditions cb cbp cbm cbmp naturalistic \
-  --seed 25001 \
-  --melody-percent 70 \
-  --percussion-percent 70 \
-  --stage midi
+# 4. Convert the already-projected condition scores to MIDI.
+#    Run from the repository root. If the projections are in another
+#    workspace, set CONDITION_ROOT to that workspace's condition directory.
+javac -cp jfugue-5.0.9.jar HumanizedMidiRenderer.java
+
+CONDITION_ROOT=./gen/acr-conditions
+MIDI_ROOT=./gen/midi/acr-conditions
+for condition in cb cbp cbm cbmp naturalistic; do
+  java -cp ".:jfugue-5.0.9.jar" \
+    HumanizedMidiRenderer \
+    "${CONDITION_ROOT}/${condition}/scores.txt" \
+    "${MIDI_ROOT}/${condition}" \
+    25001
+done
+
+# MIDI files are written under:
+#   ./gen/midi/acr-conditions/cb/
+#   ./gen/midi/acr-conditions/cbp/
+#   ./gen/midi/acr-conditions/cbm/
+#   ./gen/midi/acr-conditions/cbmp/
+#   ./gen/midi/acr-conditions/naturalistic/
 
 All projections reuse the canonical source cohort and render seed. The
 canonical render pays the symbolic-generation cost once; projection is a
