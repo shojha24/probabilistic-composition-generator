@@ -33,10 +33,10 @@ processing. The corpus must preserve both facts and measure the gap.
 | Multitrack score contract | Implemented | V0 chords/arpeggios, V1 bass, optional V2 melody, and V9 percussion are emitted with synchronized sidecars. |
 | Melody generation | Implemented as an opt-in V2 augmentation | Spec 14 contracts, profiles, local-key context, candidate decoding, quotas, no-chord handling, and provenance are present. |
 | Symbolic validation and curation | Implemented | Corpus validation and diversity-aware curation cover score, MIDI-oriented metadata, tracks, and melody metadata. |
-| Score-to-MIDI conversion | Partial | `HumanizedMidiRenderer.java` exists, but `render.py` does not automatically invoke it and its humanization RNG is currently unseeded. |
-| Versioned MIDI/audio renderer | Not implemented | There is no project-owned, headless MIDI-to-WAV/FLAC production path. |
-| Sound-library/patch registry | Not implemented | General MIDI programs and predecessor sampler names are not a reproducible sound asset specification. |
-| Mix/master graph | Not implemented | There is no source-controlled per-track mix, effect, room, or master-bus policy. |
+| Score-to-MIDI conversion | Implemented | `render.py --stage midi` invokes the seeded `HumanizedMidiRenderer.java` and records MIDI checksums. |
+| Versioned MIDI/audio renderer | MVP implemented | `audio_render.py` uses FluidSynth and a declared SoundFont to produce reproducible role stems and condition mixes. |
+| Sound-library/patch registry | MVP implemented | The audio manifest records the supplied SoundFont path, content checksum, release label, renderer, and license declaration. |
+| Mix/master graph | MVP implemented | The reference profile applies declared role gains, ffmpeg `amix`, and loudness/true-peak targets; richer EQ, room, and dynamics profiles remain future work. |
 | Audio QA and symbolic-to-audio alignment checks | Not implemented | Existing validation does not inspect audio properties or verify frame-level alignment. |
 | ACR calibration and audio robustness benchmark | Not implemented | No ACR evaluation gate establishes which sound-design conditions preserve usable recognition. |
 
@@ -115,23 +115,19 @@ pipeline:
 These components should be extended rather than replaced where their contracts
 remain useful.
 
-### 2.4 The immediate reproducibility defect
+### 2.4 Reproducibility boundary
 
-`HumanizedMidiRenderer.processSong()` currently calls the humanization path with
-an unseeded Java `Random`. Consequently, the same Python seed and score do not
-necessarily produce the same MIDI bytes. This must be fixed before claiming
-byte-reproducible canonical audio:
+The current `HumanizedMidiRenderer.processSong()` path derives a deterministic
+per-song seed from the render seed and ordinal, and the MIDI manifest records
+that seed and each MIDI checksum. The new audio stage extends the boundary by
+recording the FluidSynth executable version, SoundFont checksum, ffmpeg
+version, profile, and per-song audio checksums.
 
-1. derive a render seed from the canonical song seed, track/role, humanization
-   profile, and render variant;
-2. pass that seed explicitly into Java;
-3. use a deterministic RNG for all timing, velocity, and channel-bias choices;
-4. record the seed and humanizer version in the manifest;
-5. add a repeat-render test that compares MIDI hashes and note-level content.
-
-If a future synthesizer or plugin cannot guarantee deterministic output, it
-must be marked as a non-canonical augmentation renderer rather than silently
-being used for the reference set.
+Canonical audio still depends on pinning the external FluidSynth/ffmpeg
+versions and the SoundFont bytes in the execution environment. If a future
+synthesizer or plugin cannot guarantee deterministic output, it must be
+marked as a non-canonical augmentation renderer rather than silently being
+used for the reference set.
 
 ## 3. What the predecessor sound-design system provides
 
@@ -154,7 +150,7 @@ parameters, and license are recorded and the renderer actually consumes them.
 
 ## 4. Required target architecture
 
-The production path should be explicit and headless:
+The production path is explicit and headless:
 
 ```text
 symbolic manifest + score
@@ -275,13 +271,15 @@ missing-artifact failure. A condition-specific audio renderer must consume the
 declared role mask and must not infer inclusion from empty files, filenames, or
 available MIDI channels.
 
-### 4.3 Recommended renderer rollout
+### 4.3 Renderer rollout
 
-An open, headless SoundFont renderer such as FluidSynth is a reasonable MVP
-because it can be run in batch, pinned in an environment, and paired with
-redistributable SoundFonts whose licenses are recorded. It will not by itself
-provide the most realistic production sound, so the interface should permit a
-later plugin-host or sample-library renderer.
+The repository's MVP uses FluidSynth because it can be run in batch, pinned in
+an environment, and paired with a SoundFont whose checksum and license are
+recorded. It is invoked by `render.py --stage audio` or
+`tools/project_condition_corpus.py --stage audio`; ffmpeg encodes retained
+FLAC stems and applies the reference mix graph. FluidSynth will not by itself
+provide the most realistic production sound, so the interface remains open to
+a later plugin-host or sample-library renderer.
 
 The corpus should not depend on a proprietary DAW session for its reference
 set. Higher-fidelity libraries or plugins may be added as separately versioned

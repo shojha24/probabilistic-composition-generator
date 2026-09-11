@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from pathlib import Path
 from typing import Any
 
 
@@ -35,8 +36,31 @@ ASSET_REGISTRY = {
         "license": "renderer-dependent; non-audio symbolic fallback",
         "renderer": "General MIDI",
         "reproducibility_class": "canonical",
-    }
+    },
 }
+
+
+def soundfont_asset_manifest(
+    soundfont: str | Path,
+    *,
+    asset_id: str | None = None,
+    release: str | None = None,
+    license_name: str | None = None,
+) -> dict[str, str]:
+    """Describe a concrete SoundFont without claiming an unknown license."""
+    path = Path(soundfont).expanduser().resolve()
+    if not path.is_file():
+        raise FileNotFoundError(f"SoundFont is missing: {path}")
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    return {
+        "asset_id": asset_id or f"soundfont-{digest[:16]}",
+        "release": release or path.name,
+        "license": license_name or "user-supplied; verify before redistribution",
+        "renderer": "FluidSynth",
+        "path": str(path),
+        "sha256": digest,
+        "reproducibility_class": "canonical",
+    }
 
 
 def derive_seed(root_seed: int, domain: str, ordinal: int) -> int:

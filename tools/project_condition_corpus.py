@@ -260,6 +260,9 @@ def _project_one(
     melody_percent: float,
     percussion_percent: float,
     stage: str,
+    soundfont: str | Path | None,
+    fluidsynth_bin: str,
+    ffmpeg_bin: str,
 ) -> Path:
     selected_roles, selection = _condition_roles(
         condition,
@@ -374,7 +377,7 @@ def _project_one(
     manifest["sound_design"]["stage"] = "score"
     _write_json(manifest_path, manifest)
 
-    if stage == "midi":
+    if stage in {"midi", "audio"}:
         from render import render_midi_scores
 
         midi_output = condition_dir / "midi"
@@ -393,6 +396,31 @@ def _project_one(
             "directory": str(midi_output.resolve()),
             "records": midi_records,
         }
+        if stage == "audio":
+            if soundfont is None:
+                raise ValueError("stage 'audio' requires a SoundFont path")
+            from audio_render import render_audio_bundle
+
+            audio = render_audio_bundle(
+                manifest,
+                {"mixed": midi_records},
+                condition_dir / "audio",
+                soundfont=soundfont,
+                seed=seed,
+                fluidsynth_bin=fluidsynth_bin,
+                ffmpeg_bin=ffmpeg_bin,
+            )
+            manifest["sound_design"]["stage"] = "audio"
+            manifest["sound_design"]["audio_rendered"] = True
+            manifest["sound_design"]["audio"] = audio
+            manifest["condition_output"]["stage"] = "audio"
+            manifest["condition_output"]["audio"] = {
+                "directory": str((condition_dir / "audio").resolve()),
+                "records": audio["records"],
+            }
+            for record in manifest["records"]:
+                record["audio_rendered"] = True
+                record["audio"] = audio["records"][str(record["ordinal"])]
         _write_json(manifest_path, manifest)
     return output_path
 
@@ -407,6 +435,9 @@ def project_conditions(
     melody_percent: float = 70.0,
     percussion_percent: float = 70.0,
     stage: str = "score",
+    soundfont: str | Path | None = None,
+    fluidsynth_bin: str = "fluidsynth",
+    ffmpeg_bin: str = "ffmpeg",
 ) -> list[Path]:
     """Project condition score views without calling symbolic generation."""
     canonical_path = Path(canonical_path)
@@ -430,8 +461,13 @@ def project_conditions(
     unknown = [condition for condition in selected_conditions if condition not in CONDITION_ROLES]
     if unknown:
         raise ValueError(f"unsupported condition(s): {', '.join(unknown)}")
-    if stage not in {"score", "midi"}:
-        raise ValueError("stage must be 'score' or 'midi'")
+    if stage not in {"score", "midi", "audio"}:
+        raise ValueError("stage must be 'score', 'midi', or 'audio'")
+    if stage == "audio":
+        if soundfont is None:
+            raise ValueError("stage 'audio' requires a SoundFont path")
+        if not Path(soundfont).expanduser().is_file():
+            raise FileNotFoundError(f"SoundFont is missing: {soundfont}")
     output_root = Path(output_root)
     output_root.mkdir(parents=True, exist_ok=True)
     return [
@@ -447,6 +483,9 @@ def project_conditions(
             melody_percent=melody_percent,
             percussion_percent=percussion_percent,
             stage=stage,
+            soundfont=soundfont,
+            fluidsynth_bin=fluidsynth_bin,
+            ffmpeg_bin=ffmpeg_bin,
         )
         for condition in selected_conditions
     ]
@@ -471,9 +510,23 @@ def main() -> None:
     parser.add_argument("--percussion-percent", type=float, default=70.0)
     parser.add_argument(
         "--stage",
-        choices=("score", "midi"),
+        choices=("score", "midi", "audio"),
         default="score",
-        help="Project scores only or also convert each projected score to MIDI.",
+        help="Project scores, convert to MIDI, or render MIDI to audio.",
+    )
+    parser.add_argument(
+        "--soundfont",
+        help="SoundFont path required when --stage audio is selected.",
+    )
+    parser.add_argument(
+        "--fluidsynth",
+        default="fluidsynth",
+        help="FluidSynth executable or full path.",
+    )
+    parser.add_argument(
+        "--ffmpeg",
+        default="ffmpeg",
+        help="ffmpeg executable or full path used for encoding and mixing.",
     )
     args = parser.parse_args()
     outputs = project_conditions(
@@ -485,6 +538,9 @@ def main() -> None:
         melody_percent=args.melody_percent,
         percussion_percent=args.percussion_percent,
         stage=args.stage,
+        soundfont=args.soundfont,
+        fluidsynth_bin=args.fluidsynth,
+        ffmpeg_bin=args.ffmpeg,
     )
     for output in outputs:
         print(f"Projected condition score: {output}")

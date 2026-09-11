@@ -54,6 +54,12 @@ HumanizedMidiRenderer.java
         |
         v
 MIDI files
+        |
+        v
+FluidSynth + ffmpeg
+        |
+        +--> role FLAC stems
+        +--> mixed FLAC audio
 ```
 
 The first two Python stages do not render audio. They create and sample
@@ -313,9 +319,41 @@ python render.py --in-dir ./gen/pop-rock-labels --out ./gen/scores.txt \
 
 The MIDI stage compiles and invokes the project-owned `HumanizedMidiRenderer`
 with a seed derived from the render seed and song ordinal. It records each
-MIDI checksum in the manifest. Audio rendering remains deliberately explicit:
-only a versioned renderer, asset registry, and mix profile may mark
-`audio_rendered` true.
+MIDI checksum in the manifest. Audio rendering is an explicit downstream
+stage. It uses FluidSynth with a user-supplied SoundFont and ffmpeg for
+lossless FLAC encoding and mixing:
+
+```bash
+python render.py --in-dir ./gen/pop-rock-labels --out ./gen/scores.txt \
+  --seed 7 --stage audio \
+  --midi-output ./gen/midi \
+  --audio-output ./gen/audio \
+  --soundfont ./soundfonts/reference.sf2
+```
+
+The audio stage converts the mixed and role score sidecars to MIDI, renders
+the chord, bass, melody, and percussion stems independently, applies the
+declared role gains and `reference-transparent-v1` loudness/true-peak policy,
+and writes one `mix.flac` plus retained role FLAC files under
+`./gen/audio/song_<ordinal>/`. The manifest records the SoundFont checksum,
+FluidSynth/ffmpeg versions, profile, stem checksums, mix checksum, and
+`audio_rendered: true`. Install `fluidsynth` and `ffmpeg` separately; the
+repository does not redistribute a SoundFont.
+
+For a MIDI-only manifest produced earlier, the same work is available as a
+standalone command:
+
+```bash
+python audio_render.py \
+  --manifest ./gen/scores.txt.manifest.json \
+  --midi-dir ./gen/midi \
+  --output-dir ./gen/audio \
+  --soundfont ./soundfonts/reference.sf2
+```
+
+Condition projections support `--stage audio` as well. Their projected MIDI
+already contains the declared role mask, so the projection audio stage writes
+the matched condition mix without regenerating symbolic material.
 
 Directory rendering requires an explicit integer `--seed` and accepts one or
 more `--in-dir` values. Each directory's source files are validated and
@@ -633,7 +671,7 @@ filtering, cost calculation, and probabilistic selection. See
 
 ## Score and JFugue rendering
 
-The planned rendering flow is:
+The rendering flow is:
 
 ```text
 Chord events
@@ -720,8 +758,9 @@ java -cp ".;jfugue-5.0.9.jar" HumanizedMidiRenderer `
   .\gen\pop_rock_scores.txt .\gen\midi_output
 ```
 
-The renderer writes one `.mid` file per `START_SONG_N` block. The Java step
-is implemented, but it is not automatically invoked by `render.py`.
+The renderer writes one `.mid` file per `START_SONG_N` block. The
+`render.py --stage midi` and `render.py --stage audio` paths invoke this
+renderer automatically.
 
 Do not treat a JFugue string as the source of chord semantics. The structured
 chord event and voiced MIDI data remain the source records.
@@ -740,14 +779,16 @@ The current responsibilities are:
 | `bass_module.py` | Render bass tracks |
 | `percussion_module.py` | Render optional voice-9 percussion tracks |
 | `melody_module.py` | Generate opt-in chord-aware voice-2 melody tracks |
-| `render.py` | Combine tracks into JFugue score text and manifests |
+| `render.py` | Combine tracks into score text, MIDI, and audio manifests |
+| `audio_render.py` | Synthesize MIDI stems and mix lossless FLAC audio |
 | `eda/validate_rendered_corpus.py` | Validate manifest-paired rendered corpora |
 | `voicing/` | Select and realize MIDI voicings |
 | `HumanizedMidiRenderer.java` | Convert JFugue text to humanized MIDI |
 | `old_src/` | Historical implementation and reference material |
 
-The Python pipeline produces score text, not final audio. Java converts the
-score text to MIDI; audio synthesis is a separate downstream step.
+The Python pipeline produces score text and can invoke the separate MIDI and
+audio stages. Java converts score text to MIDI; FluidSynth and ffmpeg produce
+the retained audio stems and mixes.
 
 ## Validation
 
@@ -781,5 +822,4 @@ The project has these known limits:
 - A narrow pop-synth context can still fail on a dense major seventh,
   ninth, sharp-eleventh chord.
 
-The next implementation step is to invoke the Java renderer from the score
-pipeline, if a single-command MIDI workflow is required.
+Future work includes richer room, EQ, dynamics, and audio QA profiles.

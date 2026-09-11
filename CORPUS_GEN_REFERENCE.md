@@ -1,5 +1,15 @@
 Assuming distributions have already been calculated:
 
+# Audio rendering prerequisites (Ubuntu 24.04 / WSL2):
+#   Install FluidSynth, ffmpeg, and the FluidR3 General MIDI SoundFont:
+sudo apt update
+sudo apt install -y fluidsynth ffmpeg fluid-soundfont-gm
+
+# Verify the tools and the installed SoundFont:
+fluidsynth --version
+ffmpeg -version
+test -f /usr/share/sounds/sf2/FluidR3_GM.sf2 && echo "SoundFont found"
+
 # 1. Generate the quota-aware target corpus:
 #    5,000 songs total (2,500 per genre) and 500,000 chord events total.
 #    Output directories will be:
@@ -76,7 +86,27 @@ done
 #   ./gen/midi/acr-conditions/cbmp/
 #   ./gen/midi/acr-conditions/naturalistic/
 
+# 5. Render matched condition audio mixes from the projected MIDI.
+#    The Ubuntu package above provides this SoundFont. For another approved
+#    asset, replace SOUNDFONT with its immutable path.
+SOUNDFONT=/usr/share/sounds/sf2/FluidR3_GM.sf2
+python3 tools/project_condition_corpus.py \
+  --canonical ./gen/acr-canonical-all-roles.txt \
+  --out-dir ./gen/acr-conditions-audio \
+  --conditions cb cbp cbm cbmp naturalistic \
+  --seed 25001 \
+  --melody-percent 70 \
+  --percussion-percent 70 \
+  --stage audio \
+  --soundfont "${SOUNDFONT}"
+
+# Condition audio mixes are written under:
+#   ./gen/acr-conditions-audio/<condition>/audio/song_<ordinal>/mix.flac
+# The condition manifests retain the MIDI and audio checksums, SoundFont
+# checksum, renderer versions, selected role mask, and mix profile.
+
 All projections reuse the canonical source cohort and render seed. The
 canonical render pays the symbolic-generation cost once; projection is a
 role-mask operation, and MIDI conversion is an independently stoppable
-follow-up stage.
+follow-up stage. Canonical all-role rendering with `render.py --stage audio`
+also retains independent role stems for diagnostic ablations.

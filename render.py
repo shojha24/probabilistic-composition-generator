@@ -17,6 +17,7 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
+from audio_render import render_audio_bundle
 from bass_module import BassModule
 from chord_module import ChordModule, POLICIES
 from instruments import ARPEGGIO_PROFILES
@@ -1007,15 +1008,32 @@ def render_midi_scores(
             check=True,
         )
     output_dir.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
-        [
-            "java", "-cp", os.pathsep.join((".", str(jar))),
-            "HumanizedMidiRenderer", str(score_path.resolve()),
-            str(output_dir.resolve()), str(seed),
-        ],
-        cwd=repo_root,
-        check=True,
-    )
+    java_command = [
+        "java", "-cp", os.pathsep.join((".", str(jar))),
+        "HumanizedMidiRenderer", str(score_path.resolve()),
+        str(output_dir.resolve()), str(seed),
+    ]
+    try:
+        subprocess.run(
+            java_command,
+            cwd=repo_root,
+            check=True,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except subprocess.CalledProcessError as error:
+        stderr = error.stderr or ""
+        if "UnsupportedClassVersionError" in stderr:
+            subprocess.run(
+                ["javac", "-cp", str(jar), str(source)],
+                cwd=repo_root,
+                check=True,
+            )
+            subprocess.run(java_command, cwd=repo_root, check=True)
+        else:
+            if stderr:
+                sys.stderr.write(stderr)
+            raise
     records = {}
     for ordinal in parse_score_ordinals(score_path):
         midi_path = output_dir / f"START_SONG_{ordinal}.mid"
@@ -1026,6 +1044,100 @@ def render_midi_scores(
             "sha256": hashlib.sha256(midi_path.read_bytes()).hexdigest(),
             "humanization_seed": str(derive_seed(seed, "humanization", ordinal)),
         }
+    return records
+
+
+def _materialize_timed_score(
+    score_path: str | Path,
+    output_dir: Path,
+    tempo_by_ordinal: dict[int, int | float],
+) -> Path:
+    """Add explicit per-song tempos to role scores before MIDI conversion."""
+    lines = Path(score_path).read_text(encoding="utf-8").splitlines(
+        keepends=True
+    )
+    output_lines: list[str] = []
+    current_ordinal: int | None = None
+    score_line_seen = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("START_SONG_"):
+            current_ordinal = int(stripped.removeprefix("START_SONG_"))
+            score_line_seen = False
+        elif (
+            current_ordinal is not None
+            and stripped
+            and stripped != "END_SONG"
+            and not score_line_seen
+        ):
+            bpm = tempo_by_ordinal.get(current_ordinal)
+            if bpm is None:
+                raise ValueError(
+                    f"missing BPM for score ordinal {current_ordinal}"
+                )
+            if not stripped.startswith("T"):
+                newline = "\r\n" if line.endswith("\r\n") else "\n"
+                score_text = line.rstrip("\r\n")
+                line = f"T{float(bpm):g} {score_text}{newline}"
+            score_line_seen = True
+        elif stripped == "END_SONG":
+            current_ordinal = None
+        output_lines.append(line)
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    temporary = tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        dir=output_dir,
+        prefix=".timed-score.",
+        suffix=".txt",
+        delete=False,
+    )
+    temporary_path = Path(temporary.name)
+    try:
+        with temporary:
+            temporary.write("".join(output_lines))
+    except BaseException:
+        if temporary_path.exists():
+            temporary_path.unlink()
+        raise
+    return temporary_path
+
+
+def render_midi_bundle(
+    score_paths: dict[str, str | Path],
+    output_dir: str | Path,
+    *,
+    seed: int,
+    tempo_by_ordinal: dict[int, int | float] | None = None,
+) -> dict[str, dict[str, dict[str, str]]]:
+    """Convert mixed and role score files to separately addressable MIDI."""
+    if not score_paths:
+        raise ValueError("at least one score path is required")
+    output_root = Path(output_dir)
+    output_root.mkdir(parents=True, exist_ok=True)
+    records = {}
+    for track, score_path in score_paths.items():
+        if not isinstance(track, str) or not track:
+            raise ValueError("MIDI bundle track names must be non-empty strings")
+        timed_score = None
+        effective_score = Path(score_path)
+        if tempo_by_ordinal is not None:
+            timed_score = _materialize_timed_score(
+                score_path,
+                output_root,
+                tempo_by_ordinal,
+            )
+            effective_score = timed_score
+        try:
+            records[track] = render_midi_scores(
+                effective_score,
+                output_root / track,
+                seed=seed,
+            )
+        finally:
+            if timed_score is not None and timed_score.exists():
+                timed_score.unlink()
     return records
 
 
@@ -1055,13 +1167,24 @@ def render_directory(
     condition: str | None = None,
     stage: str = "score",
     midi_output: str | Path | None = None,
+    audio_output: str | Path | None = None,
+    soundfont: str | Path | None = None,
+    fluidsynth_bin: str = "fluidsynth",
+    ffmpeg_bin: str = "ffmpeg",
 ) -> None:
     if not isinstance(seed, int) or isinstance(seed, bool):
         raise ValueError("render_directory requires an explicit integer seed")
-    if stage not in {"score", "midi"}:
-        raise ValueError("stage must be 'score' or 'midi'")
-    if stage == "midi" and midi_output is None:
+    if stage not in {"score", "midi", "audio"}:
+        raise ValueError("stage must be 'score', 'midi', or 'audio'")
+    if stage in {"midi", "audio"} and midi_output is None:
         midi_output = Path(output).with_name(f"{Path(output).stem}_midi")
+    if stage == "audio":
+        if soundfont is None:
+            raise ValueError("stage 'audio' requires a SoundFont path")
+        if not Path(soundfont).expanduser().is_file():
+            raise FileNotFoundError(f"SoundFont is missing: {soundfont}")
+        if audio_output is None:
+            audio_output = Path(output).with_name(f"{Path(output).stem}_audio")
     output = str(output)
     input_dir_list = _input_dir_list(input_dir)
     files = _source_files(input_dir_list)
@@ -1070,6 +1193,13 @@ def render_directory(
         condition, melody_condition, melody_percent, percussion_percent
     )
     melody_condition = _melody_condition(melody_condition)
+    selected_roles = tuple(
+        CONDITION_ROLES[condition]
+        if condition is not None
+        else ("V0", "V1", "V2", "V9")
+        if melody_condition == "naturalistic"
+        else ("V0", "V1", "V9")
+    )
     profile_obj = get_melody_profile(melody_profile)
     melody_percent = _percentage(melody_percent, "melody_percent")
     melody_collapse_probability = _melody_collapse_probability(
@@ -1272,11 +1402,7 @@ def render_directory(
                             ),
                         },
                         "condition_id": condition or "all_roles",
-                        "selected_roles": list(
-                            CONDITION_ROLES[condition]
-                            if condition is not None
-                            else ("V0", "V1", "V2", "V9")
-                        ),
+                        "selected_roles": list(selected_roles),
                         "role_presence": {
                             "V0": True,
                             "V1": True,
@@ -1361,11 +1487,7 @@ def render_directory(
                 "stage": "score",
             },
             "condition_id": condition or "all_roles",
-            "selected_roles": list(
-                CONDITION_ROLES[condition]
-                if condition is not None
-                else ("V0", "V1", "V2", "V9")
-            ),
+            "selected_roles": list(selected_roles),
             "render_mode": effective_mode,
             "render_mode_counts": {
                 render_mode: render_mode_counts.get(render_mode, 0)
@@ -1513,8 +1635,28 @@ def render_directory(
                 temporary.unlink()
         raise
 
-    if stage == "midi":
-        midi_records = render_midi_scores(output_path, midi_output, seed=seed)
+    if stage in {"midi", "audio"}:
+        if stage == "audio":
+            midi_role_records = render_midi_bundle(
+                {
+                    role: output_paths[role]
+                    for role in score_blocks
+                },
+                midi_output,
+                seed=seed,
+                tempo_by_ordinal={
+                    record["ordinal"]: record["bpm"]
+                    for record in manifest_records
+                },
+            )
+            midi_records = midi_role_records["mixed"]
+        else:
+            midi_role_records = None
+            midi_records = render_midi_scores(
+                output_path,
+                midi_output,
+                seed=seed,
+            )
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         manifest["sound_design"]["stage"] = "midi"
         manifest["sound_design"]["midi"] = {
@@ -1522,12 +1664,40 @@ def render_directory(
             "seed_derivation_version": "fnv1a64-v1",
             "records": midi_records,
         }
+        if midi_role_records is not None:
+            manifest["sound_design"]["midi"]["roles"] = midi_role_records
+            manifest["sound_design"]["midi"]["output_dir"] = str(
+                Path(midi_output).resolve()
+            )
         _install_output_set({
             manifest_path: _stage_text(
                 manifest_path,
                 json.dumps(manifest, indent=2, sort_keys=True) + "\n",
             )
         })
+
+        if stage == "audio":
+            audio = render_audio_bundle(
+                manifest,
+                midi_role_records,
+                audio_output,
+                soundfont=soundfont,
+                seed=seed,
+                fluidsynth_bin=fluidsynth_bin,
+                ffmpeg_bin=ffmpeg_bin,
+            )
+            manifest["sound_design"]["stage"] = "audio"
+            manifest["sound_design"]["audio_rendered"] = True
+            manifest["sound_design"]["audio"] = audio
+            for record in manifest["records"]:
+                record["audio_rendered"] = True
+                record["audio"] = audio["records"][str(record["ordinal"])]
+            _install_output_set({
+                manifest_path: _stage_text(
+                    manifest_path,
+                    json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+                )
+            })
 
     print(f"Rendered {len(files)} song(s) to {output}")
     print("Voicer summary:")
@@ -1617,13 +1787,31 @@ def main() -> None:
     )
     parser.add_argument(
         "--stage",
-        choices=("score", "midi"),
+        choices=("score", "midi", "audio"),
         default="score",
-        help="Stop after score generation or also create deterministic MIDI.",
+        help="Stop after score, create MIDI, or create MIDI plus audio.",
     )
     parser.add_argument(
         "--midi-output",
-        help="Directory for MIDI output when --stage midi is selected.",
+        help="Directory for MIDI output when --stage midi or audio is selected.",
+    )
+    parser.add_argument(
+        "--audio-output",
+        help="Directory for FLAC stems and mixes when --stage audio is selected.",
+    )
+    parser.add_argument(
+        "--soundfont",
+        help="SoundFont path required when --stage audio is selected.",
+    )
+    parser.add_argument(
+        "--fluidsynth",
+        default="fluidsynth",
+        help="FluidSynth executable or full path.",
+    )
+    parser.add_argument(
+        "--ffmpeg",
+        default="ffmpeg",
+        help="ffmpeg executable or full path used for encoding and mixing.",
     )
     args = parser.parse_args()
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
@@ -1643,6 +1831,10 @@ def main() -> None:
         condition=args.condition,
         stage=args.stage,
         midi_output=args.midi_output,
+        audio_output=args.audio_output,
+        soundfont=args.soundfont,
+        fluidsynth_bin=args.fluidsynth,
+        ffmpeg_bin=args.ffmpeg,
     )
 
 
