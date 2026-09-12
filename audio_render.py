@@ -223,7 +223,7 @@ def _normalize_midi_records(
             result["mixed"] = mixed
         return result
 
-    known_tracks = set(ROLE_TO_TRACK.values())
+    known_tracks = set(ROLE_TO_TRACK.values()) | {"mixed"}
     if any(key in known_tracks for key in midi_records):
         return {
             str(key): value

@@ -1259,7 +1259,7 @@ def render_directory(
         score_blocks["melody"] = []
     staged: dict[Path, Path] = {}
     try:
-        workers = min(8, len(files), os.cpu_count() or 1)
+        workers = min(14, len(files), os.cpu_count() or 1) # CHANGE THIS IF YOU NEED, MY LAPTOP HAS 16 CORES
         with ProcessPoolExecutor(max_workers=workers) as executor:
             for batch_start in range(0, len(files), workers):
                 batch = files[batch_start:batch_start + workers]
