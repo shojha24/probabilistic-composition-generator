@@ -8,8 +8,10 @@ without embedding a platform-specific audio engine.
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ProcessPoolExecutor
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import tempfile
@@ -269,6 +271,98 @@ def _selected_roles(
     return result
 
 
+def _render_song_audio(
+    ordinal: int,
+    selected_roles: tuple[str, ...],
+    role_records: Mapping[str, Any],
+    mixed_records: Mapping[str, Any] | None,
+    root: Path,
+    fluidsynth: str,
+    ffmpeg: str,
+    soundfont_path: Path,
+    effective_profile: Mapping[str, Any],
+    seed: int,
+) -> tuple[str, dict[str, Any]]:
+    song_dir = root / f"song_{ordinal}"
+    song_dir.mkdir(parents=True, exist_ok=True)
+    temporary_dir = Path(
+        tempfile.mkdtemp(prefix=f".song_{ordinal}.", dir=root)
+    )
+    stem_wavs: dict[str, Path] = {}
+    stem_records: dict[str, dict[str, str]] = {}
+    try:
+        for track, track_records in sorted(role_records.items()):
+            midi_path = _midi_record(track_records, ordinal, track)
+            wav_path = temporary_dir / f"{track}.wav"
+            _render_midi_to_wav(
+                fluidsynth,
+                midi_path,
+                wav_path,
+                soundfont_path,
+                effective_profile["sample_rate_hz"],
+            )
+            stem_wavs[track] = wav_path
+            stem_path = song_dir / f"{track}.flac"
+            _encode_flac(ffmpeg, wav_path, stem_path, effective_profile)
+            stem_records[track] = _file_record(stem_path)
+
+        if role_records:
+            selected_tracks = [
+                ROLE_TO_TRACK[role]
+                for role in selected_roles
+            ]
+            missing = [
+                track for track in selected_tracks
+                if track not in stem_wavs
+            ]
+            if missing:
+                raise ValueError(
+                    f"selected roles have no MIDI stems for song "
+                    f"{ordinal}: {missing}"
+                )
+            mix_inputs = [
+                (track, stem_wavs[track])
+                for track in selected_tracks
+            ]
+        else:
+            if mixed_records is None:
+                raise ValueError("audio rendering requires mixed MIDI records")
+            mixed_path = _midi_record(mixed_records, ordinal, "mixed")
+            mixed_wav = temporary_dir / "mixed.wav"
+            _render_midi_to_wav(
+                fluidsynth,
+                mixed_path,
+                mixed_wav,
+                soundfont_path,
+                effective_profile["sample_rate_hz"],
+            )
+            mix_inputs = [("chords", mixed_wav)]
+
+        mix_path = song_dir / "mix.flac"
+        _mix_flac(ffmpeg, mix_inputs, mix_path, effective_profile)
+        return str(ordinal), {
+            "render_seed": derive_seed(seed, "audio-render", ordinal),
+            "selected_roles": list(selected_roles),
+            "stems": stem_records,
+            "mix": _file_record(mix_path),
+            "format": effective_profile["format"],
+            "sample_rate_hz": effective_profile["sample_rate_hz"],
+            "bit_depth": effective_profile["bit_depth"],
+            "channels": effective_profile["channels"],
+            "tail_policy": effective_profile["tail_policy"],
+            "role_gains_db": {
+                role: effective_profile["role_gains_db"][role]
+                for role in selected_roles
+            },
+        }
+    finally:
+        shutil.rmtree(temporary_dir, ignore_errors=False)
+
+
+def _render_song_audio_worker(args: tuple) -> tuple[str, dict[str, Any]]:
+    return _render_song_audio(*args)
+
+
 def render_audio_bundle(
     manifest: Mapping[str, Any],
     midi_records: Mapping[str, Any],
@@ -308,6 +402,7 @@ def render_audio_bundle(
     root.mkdir(parents=True, exist_ok=True)
     audio_records: dict[str, Any] = {}
 
+    song_args = []
     for raw_record in records:
         if not isinstance(raw_record, Mapping):
             raise ValueError("manifest records must contain objects")
@@ -315,78 +410,30 @@ def render_audio_bundle(
         if isinstance(ordinal, bool) or not isinstance(ordinal, int):
             raise ValueError("manifest record ordinal must be an integer")
         selected_roles = _selected_roles(raw_record, manifest)
-        song_dir = root / f"song_{ordinal}"
-        song_dir.mkdir(parents=True, exist_ok=True)
-        temporary_dir = Path(
-            tempfile.mkdtemp(prefix=f".song_{ordinal}.", dir=root)
-        )
-        stem_wavs: dict[str, Path] = {}
-        stem_records: dict[str, dict[str, str]] = {}
-        try:
-            for track, track_records in sorted(role_records.items()):
-                midi_path = _midi_record(track_records, ordinal, track)
-                wav_path = temporary_dir / f"{track}.wav"
-                _render_midi_to_wav(
-                    fluidsynth,
-                    midi_path,
-                    wav_path,
-                    soundfont_path,
-                    effective_profile["sample_rate_hz"],
-                )
-                stem_wavs[track] = wav_path
-                stem_path = song_dir / f"{track}.flac"
-                _encode_flac(ffmpeg, wav_path, stem_path, effective_profile)
-                stem_records[track] = _file_record(stem_path)
+        song_args.append((
+            ordinal,
+            selected_roles,
+            role_records,
+            mixed_records,
+            root,
+            fluidsynth,
+            ffmpeg,
+            soundfont_path,
+            effective_profile,
+            seed,
+        ))
 
-            if role_records:
-                selected_tracks = [
-                    ROLE_TO_TRACK[role]
-                    for role in selected_roles
-                ]
-                missing = [
-                    track for track in selected_tracks
-                    if track not in stem_wavs
-                ]
-                if missing:
-                    raise ValueError(
-                        f"selected roles have no MIDI stems for song "
-                        f"{ordinal}: {missing}"
-                    )
-                mix_inputs = [
-                    (track, stem_wavs[track])
-                    for track in selected_tracks
-                ]
-            else:
-                mixed_path = _midi_record(mixed_records, ordinal, "mixed")
-                mixed_wav = temporary_dir / "mixed.wav"
-                _render_midi_to_wav(
-                    fluidsynth,
-                    mixed_path,
-                    mixed_wav,
-                    soundfont_path,
-                    effective_profile["sample_rate_hz"],
-                )
-                mix_inputs = [("chords", mixed_wav)]
-
-            mix_path = song_dir / "mix.flac"
-            _mix_flac(ffmpeg, mix_inputs, mix_path, effective_profile)
-            audio_records[str(ordinal)] = {
-                "render_seed": derive_seed(seed, "audio-render", ordinal),
-                "selected_roles": list(selected_roles),
-                "stems": stem_records,
-                "mix": _file_record(mix_path),
-                "format": effective_profile["format"],
-                "sample_rate_hz": effective_profile["sample_rate_hz"],
-                "bit_depth": effective_profile["bit_depth"],
-                "channels": effective_profile["channels"],
-                "tail_policy": effective_profile["tail_policy"],
-                "role_gains_db": {
-                    role: effective_profile["role_gains_db"][role]
-                    for role in selected_roles
-                },
-            }
-        finally:
-            shutil.rmtree(temporary_dir, ignore_errors=False)
+    workers = min(14, len(records), os.cpu_count() or 1)
+    if workers > 1:
+        with ProcessPoolExecutor(max_workers=workers) as executor:
+            for ordinal_key, record in executor.map(
+                _render_song_audio_worker, song_args
+            ):
+                audio_records[ordinal_key] = record
+    else:
+        for args in song_args:
+            ordinal_key, record = _render_song_audio(*args)
+            audio_records[ordinal_key] = record
 
     return {
         "renderer": {

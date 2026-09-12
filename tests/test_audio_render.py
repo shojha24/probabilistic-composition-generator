@@ -172,3 +172,73 @@ def test_audio_bundle_executes_renderer_and_mixer_commands(tmp_path):
     assert result["mixer"]["version"] == "fake-ffmpeg 1.0"
     assert Path(record["stems"]["chords"]["path"]).is_file()
     assert Path(record["mix"]["path"]).is_file()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="uses POSIX executable wrappers")
+def test_audio_bundle_parallel_multiple_songs(tmp_path):
+    soundfont = tmp_path / "reference.sf2"
+    soundfont.write_bytes(b"soundfont")
+
+    def fake_tool(name, version, output_flag=None):
+        tool = tmp_path / name
+        script = [
+            "#!/usr/bin/env python3",
+            "from pathlib import Path",
+            "import sys",
+            "args = sys.argv[1:]",
+            f"version = {version!r}",
+            "if args and args[0] in {'--version', '-version'}:",
+            "    print(version)",
+            "    raise SystemExit(0)",
+        ]
+        if output_flag is None:
+            script.extend([
+                "output = Path(args[-1])",
+            ])
+        else:
+            script.extend([
+                f"output = Path(args[args.index({output_flag!r}) + 1])",
+            ])
+        script.extend([
+            "output.parent.mkdir(parents=True, exist_ok=True)",
+            "output.write_bytes(version.encode('ascii'))",
+        ])
+        tool.write_text("\n".join(script) + "\n", encoding="utf-8")
+        tool.chmod(0o755)
+        return tool
+
+    fluidsynth = fake_tool("fake-fluidsynth", "fake-fluidsynth 1.0", "-F")
+    ffmpeg = fake_tool("fake-ffmpeg", "fake-ffmpeg 1.0")
+
+    manifest = {
+        "seed": 7,
+        "selected_roles": ["V0", "V1"],
+        "records": [
+            {"ordinal": 0, "selected_roles": ["V0", "V1"]},
+            {"ordinal": 1, "selected_roles": ["V0", "V1"]},
+        ],
+    }
+    midi_records = {
+        "mixed": {
+            "0": {"path": str(tmp_path / "0.mid")},
+            "1": {"path": str(tmp_path / "1.mid")},
+        }
+    }
+    (tmp_path / "0.mid").write_bytes(b"0")
+    (tmp_path / "1.mid").write_bytes(b"1")
+
+    result = render_audio_bundle(
+        manifest,
+        midi_records,
+        tmp_path / "audio",
+        soundfont=soundfont,
+        seed=7,
+        fluidsynth_bin=str(fluidsynth),
+        ffmpeg_bin=str(ffmpeg),
+    )
+
+    assert "0" in result["records"]
+    assert "1" in result["records"]
+    assert Path(result["records"]["0"]["mix"]["path"]).is_file()
+    assert Path(result["records"]["1"]["mix"]["path"]).is_file()
+
