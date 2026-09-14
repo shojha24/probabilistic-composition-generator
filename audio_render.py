@@ -43,8 +43,10 @@ def _validate_profile(profile: Mapping[str, Any]) -> dict[str, Any]:
         value = result.get(key)
         if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
             raise ValueError(f"audio render profile {key} must be positive")
-    if result["channels"] != 2:
-        raise ValueError("audio render profile must use stereo output")
+    if result["channels"] not in (1, 2):
+        raise ValueError("audio render profile channels must be 1 (mono) or 2 (stereo)")
+    if result["bit_depth"] not in (16, 24):
+        raise ValueError("audio render profile bit_depth must be 16 or 24")
     gains = result.get("role_gains_db")
     if not isinstance(gains, Mapping):
         raise ValueError("audio render profile must define role_gains_db")
@@ -110,6 +112,8 @@ def _render_midi_to_wav(
             str(soundfont),
             str(midi_path),
         ],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
         check=True,
     )
 
@@ -121,9 +125,11 @@ def _encode_flac(
     profile: Mapping[str, Any],
 ) -> None:
     flac_path.parent.mkdir(parents=True, exist_ok=True)
+    sample_fmt = "s16" if profile["bit_depth"] == 16 else "s32"
     subprocess.run(
         [
             executable,
+            "-nostdin",
             "-hide_banner",
             "-loglevel",
             "error",
@@ -137,11 +143,13 @@ def _encode_flac(
             "-c:a",
             "flac",
             "-sample_fmt",
-            "s32",
+            sample_fmt,
             "-bits_per_raw_sample",
             str(profile["bit_depth"]),
             str(flac_path),
         ],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
         check=True,
     )
 
@@ -173,18 +181,23 @@ def _mix_flac(
         f"TP={float(profile['true_peak_ceiling_dbtp']):g}:"
         "LRA=7:print_format=none"
     )
-    filters.append(
-        "".join(labels)
-        + (
-            f"amix=inputs={len(wav_paths)}:duration=longest:"
-            "dropout_transition=0:normalize=0,"
-            f"{loudness}[mix]"
+    if len(wav_paths) == 1:
+        filters.append(f"{labels[0]}{loudness}[mix]")
+    else:
+        filters.append(
+            "".join(labels)
+            + (
+                f"amix=inputs={len(wav_paths)}:duration=longest:"
+                "dropout_transition=0:normalize=0,"
+                f"{loudness}[mix]"
+            )
         )
-    )
     flac_path.parent.mkdir(parents=True, exist_ok=True)
+    sample_fmt = "s16" if profile["bit_depth"] == 16 else "s32"
     subprocess.run(
         [
             executable,
+            "-nostdin",
             "-hide_banner",
             "-loglevel",
             "error",
@@ -201,11 +214,13 @@ def _mix_flac(
             "-c:a",
             "flac",
             "-sample_fmt",
-            "s32",
+            sample_fmt,
             "-bits_per_raw_sample",
             str(profile["bit_depth"]),
             str(flac_path),
         ],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
         check=True,
     )
 
@@ -282,6 +297,7 @@ def _render_song_audio(
     soundfont_path: Path,
     effective_profile: Mapping[str, Any],
     seed: int,
+    render_mix: bool = True,
 ) -> tuple[str, dict[str, Any]]:
     song_dir = root / f"song_{ordinal}"
     song_dir.mkdir(parents=True, exist_ok=True)
@@ -306,45 +322,48 @@ def _render_song_audio(
             _encode_flac(ffmpeg, wav_path, stem_path, effective_profile)
             stem_records[track] = _file_record(stem_path)
 
-        if role_records:
-            selected_tracks = [
-                ROLE_TO_TRACK[role]
-                for role in selected_roles
-            ]
-            missing = [
-                track for track in selected_tracks
-                if track not in stem_wavs
-            ]
-            if missing:
-                raise ValueError(
-                    f"selected roles have no MIDI stems for song "
-                    f"{ordinal}: {missing}"
+        mix_record = None
+        if render_mix:
+            if role_records:
+                selected_tracks = [
+                    ROLE_TO_TRACK[role]
+                    for role in selected_roles
+                ]
+                missing = [
+                    track for track in selected_tracks
+                    if track not in stem_wavs
+                ]
+                if missing:
+                    raise ValueError(
+                        f"selected roles have no MIDI stems for song "
+                        f"{ordinal}: {missing}"
+                    )
+                mix_inputs = [
+                    (track, stem_wavs[track])
+                    for track in selected_tracks
+                ]
+            else:
+                if mixed_records is None:
+                    raise ValueError("audio rendering requires mixed MIDI records")
+                mixed_path = _midi_record(mixed_records, ordinal, "mixed")
+                mixed_wav = temporary_dir / "mixed.wav"
+                _render_midi_to_wav(
+                    fluidsynth,
+                    mixed_path,
+                    mixed_wav,
+                    soundfont_path,
+                    effective_profile["sample_rate_hz"],
                 )
-            mix_inputs = [
-                (track, stem_wavs[track])
-                for track in selected_tracks
-            ]
-        else:
-            if mixed_records is None:
-                raise ValueError("audio rendering requires mixed MIDI records")
-            mixed_path = _midi_record(mixed_records, ordinal, "mixed")
-            mixed_wav = temporary_dir / "mixed.wav"
-            _render_midi_to_wav(
-                fluidsynth,
-                mixed_path,
-                mixed_wav,
-                soundfont_path,
-                effective_profile["sample_rate_hz"],
-            )
-            mix_inputs = [("chords", mixed_wav)]
+                mix_inputs = [("chords", mixed_wav)]
 
-        mix_path = song_dir / "mix.flac"
-        _mix_flac(ffmpeg, mix_inputs, mix_path, effective_profile)
-        return str(ordinal), {
+            mix_path = song_dir / "mix.flac"
+            _mix_flac(ffmpeg, mix_inputs, mix_path, effective_profile)
+            mix_record = _file_record(mix_path)
+
+        result_payload: dict[str, Any] = {
             "render_seed": derive_seed(seed, "audio-render", ordinal),
             "selected_roles": list(selected_roles),
             "stems": stem_records,
-            "mix": _file_record(mix_path),
             "format": effective_profile["format"],
             "sample_rate_hz": effective_profile["sample_rate_hz"],
             "bit_depth": effective_profile["bit_depth"],
@@ -355,6 +374,9 @@ def _render_song_audio(
                 for role in selected_roles
             },
         }
+        if mix_record is not None:
+            result_payload["mix"] = mix_record
+        return str(ordinal), result_payload
     finally:
         shutil.rmtree(temporary_dir, ignore_errors=False)
 
@@ -373,6 +395,7 @@ def render_audio_bundle(
     fluidsynth_bin: str = "fluidsynth",
     ffmpeg_bin: str = "ffmpeg",
     profile: Mapping[str, Any] = REFERENCE_RENDER_PROFILE,
+    render_mix: bool = True,
 ) -> dict[str, Any]:
     """Render role stems and full mixes from a MIDI manifest."""
     if isinstance(seed, bool) or not isinstance(seed, int):
@@ -421,19 +444,35 @@ def render_audio_bundle(
             soundfont_path,
             effective_profile,
             seed,
+            render_mix,
         ))
 
-    workers = min(14, len(records), os.cpu_count() or 1)
+    total = len(records)
+    log_interval = max(10, total // 20) if total > 20 else max(1, total)
+    completed = 0
+    workers = min(14, total, os.cpu_count() or 1)
     if workers > 1:
         with ProcessPoolExecutor(max_workers=workers) as executor:
             for ordinal_key, record in executor.map(
                 _render_song_audio_worker, song_args
             ):
                 audio_records[ordinal_key] = record
+                completed += 1
+                if completed % log_interval == 0 or completed == total:
+                    print(
+                        f"  [audio:render] {completed}/{total} songs synthesized ({completed/total*100:.1f}%)",
+                        flush=True,
+                    )
     else:
         for args in song_args:
             ordinal_key, record = _render_song_audio(*args)
             audio_records[ordinal_key] = record
+            completed += 1
+            if completed % log_interval == 0 or completed == total:
+                print(
+                    f"  [audio:render] {completed}/{total} songs synthesized ({completed/total*100:.1f}%)",
+                    flush=True,
+                )
 
     return {
         "renderer": {
@@ -454,6 +493,171 @@ def render_audio_bundle(
         "output_dir": str(root),
         "records": audio_records,
     }
+
+
+def _mix_song_from_stems(
+    ordinal: int,
+    selected_roles: tuple[str, ...],
+    stem_paths: Mapping[str, Path],
+    song_dir: Path,
+    ffmpeg: str,
+    effective_profile: Mapping[str, Any],
+    seed: int,
+) -> tuple[str, dict[str, Any]]:
+    song_dir.mkdir(parents=True, exist_ok=True)
+    selected_tracks = [
+        ROLE_TO_TRACK[role]
+        for role in selected_roles
+    ]
+    missing = [
+        track for track in selected_tracks
+        if track not in stem_paths or not Path(stem_paths[track]).is_file()
+    ]
+    if missing:
+        raise ValueError(
+            f"selected roles have no stem audio for song {ordinal}: {missing}"
+        )
+    mix_inputs = [
+        (track, Path(stem_paths[track]))
+        for track in selected_tracks
+    ]
+    mix_path = song_dir / "mix.flac"
+    _mix_flac(ffmpeg, mix_inputs, mix_path, effective_profile)
+    stem_records = {
+        track: _file_record(Path(stem_paths[track]))
+        for track in selected_tracks
+    }
+    return str(ordinal), {
+        "render_seed": derive_seed(seed, "audio-render", ordinal),
+        "selected_roles": list(selected_roles),
+        "stems": stem_records,
+        "mix": _file_record(mix_path),
+        "format": effective_profile["format"],
+        "sample_rate_hz": effective_profile["sample_rate_hz"],
+        "bit_depth": effective_profile["bit_depth"],
+        "channels": effective_profile["channels"],
+        "tail_policy": effective_profile["tail_policy"],
+        "role_gains_db": {
+            role: effective_profile["role_gains_db"][role]
+            for role in selected_roles
+        },
+    }
+
+
+def _mix_song_from_stems_worker(args: tuple) -> tuple[str, dict[str, Any]]:
+    return _mix_song_from_stems(*args)
+
+
+def mix_audio_bundle_from_stems(
+    manifest: Mapping[str, Any],
+    stems_records: Mapping[str, Mapping[str, Any]],
+    output_dir: str | Path,
+    *,
+    seed: int,
+    ffmpeg_bin: str = "ffmpeg",
+    profile: Mapping[str, Any] = REFERENCE_RENDER_PROFILE,
+    renderer_info: Mapping[str, Any] | None = None,
+    asset_info: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Mix pre-rendered role stems into full condition mixes."""
+    if isinstance(seed, bool) or not isinstance(seed, int):
+        raise ValueError("audio rendering seed must be an integer")
+    effective_profile = _validate_profile(profile)
+    ffmpeg = _resolve_executable(ffmpeg_bin, "ffmpeg")
+    ffmpeg_version = _tool_version(ffmpeg, "-version")
+
+    records = manifest.get("records")
+    if not isinstance(records, list) or not records:
+        raise ValueError("audio mixing requires non-empty manifest records")
+
+    root = Path(output_dir).expanduser().resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    audio_records: dict[str, Any] = {}
+
+    song_args = []
+    for raw_record in records:
+        if not isinstance(raw_record, Mapping):
+            raise ValueError("manifest records must contain objects")
+        ordinal = raw_record.get("ordinal")
+        if isinstance(ordinal, bool) or not isinstance(ordinal, int):
+            raise ValueError("manifest record ordinal must be an integer")
+        selected_roles = _selected_roles(raw_record, manifest)
+        ord_str = str(ordinal)
+
+        stem_paths_for_ordinal: dict[str, Path] = {}
+        for track in ROLE_TO_TRACK.values():
+            val = None
+            if ord_str in stems_records and isinstance(stems_records[ord_str], Mapping):
+                val = stems_records[ord_str].get(track)
+            elif track in stems_records and isinstance(stems_records[track], Mapping):
+                val = stems_records[track].get(ord_str)
+            if val is not None:
+                if isinstance(val, Mapping) and "path" in val:
+                    stem_paths_for_ordinal[track] = Path(val["path"])
+                elif isinstance(val, (str, Path)):
+                    stem_paths_for_ordinal[track] = Path(val)
+
+        song_dir = root / f"song_{ordinal}"
+        song_args.append((
+            ordinal,
+            selected_roles,
+            stem_paths_for_ordinal,
+            song_dir,
+            ffmpeg,
+            effective_profile,
+            seed,
+        ))
+
+    total = len(records)
+    log_interval = max(10, total // 20) if total > 20 else max(1, total)
+    completed = 0
+    workers = min(14, total, os.cpu_count() or 1)
+    if workers > 1:
+        with ProcessPoolExecutor(max_workers=workers) as executor:
+            for ordinal_key, record in executor.map(
+                _mix_song_from_stems_worker, song_args
+            ):
+                audio_records[ordinal_key] = record
+                completed += 1
+                if completed % log_interval == 0 or completed == total:
+                    print(
+                        f"  [audio:mix] {completed}/{total} songs mixed ({completed/total*100:.1f}%)",
+                        flush=True,
+                    )
+    else:
+        for args in song_args:
+            ordinal_key, record = _mix_song_from_stems(*args)
+            audio_records[ordinal_key] = record
+            completed += 1
+            if completed % log_interval == 0 or completed == total:
+                print(
+                    f"  [audio:mix] {completed}/{total} songs mixed ({completed/total*100:.1f}%)",
+                    flush=True,
+                )
+
+    result = {
+        "mixer": {
+            "engine": "ffmpeg",
+            "executable": ffmpeg,
+            "version": ffmpeg_version,
+            "graph": "role_gain -> amix -> loudnorm",
+        },
+        "profile": effective_profile,
+        "profile_id": effective_profile["profile_id"],
+        "seed_derivation_version": SEED_DERIVATION_VERSION,
+        "output_dir": str(root),
+        "records": audio_records,
+    }
+    if renderer_info is not None:
+        result["renderer"] = dict(renderer_info)
+    else:
+        result["renderer"] = {
+            "engine": "FluidSynth",
+            "reused_stems": True,
+        }
+    if asset_info is not None:
+        result["asset"] = dict(asset_info)
+    return result
 
 
 def _load_midi_records(
@@ -499,6 +703,11 @@ def main() -> None:
     parser.add_argument("--seed", type=int)
     parser.add_argument("--fluidsynth", default="fluidsynth")
     parser.add_argument("--ffmpeg", default="ffmpeg")
+    parser.add_argument(
+        "--no-mix",
+        action="store_true",
+        help="Skip rendering full mix.flac (stems only).",
+    )
     args = parser.parse_args()
 
     manifest_path = Path(args.manifest)
@@ -515,6 +724,7 @@ def main() -> None:
         seed=seed,
         fluidsynth_bin=args.fluidsynth,
         ffmpeg_bin=args.ffmpeg,
+        render_mix=not args.no_mix,
     )
     manifest["sound_design"] = dict(manifest.get("sound_design", {}))
     manifest["sound_design"]["audio_rendered"] = True

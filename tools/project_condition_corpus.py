@@ -10,6 +10,7 @@ import math
 import random
 import re
 import sys
+import time
 from collections import Counter
 from pathlib import Path
 from typing import Any, Iterable
@@ -86,18 +87,27 @@ def _canonical_role_paths(
     if not isinstance(declared_paths, dict):
         raise ValueError("canonical manifest has no track_outputs.paths")
     paths: dict[str, Path] = {}
+    canonical_dir = canonical_path.parent
     for track in _ROLE_TO_TRACK.values():
         raw_path = declared_paths.get(track)
         if not isinstance(raw_path, str):
             raise ValueError(
                 f"canonical manifest is missing the {track} role path"
             )
-        path = Path(raw_path)
+        candidate = canonical_dir / Path(raw_path).name
+        if candidate.is_file():
+            path = candidate
+        else:
+            path = Path(raw_path)
         if not path.is_file():
             raise FileNotFoundError(f"canonical role file is missing: {path}")
         paths[track] = path
     mixed_path = declared_paths.get("mixed")
-    if isinstance(mixed_path, str) and Path(mixed_path).resolve() != canonical_path.resolve():
+    if (
+        isinstance(mixed_path, str)
+        and Path(mixed_path).resolve() != canonical_path.resolve()
+        and Path(mixed_path).name != canonical_path.name
+    ):
         raise ValueError(
             "canonical score path does not match track_outputs.paths.mixed"
         )
@@ -107,7 +117,7 @@ def _canonical_role_paths(
 def _validate_canonical(
     canonical_path: Path,
     manifest: dict[str, Any],
-) -> tuple[list[dict[str, Any]], dict[str, dict[int, str]], Path]:
+) -> tuple[list[dict[str, Any]], dict[str, dict[int, str]], dict[str, Path]]:
     records = manifest.get("records")
     if not isinstance(records, list):
         raise ValueError("canonical manifest records must be a list")
@@ -145,7 +155,7 @@ def _validate_canonical(
                 raise ValueError(
                     f"canonical {track} hash mismatch for song {ordinal}"
                 )
-    return records, blocks
+    return records, blocks, role_paths
 
 
 def _percussion_inclusion_plan(
@@ -247,6 +257,172 @@ def _write_json(path: Path, value: dict[str, Any]) -> None:
     )
 
 
+def _resolve_or_render_stems(
+    *,
+    canonical_path: Path,
+    canonical_manifest: dict[str, Any],
+    records: list[dict[str, Any]],
+    role_paths: dict[str, Path],
+    output_root: Path,
+    seed: int,
+    soundfont: str | Path | None,
+    stems_dir: str | Path | None = None,
+    fluidsynth_bin: str = "fluidsynth",
+    ffmpeg_bin: str = "ffmpeg",
+) -> dict[str, Any]:
+    if soundfont is None:
+        raise ValueError("stage 'audio' requires a SoundFont path")
+    soundfont_path = Path(soundfont).expanduser().resolve()
+    if not soundfont_path.is_file():
+        raise FileNotFoundError(f"SoundFont is missing: {soundfont_path}")
+
+    # 1. Check if canonical manifest has audio already rendered
+    canonical_audio = canonical_manifest.get("sound_design", {}).get("audio")
+    if (
+        isinstance(canonical_audio, dict)
+        and canonical_manifest.get("sound_design", {}).get("audio_rendered")
+        and isinstance(canonical_audio.get("records"), dict)
+    ):
+        audio_records = canonical_audio["records"]
+        all_present = True
+        for rec in records:
+            ord_str = str(rec["ordinal"])
+            ord_audio = audio_records.get(ord_str)
+            if not isinstance(ord_audio, dict) or not isinstance(ord_audio.get("stems"), dict):
+                all_present = False
+                break
+            for track, stem_info in ord_audio["stems"].items():
+                if not isinstance(stem_info, dict) or not Path(stem_info.get("path", "")).is_file():
+                    all_present = False
+                    break
+            if not all_present:
+                break
+        if all_present:
+            stems_records = {
+                ord_str: audio_records[ord_str]["stems"]
+                for ord_str in audio_records
+            }
+            return {
+                "stems_records": stems_records,
+                "renderer": canonical_audio.get("renderer"),
+                "asset": canonical_audio.get("asset"),
+                "stems_dir": Path(canonical_audio.get("output_dir", output_root / "_stems")),
+            }
+
+    # 2. Check if stems_dir has cached stems_manifest.json
+    resolved_stems_dir = (
+        Path(stems_dir).expanduser().resolve()
+        if stems_dir is not None
+        else (output_root / "_stems").resolve()
+    )
+    resolved_stems_dir.mkdir(parents=True, exist_ok=True)
+    stems_manifest_path = resolved_stems_dir / "stems_manifest.json"
+    if stems_manifest_path.is_file():
+        try:
+            cached = json.loads(stems_manifest_path.read_text(encoding="utf-8"))
+            audio_records = cached.get("audio", {}).get("records", {})
+            all_present = True
+            for rec in records:
+                ord_str = str(rec["ordinal"])
+                ord_audio = audio_records.get(ord_str)
+                if not isinstance(ord_audio, dict) or not isinstance(ord_audio.get("stems"), dict):
+                    all_present = False
+                    break
+                for track, stem_info in ord_audio["stems"].items():
+                    if not isinstance(stem_info, dict) or not Path(stem_info.get("path", "")).is_file():
+                        all_present = False
+                        break
+                if not all_present:
+                    break
+            if all_present:
+                print(
+                    f"[stems] Reusing verified cache of {len(records)} stem bundles in {resolved_stems_dir}",
+                    flush=True,
+                )
+                stems_records = {
+                    ord_str: audio_records[ord_str]["stems"]
+                    for ord_str in audio_records
+                }
+                return {
+                    "stems_records": stems_records,
+                    "renderer": cached.get("audio", {}).get("renderer"),
+                    "asset": cached.get("audio", {}).get("asset"),
+                    "stems_dir": resolved_stems_dir,
+                }
+        except Exception:
+            pass
+
+    # 3. Render canonical role MIDIs and audio stems
+    from render import render_midi_bundle
+    from audio_render import render_audio_bundle
+
+    midi_output = resolved_stems_dir / "midi"
+    print(
+        f"[stems] Rendering role MIDI tracks for {len(records)} songs into {midi_output}...",
+        flush=True,
+    )
+    tempo_by_ordinal = {
+        record["ordinal"]: record.get("bpm", 120)
+        for record in records
+    }
+    role_midi_records = render_midi_bundle(
+        role_paths,
+        midi_output,
+        seed=seed,
+        tempo_by_ordinal=tempo_by_ordinal,
+    )
+
+    all_roles_manifest = {
+        "seed": seed,
+        "selected_roles": list(_ALL_ROLES),
+        "records": [
+            {
+                "ordinal": record["ordinal"],
+                "selected_roles": list(_ALL_ROLES),
+            }
+            for record in records
+        ],
+    }
+    audio_output = resolved_stems_dir / "audio"
+    print(
+        f"[stems] Synthesizing audio stems for {len(records)} songs into {audio_output}...",
+        flush=True,
+    )
+    stems_audio = render_audio_bundle(
+        all_roles_manifest,
+        role_midi_records,
+        audio_output,
+        soundfont=soundfont_path,
+        seed=seed,
+        fluidsynth_bin=fluidsynth_bin,
+        ffmpeg_bin=ffmpeg_bin,
+        render_mix=False,
+    )
+
+    _write_json(
+        stems_manifest_path,
+        {
+            "canonical_path": str(canonical_path.resolve()),
+            "seed": seed,
+            "audio": stems_audio,
+        },
+    )
+    print(
+        f"[stems] Stems manifest successfully written to {stems_manifest_path}.",
+        flush=True,
+    )
+    stems_records = {
+        str(rec["ordinal"]): stems_audio["records"][str(rec["ordinal"])]["stems"]
+        for rec in records
+    }
+    return {
+        "stems_records": stems_records,
+        "renderer": stems_audio.get("renderer"),
+        "asset": stems_audio.get("asset"),
+        "stems_dir": resolved_stems_dir,
+    }
+
+
 def _project_one(
     *,
     condition: str,
@@ -255,15 +431,19 @@ def _project_one(
     canonical_manifest: dict[str, Any],
     records: list[dict[str, Any]],
     blocks: dict[str, dict[int, str]],
+    role_paths: dict[str, Path],
     output_root: Path,
     seed: int,
     melody_percent: float,
     percussion_percent: float,
     stage: str,
     soundfont: str | Path | None,
+    stems_data: dict[str, Any] | None = None,
     fluidsynth_bin: str,
     ffmpeg_bin: str,
 ) -> Path:
+    start_time = time.time()
+    print(f"\n[{condition}] Stage '{stage}': initializing condition projection...", flush=True)
     selected_roles, selection = _condition_roles(
         condition,
         records,
@@ -276,6 +456,7 @@ def _project_one(
     output_path = condition_dir / "scores.txt"
     manifest_path = output_path.with_name(output_path.name + ".manifest.json")
 
+    print(f"  [{condition}] (1/3) Writing projected scores to {output_path}...", flush=True)
     output_blocks: list[str] = []
     projected_records: list[dict[str, Any]] = []
     for ordinal, record in enumerate(records):
@@ -341,11 +522,7 @@ def _project_one(
         "source_manifest": str(canonical_manifest_path.resolve()),
         "source_manifest_sha256": canonical_manifest_hash,
         "source_role_paths": {
-            track: str(
-                Path(
-                    canonical_manifest["track_outputs"]["paths"][track]
-                ).resolve()
-            )
+            track: str(role_paths[track].resolve())
             for track in _ROLE_TO_TRACK.values()
         },
         "selection": selection,
@@ -381,6 +558,7 @@ def _project_one(
         from render import render_midi_scores
 
         midi_output = condition_dir / "midi"
+        print(f"  [{condition}] (2/3) Rendering condition MIDI to {midi_output}...", flush=True)
         midi_records = render_midi_scores(
             output_path,
             midi_output,
@@ -397,18 +575,33 @@ def _project_one(
             "records": midi_records,
         }
         if stage == "audio":
-            if soundfont is None:
-                raise ValueError("stage 'audio' requires a SoundFont path")
-            from audio_render import render_audio_bundle
+            if stems_data is None:
+                if soundfont is None:
+                    raise ValueError("stage 'audio' requires a SoundFont path")
+                stems_data = _resolve_or_render_stems(
+                    canonical_path=canonical_path,
+                    canonical_manifest=canonical_manifest,
+                    records=records,
+                    role_paths=role_paths,
+                    output_root=output_root,
+                    seed=seed,
+                    soundfont=soundfont,
+                    stems_dir=None,
+                    fluidsynth_bin=fluidsynth_bin,
+                    ffmpeg_bin=ffmpeg_bin,
+                )
+            from audio_render import mix_audio_bundle_from_stems
 
-            audio = render_audio_bundle(
+            audio_output = condition_dir / "audio"
+            print(f"  [{condition}] (3/3) Mixing condition audio from stems to {audio_output}...", flush=True)
+            audio = mix_audio_bundle_from_stems(
                 manifest,
-                {"mixed": midi_records},
-                condition_dir / "audio",
-                soundfont=soundfont,
+                stems_data["stems_records"],
+                audio_output,
                 seed=seed,
-                fluidsynth_bin=fluidsynth_bin,
                 ffmpeg_bin=ffmpeg_bin,
+                renderer_info=stems_data.get("renderer"),
+                asset_info=stems_data.get("asset"),
             )
             manifest["sound_design"]["stage"] = "audio"
             manifest["sound_design"]["audio_rendered"] = True
@@ -422,6 +615,8 @@ def _project_one(
                 record["audio_rendered"] = True
                 record["audio"] = audio["records"][str(record["ordinal"])]
         _write_json(manifest_path, manifest)
+    elapsed = time.time() - start_time
+    print(f"[{condition}] Completed condition '{condition}' in {elapsed:.1f}s.\n", flush=True)
     return output_path
 
 
@@ -436,6 +631,7 @@ def project_conditions(
     percussion_percent: float = 70.0,
     stage: str = "score",
     soundfont: str | Path | None = None,
+    stems_dir: str | Path | None = None,
     fluidsynth_bin: str = "fluidsynth",
     ffmpeg_bin: str = "ffmpeg",
 ) -> list[Path]:
@@ -451,7 +647,7 @@ def project_conditions(
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if not isinstance(manifest, dict):
         raise ValueError("canonical manifest must be a JSON object")
-    records, blocks = _validate_canonical(canonical_path, manifest)
+    records, blocks, role_paths = _validate_canonical(canonical_path, manifest)
     resolved_seed = manifest.get("seed") if seed is None else seed
     if not isinstance(resolved_seed, int) or isinstance(resolved_seed, bool):
         raise ValueError("canonical manifest or --seed must provide an integer seed")
@@ -470,7 +666,29 @@ def project_conditions(
             raise FileNotFoundError(f"SoundFont is missing: {soundfont}")
     output_root = Path(output_root)
     output_root.mkdir(parents=True, exist_ok=True)
-    return [
+    print(
+        f"[project_conditions] Projecting {len(selected_conditions)} condition(s): {', '.join(selected_conditions)} (stage: {stage})",
+        flush=True,
+    )
+    stems_data = None
+    if stage == "audio":
+        print(
+            f"[audio] Resolving shared audio stems in {stems_dir or output_root / '_stems'}...",
+            flush=True,
+        )
+        stems_data = _resolve_or_render_stems(
+            canonical_path=canonical_path,
+            canonical_manifest=manifest,
+            records=records,
+            role_paths=role_paths,
+            output_root=output_root,
+            seed=resolved_seed,
+            soundfont=soundfont,
+            stems_dir=stems_dir,
+            fluidsynth_bin=fluidsynth_bin,
+            ffmpeg_bin=ffmpeg_bin,
+        )
+    results = [
         _project_one(
             condition=condition,
             canonical_path=canonical_path,
@@ -478,17 +696,24 @@ def project_conditions(
             canonical_manifest=manifest,
             records=records,
             blocks=blocks,
+            role_paths=role_paths,
             output_root=output_root,
             seed=resolved_seed,
             melody_percent=melody_percent,
             percussion_percent=percussion_percent,
             stage=stage,
             soundfont=soundfont,
+            stems_data=stems_data,
             fluidsynth_bin=fluidsynth_bin,
             ffmpeg_bin=ffmpeg_bin,
         )
         for condition in selected_conditions
     ]
+    print(
+        f"[project_conditions] Successfully finished all {len(selected_conditions)} condition(s).",
+        flush=True,
+    )
+    return results
 
 
 def main() -> None:
@@ -519,6 +744,10 @@ def main() -> None:
         help="SoundFont path required when --stage audio is selected.",
     )
     parser.add_argument(
+        "--stems-dir",
+        help="Directory to store or reuse shared audio stems (defaults to <out-dir>/_stems).",
+    )
+    parser.add_argument(
         "--fluidsynth",
         default="fluidsynth",
         help="FluidSynth executable or full path.",
@@ -539,6 +768,7 @@ def main() -> None:
         percussion_percent=args.percussion_percent,
         stage=args.stage,
         soundfont=args.soundfont,
+        stems_dir=args.stems_dir,
         fluidsynth_bin=args.fluidsynth,
         ffmpeg_bin=args.ffmpeg,
     )
