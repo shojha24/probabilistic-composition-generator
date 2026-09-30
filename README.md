@@ -821,5 +821,12 @@ The project has these known limits:
   complete canonical coverage is not available in the reviewed sources.
 - A narrow pop-synth context can still fail on a dense major seventh,
   ninth, sharp-eleventh chord.
+- In `extract_distributions.py`, Harte chord parsing maps standalone 6ths
+  (`6`, `maj6`, `min6`) to `seventh="bb7"`, and drops conflicting tokens when
+  both a 6th and 7th occur in the same chord (e.g. `6(7)` or `7(6)`). Future
+  revisions should parse these into both a 7th (`seventh`) and a 13th
+  (`thirteenth`), allowing both degrees to populate the training distributions
+  and be sampled together during generation without competing for the same
+  7th slot.
 
 Future work includes richer room, EQ, dynamics, and audio QA profiles.
