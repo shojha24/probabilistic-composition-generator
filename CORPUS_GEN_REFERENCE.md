@@ -11,13 +11,14 @@ ffmpeg -version
 test -f /usr/share/sounds/sf2/FluidR3_GM.sf2 && echo "SoundFont found"
 
 # 1. Generate the quota-aware target corpus:
-#    5,000 songs total (2,500 per genre) and 500,000 chord events total.
+#    5,000 songs total (3,500 pop/rock, 1,500 jazz; 70/30 split) and 500,000 chord events total.
 #    Output directories will be:
 #      ./gen/acr-target-500k/jazz-labels
 #      ./gen/acr-target-500k/pop-rock-labels
 python3 target_corpus_gen.py \
   --target-events 500000 \
-  --target-songs 2500 \
+  --total-songs 5000 \
+  --pop-rock-ratio 0.7 \
   --debug \
   --seed 15001 \
   --dist-dir ./distributions \

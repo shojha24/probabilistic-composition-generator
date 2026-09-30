@@ -48,9 +48,10 @@ GUITAR_MAX_ACTIVE_EXTENSIONS = 2
 # §08 corpus and minimum-coverage targets. Natural events count toward these
 # minimums; only the remaining deficit is eligible for targeted sampling.
 TARGET_TOTAL_EVENTS = 250_000
+DEFAULT_POP_ROCK_RATIO = 0.70
 TARGET_EVENTS_BY_GENRE: Dict[str, int] = {
-    "jazz": 125_000,
-    "pop_rock": 125_000,
+    "pop_rock": 175_000,
+    "jazz": 75_000,
 }
 TARGET_LABEL_DIRS: Dict[str, str] = {
     genre: f"target-{directory}"
@@ -58,51 +59,63 @@ TARGET_LABEL_DIRS: Dict[str, str] = {
 }
 RARE_TRIAD_TARGETS: Dict[str, Dict[str, int]] = {
     "jazz": {
-        "sus2": 1_000,
-        "augmented": 1_500,
-        "diminished": 5_000,
+        "sus2": 1_200,
+        "augmented": 1_200,
+        "diminished": 3_500,
         "1": 0,
-        "5": 1_000,
-        "sus4": 3_000,
+        "5": 800,
+        "sus4": 2_500,
     },
     "pop_rock": {
-        "sus2": 1_000,
-        "augmented": 750,
-        "diminished": 1_500,
-        "1": 2_000,
-        "5": 2_500,
-        "sus4": 3_000,
+        "sus2": 3_500,
+        "augmented": 1_200,
+        "diminished": 2_500,
+        "1": 3_000,
+        "5": 4_500,
+        "sus4": 6_000,
     },
 }
 RARE_EXTENSION_TARGETS: Dict[str, Dict[str, int]] = {
     "jazz": {
-        "b9": 3_500,
-        "#9": 1_000,
-        "11": 2_500,
-        "#11": 2_000,
+        "b7": 40_000,
+        "b9": 2_000,
+        "#9": 1_500,
+        "11": 2_000,
+        "#11": 1_500,
         "13": 1_500,
-        "b13": 1_000,
+        "b13": 1_500,
     },
     "pop_rock": {
-        "b9": 200,
-        "#9": 750,
-        "11": 1_250,
-        "#11": 200,
-        "13": 500,
-        "b13": 150,
+        "b7": 50_000,
+        "b9": 700,
+        "#9": 4_000,
+        "11": 2_500,
+        "#11": 1_000,
+        "13": 1_200,
+        "b13": 1_200,
     },
 }
 DENSE_EXTENSION_TARGETS: Dict[str, Dict[int, int]] = {
-    genre: {2: 15_000, 3: 3_000, 4: 1_000}
-    for genre in VALID_GENRES
+    "pop_rock": {2: 15_000, 3: 3_000, 4: 800},
+    "jazz": {2: 15_000, 3: 3_000, 4: 1_000},
 }
 EXTENSION_TARGET_SLOTS = {
+    "b7": "seventh",
+    "7": "seventh",
+    "bb7": "seventh",
     "b9": "ninth",
     "#9": "ninth",
     "11": "eleventh",
     "#11": "eleventh",
     "13": "thirteenth",
     "b13": "thirteenth",
+}
+
+ALTERED_EXTENSION_PREFERRED_7TH: Dict[str, Tuple[str, ...]] = {
+    "#9": ("b7",),
+    "b9": ("b7",),
+    "b13": ("b7",),
+    "#11": ("b7", "7"),
 }
 
 
@@ -245,6 +258,14 @@ def walk_extension_trie_target(
                     maximum_active,
                 )
             }
+            if depth == 0 and target_value in ALTERED_EXTENSION_PREFERRED_7TH:
+                preferred = ALTERED_EXTENSION_PREFERRED_7TH[target_value]
+                pref_dist = {
+                    child: prob for child, prob in dist.items()
+                    if child in preferred
+                }
+                if pref_dist:
+                    dist = pref_dist
         else:
             dist = {
                 child: probability
@@ -326,11 +347,10 @@ class GenerationQuota:
 
         def scaled(source: Dict[str, int]) -> Dict[str, int]:
             return {
-                key: (
-                    value
-                    if total_events >= reference_events
-                    else (value * total_events + reference_events - 1)
-                    // reference_events
+                key: max(
+                    1,
+                    (value * total_events + reference_events // 2)
+                    // reference_events,
                 )
                 for key, value in source.items()
                 if value > 0
@@ -517,7 +537,7 @@ class TargetChordGenerator(ChordGenerator):
         target_value: str,
     ) -> Optional[dict]:
         """Find the narrowest trie that attests a requested extension."""
-        if triad in ("1", "5"):
+        if triad in ("1", "5") or (triad == "augmented" and target_value == "b13"):
             return None
 
         cache_key = (state, target_value)
@@ -702,15 +722,15 @@ class TargetChordGenerator(ChordGenerator):
             chosen_state, pending_target, _target, _root_count, _weight = chosen_path
             return chosen_state, pending_target is None, pending_target
 
-        due_extensions = (
-            []
-            if self.instrument_profile == "guitar"
-            else [
-                value
-                for value in quota.extension_targets
-                if quota.is_due("extension", value)
-            ]
-        )
+        due_extensions = [
+            value
+            for value in quota.extension_targets
+            if quota.is_due("extension", value)
+            and (
+                self.instrument_profile != "guitar"
+                or EXTENSION_TARGET_SLOTS[value] == "seventh"
+            )
+        ]
         due_dense = (
             []
             if self.instrument_profile == "guitar"
@@ -803,13 +823,17 @@ class TargetChordGenerator(ChordGenerator):
             quota is None
             or not quota.can_target()
             or triad in ("1", "5")
-            or self.instrument_profile == "guitar"
         ):
             return None
 
         candidates = []
         for value in quota.extension_targets:
             if not quota.is_due("extension", value):
+                continue
+            if (
+                self.instrument_profile == "guitar"
+                and EXTENSION_TARGET_SLOTS[value] != "seventh"
+            ):
                 continue
             trie = self._target_extension_trie(state, triad, value)
             if trie is None:
@@ -1141,10 +1165,11 @@ class TargetChordGenerator(ChordGenerator):
 
 
 def generate_target_corpus(
-    events_per_genre: int = TARGET_EVENTS_BY_GENRE["jazz"],
+    events_per_genre: int = TARGET_EVENTS_BY_GENRE["pop_rock"],
     songs_per_genre: int = 100,
     *,
     events_by_genre: Optional[Dict[str, int]] = None,
+    songs_by_genre: Optional[Dict[str, int]] = None,
     tonic_pc: int | str = 0,
     bpm: int = 120,
     temperature: Optional[float] = None,
@@ -1179,8 +1204,27 @@ def generate_target_corpus(
             )
         if any(value <= 0 for value in events_by_genre.values()):
             raise ValueError("events_by_genre values must be positive")
-    if any(value < songs_per_genre for value in events_by_genre.values()):
-        raise ValueError("each genre event budget must be at least songs_per_genre")
+
+    if songs_by_genre is None:
+        songs_by_genre = {
+            genre: songs_per_genre
+            for genre in VALID_GENRES
+        }
+    else:
+        unknown_songs = set(songs_by_genre) - set(VALID_GENRES)
+        missing_songs = set(VALID_GENRES) - set(songs_by_genre)
+        if unknown_songs or missing_songs:
+            raise ValueError(
+                f"songs_by_genre must contain exactly {VALID_GENRES}"
+            )
+        if any(value <= 0 for value in songs_by_genre.values()):
+            raise ValueError("songs_by_genre values must be positive")
+
+    for genre in VALID_GENRES:
+        if events_by_genre[genre] < songs_by_genre[genre]:
+            raise ValueError(
+                f"event budget for {genre} ({events_by_genre[genre]}) must be at least song count ({songs_by_genre[genre]})"
+            )
     bpm_lo, bpm_hi = random_bpm_range
     if bpm_lo > bpm_hi:
         bpm_lo, bpm_hi = bpm_hi, bpm_lo
@@ -1197,10 +1241,11 @@ def generate_target_corpus(
     result: Dict[str, List[List[dict]]] = {}
     for genre_index, genre in enumerate(VALID_GENRES):
         event_budget = events_by_genre[genre]
+        num_songs = songs_by_genre[genre]
         quota = GenerationQuota.for_genre(genre, event_budget)
         song_profiles = [
             VOICER_FAMILIES[index % len(VOICER_FAMILIES)]
-            for index in range(songs_per_genre)
+            for index in range(num_songs)
         ]
         generator_params = (
             GenParams(**vars(params)) if params is not None else GenParams()
@@ -1213,7 +1258,7 @@ def generate_target_corpus(
         generator = TargetChordGenerator(
             genre=genre,
             tonic_pc=tonic_pc,
-            num_chords=event_budget // songs_per_genre,
+            num_chords=event_budget // num_songs,
             temperature=temperature,
             self_transition_discount=self_transition_discount,
             seed=genre_seed,
@@ -1229,20 +1274,20 @@ def generate_target_corpus(
         )
         property_rng = random.Random(property_seed)
         song_tonics = (
-            [property_rng.randint(0, 11) for _ in range(songs_per_genre)]
+            [property_rng.randint(0, 11) for _ in range(num_songs)]
             if random_tonic
             else None
         )
         song_bpms = (
             [
                 property_rng.randint(bpm_lo, bpm_hi)
-                for _ in range(songs_per_genre)
+                for _ in range(num_songs)
             ]
             if random_bpm
             else None
         )
         songs = generator.generate_batch(
-            songs_per_genre,
+            num_songs,
             event_budget,
             quota=quota,
             song_tonics=song_tonics,
@@ -1300,7 +1345,19 @@ def parse_args():
         dest="target_songs",
         type=int,
         default=100,
-        help="Songs per genre.",
+        help="Songs per genre (used when --total-songs is not specified).",
+    )
+    parser.add_argument(
+        "--total-songs",
+        type=int,
+        default=None,
+        help="Total songs across genres; split according to --pop-rock-ratio.",
+    )
+    parser.add_argument(
+        "--pop-rock-ratio",
+        type=float,
+        default=DEFAULT_POP_ROCK_RATIO,
+        help="Proportion of total events and songs allocated to pop/rock (default 0.70).",
     )
     parser.add_argument(
         "--tonic",
@@ -1345,16 +1402,38 @@ def main() -> None:
 
     if args.target_events <= 0:
         raise ValueError("target event count must be positive")
-    if args.target_songs <= 0:
-        raise ValueError("target song count must be positive")
+    if not (0.0 < args.pop_rock_ratio < 1.0):
+        raise ValueError("pop_rock_ratio must be between 0.0 and 1.0 exclusive")
 
-    jazz_events = args.target_events // 2
+    pop_rock_events = int(round(args.target_events * args.pop_rock_ratio))
+    jazz_events = args.target_events - pop_rock_events
     events_by_genre = {
+        "pop_rock": pop_rock_events,
         "jazz": jazz_events,
-        "pop_rock": args.target_events - jazz_events,
     }
-    if min(events_by_genre.values()) < args.target_songs:
-        raise ValueError("target event count must provide at least one event per song")
+
+    if args.total_songs is not None:
+        if args.total_songs <= 0:
+            raise ValueError("total song count must be positive")
+        pop_rock_songs = int(round(args.total_songs * args.pop_rock_ratio))
+        jazz_songs = args.total_songs - pop_rock_songs
+        songs_by_genre = {
+            "pop_rock": pop_rock_songs,
+            "jazz": jazz_songs,
+        }
+    else:
+        if args.target_songs <= 0:
+            raise ValueError("target song count must be positive")
+        songs_by_genre = {
+            genre: args.target_songs
+            for genre in VALID_GENRES
+        }
+
+    for genre, event_count in events_by_genre.items():
+        if event_count < songs_by_genre[genre]:
+            raise ValueError(
+                f"target event count for {genre} ({event_count}) must provide at least one event per song ({songs_by_genre[genre]})"
+            )
 
     if args.out_dir is None:
         output_dirs = {
@@ -1380,12 +1459,13 @@ def main() -> None:
     random_bpm = args.random_bpm or args.debug
     print(
         f"Generating {args.target_events} target event(s) "
-        f"({jazz_events} jazz, {args.target_events - jazz_events} pop/rock) "
+        f"({events_by_genre['pop_rock']} pop/rock, {events_by_genre['jazz']} jazz; "
+        f"{args.pop_rock_ratio * 100:.0f}/{(1.0 - args.pop_rock_ratio) * 100:.0f} split) "
         f"-> {output_description}"
     )
     generate_target_corpus(
-        songs_per_genre=args.target_songs,
         events_by_genre=events_by_genre,
+        songs_by_genre=songs_by_genre,
         tonic_pc=fixed_tonic,
         bpm=args.bpm,
         temperature=args.temperature,
