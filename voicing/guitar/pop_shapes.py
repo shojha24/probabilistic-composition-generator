@@ -47,12 +47,19 @@ _E_SHAPES = [
            [("minor", "N", "N", "N", "N")]),
     _shape("E-barre-dom7", 6, [0, 2, 0, 1, 0, 0], _E_DEG_SEV,
            [("major", "b7", "N", "N", "N")]),
+    # Low-interval-limit safe 5th-omitted variants (spec 02 §3.2/§3.3):
+    # In low registers (e.g. B:7/Bb:7), the 5th on string 5/4 forms a minor 3rd below MIDI 55
+    # with the 7th. Muting string 5/4 yields standard idiomatic comping voicings that satisfy LIL.
+    _shape("E-barre-dom7-no5", 6, [0, X, 0, 1, 0, 0], ("root", None, "7th", "3rd", "5th", "root"),
+           [("major", "b7", "N", "N", "N")]),
     # maj7 hazard (spec 02 §7): high-E root sits 1 semitone above the maj7
     # 7th on the B string in the naive open-shape layout -- muted here to
     # avoid the doubled-root maj7 trap (spec 07 §5.2).
     _shape("E-barre-maj7", 6, [0, 2, 1, 1, 0, X], ("root", "5th", "7th", "3rd", "5th", None),
            [("major", "7", "N", "N", "N")]),
     _shape("E-barre-min7", 6, [0, 2, 0, 0, 0, 0], _E_DEG_SEV,
+           [("minor", "b7", "N", "N", "N")]),
+    _shape("E-barre-min7-no5", 6, [0, X, 0, 0, 0, 0], ("root", None, "7th", "3rd", "5th", "root"),
            [("minor", "b7", "N", "N", "N")]),
     _shape("E-barre-m7b5", 6, [0, 1, 0, 0, X, 0], ("root", "5th", "7th", "3rd", None, "root"),
            [("diminished", "b7", "N", "N", "N")]),
@@ -71,9 +78,13 @@ _A_SHAPES = [
            [("minor", "N", "N", "N", "N")]),
     _shape("A-barre-dom7", 5, [X, 0, 2, 0, 2, 0], _A_DEG_SEV,
            [("major", "b7", "N", "N", "N")]),
+    _shape("A-barre-dom7-no5", 5, [X, 0, X, 0, 2, 0], (None, "root", None, "7th", "3rd", "5th"),
+           [("major", "b7", "N", "N", "N")]),
     _shape("A-barre-maj7", 5, [X, 0, 2, 1, 2, 0], _A_DEG_SEV,
            [("major", "7", "N", "N", "N")]),
     _shape("A-barre-min7", 5, [X, 0, 2, 0, 1, 0], _A_DEG_SEV,
+           [("minor", "b7", "N", "N", "N")]),
+    _shape("A-barre-min7-no5", 5, [X, 0, X, 0, 1, 0], (None, "root", None, "7th", "3rd", "5th"),
            [("minor", "b7", "N", "N", "N")]),
     _shape("A-barre-m7b5", 5, [X, 0, 1, 0, 1, X], (None, "root", "5th", "7th", "3rd", None),
            [("diminished", "b7", "N", "N", "N")]),

@@ -21,7 +21,10 @@ _DEFAULT_GEN_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
 @lru_cache(maxsize=1)
 def _load_all_events(gen_dir: str = _DEFAULT_GEN_DIR) -> tuple:
     events = []
-    for path in sorted(glob.glob(os.path.join(gen_dir, "*-labels", "*.json"))):
+    paths = sorted(glob.glob(os.path.join(gen_dir, "*-labels", "*.json")))
+    if not paths:
+        paths = sorted(glob.glob(os.path.join(gen_dir, "*", "*-labels", "*.json")))
+    for path in paths:
         with open(path) as f:
             d = json.load(f)
         for c in d.get("chords", []):

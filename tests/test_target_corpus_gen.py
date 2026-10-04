@@ -34,12 +34,12 @@ def test_b7_quota_and_extension_slots():
     assert EXTENSION_TARGET_SLOTS["b7"] == "seventh"
     assert "b7" in RARE_EXTENSION_TARGETS["pop_rock"]
     assert "b7" in RARE_EXTENSION_TARGETS["jazz"]
-    assert RARE_EXTENSION_TARGETS["pop_rock"]["b7"] == 50_000
+    assert RARE_EXTENSION_TARGETS["pop_rock"]["b7"] == 90_000
     assert RARE_EXTENSION_TARGETS["jazz"]["b7"] == 40_000
 
 
 def test_triad_quotas_updated():
-    assert RARE_TRIAD_TARGETS["pop_rock"]["sus2"] == 3_500
+    assert RARE_TRIAD_TARGETS["pop_rock"]["sus2"] == 7_000
     assert RARE_TRIAD_TARGETS["pop_rock"]["sus4"] == 6_000
     assert RARE_TRIAD_TARGETS["pop_rock"]["augmented"] == 1_200
     assert RARE_TRIAD_TARGETS["pop_rock"]["diminished"] == 2_500
@@ -48,13 +48,13 @@ def test_triad_quotas_updated():
 def test_linear_quota_scaling():
     # Test scaled for double reference
     quota_2x = GenerationQuota.for_genre("pop_rock", 350_000)
-    assert quota_2x.extension_targets["b7"] == 100_000
-    assert quota_2x.triad_targets["sus2"] == 7_000
+    assert quota_2x.extension_targets["b7"] == 180_000
+    assert quota_2x.triad_targets["sus2"] == 14_000
 
     # Test scaled for smaller batch
     quota_small = GenerationQuota.for_genre("pop_rock", 1_750)
-    assert quota_small.extension_targets["b7"] == 500
-    assert quota_small.triad_targets["sus2"] == 35
+    assert quota_small.extension_targets["b7"] == 900
+    assert quota_small.triad_targets["sus2"] == 70
 
 
 def test_altered_extension_conditioning():

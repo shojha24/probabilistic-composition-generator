@@ -67,7 +67,7 @@ RARE_TRIAD_TARGETS: Dict[str, Dict[str, int]] = {
         "sus4": 2_500,
     },
     "pop_rock": {
-        "sus2": 3_500,
+        "sus2": 7_000,
         "augmented": 1_200,
         "diminished": 2_500,
         "1": 3_000,
@@ -86,7 +86,7 @@ RARE_EXTENSION_TARGETS: Dict[str, Dict[str, int]] = {
         "b13": 1_500,
     },
     "pop_rock": {
-        "b7": 50_000,
+        "b7": 90_000,
         "b9": 700,
         "#9": 4_000,
         "11": 2_500,
@@ -356,12 +356,21 @@ class GenerationQuota:
                 if value > 0
             }
 
+        ext_targets = scaled(RARE_EXTENSION_TARGETS[genre])
+        max_target_ratio = (
+            max(ext_targets.values()) / total_events
+            if ext_targets and total_events > 0
+            else 0.0
+        )
+        min_spacing = 1 if max_target_ratio > 0.35 else 2
+
         return cls(
             genre=genre,
             total_events=total_events,
             triad_targets=scaled(RARE_TRIAD_TARGETS[genre]),
-            extension_targets=scaled(RARE_EXTENSION_TARGETS[genre]),
+            extension_targets=ext_targets,
             dense_targets=scaled(DENSE_EXTENSION_TARGETS[genre]),
+            min_target_spacing=min_spacing,
         )
 
     def remaining(self, kind: str, key: str) -> int:
@@ -991,23 +1000,44 @@ class TargetChordGenerator(ChordGenerator):
             else:
                 target_tuple = None
                 if state_hist.pending_target_state is None:
-                    target = self._target_extension(
-                        chosen_state, triad, quota
-                    )
-                    if target is not None:
-                        target_slot, target_value, target_trie = target
-                        target_tuple = walk_extension_trie_target(
-                            target_trie,
-                            bass_str,
-                            state_hist.ext_prev_str,
-                            target_slot,
-                            target_value,
-                            self.params,
-                            self.rng,
-                            self._max_active_extensions(),
+                    dense_due = (
+                        self.instrument_profile != "guitar"
+                        and any(quota.dense_is_due(m) for m in quota.dense_targets)
+                    ) if quota is not None else False
+                    if dense_due:
+                        dense_target = self._target_dense_extension(
+                            chosen_state, triad, quota
                         )
+                        if dense_target is not None:
+                            minimum_active, dense_trie = dense_target
+                            target_tuple = walk_extension_trie_density(
+                                dense_trie,
+                                bass_str,
+                                state_hist.ext_prev_str,
+                                minimum_active,
+                                self.params,
+                                self.rng,
+                            )
+                            targeted_dense = target_tuple is not None
 
                     if target_tuple is None:
+                        target = self._target_extension(
+                            chosen_state, triad, quota
+                        )
+                        if target is not None:
+                            target_slot, target_value, target_trie = target
+                            target_tuple = walk_extension_trie_target(
+                                target_trie,
+                                bass_str,
+                                state_hist.ext_prev_str,
+                                target_slot,
+                                target_value,
+                                self.params,
+                                self.rng,
+                                self._max_active_extensions(),
+                            )
+
+                    if target_tuple is None and not dense_due:
                         dense_target = self._target_dense_extension(
                             chosen_state, triad, quota
                         )
