@@ -337,20 +337,27 @@ class GenerationQuota:
             raise ValueError(f"Unknown extension target(s): {sorted(unknown)}")
 
     @classmethod
-    def for_genre(cls, genre: str, total_events: int) -> "GenerationQuota":
+    def for_genre(
+        cls,
+        genre: str,
+        total_events: int,
+        triad_target_scale: float = 1.0,
+    ) -> "GenerationQuota":
         """Create the §08 targets, proportionally scaled for smaller tests."""
         if genre not in VALID_GENRES:
             raise ValueError(f"genre must be one of {VALID_GENRES}, got {genre!r}")
         if total_events <= 0:
             raise ValueError("total_events must be positive")
+        if triad_target_scale <= 0:
+            raise ValueError("triad_target_scale must be positive")
         reference_events = TARGET_EVENTS_BY_GENRE[genre]
 
-        def scaled(source: Dict[str, int]) -> Dict[str, int]:
+        def scaled(source: Dict[str, int], scale: float = 1.0) -> Dict[str, int]:
             return {
                 key: max(
                     1,
-                    (value * total_events + reference_events // 2)
-                    // reference_events,
+                    int(round((value * scale * total_events + reference_events // 2)
+                    // reference_events)),
                 )
                 for key, value in source.items()
                 if value > 0
@@ -367,7 +374,7 @@ class GenerationQuota:
         return cls(
             genre=genre,
             total_events=total_events,
-            triad_targets=scaled(RARE_TRIAD_TARGETS[genre]),
+            triad_targets=scaled(RARE_TRIAD_TARGETS[genre], scale=triad_target_scale),
             extension_targets=ext_targets,
             dense_targets=scaled(DENSE_EXTENSION_TARGETS[genre]),
             min_target_spacing=min_spacing,
@@ -1214,6 +1221,7 @@ def generate_target_corpus(
     random_bpm_range: Tuple[int, int] = (60, 180),
     no_chord_rate: float = 0.01,
     no_chord_seed: int | None = None,
+    triad_target_scale: float = 1.0,
 ) -> Dict[str, List[List[dict]]]:
     """Generate the quota-driven §08 corpus without mixing genre models."""
     if events_per_genre <= 0:
@@ -1272,7 +1280,9 @@ def generate_target_corpus(
     for genre_index, genre in enumerate(VALID_GENRES):
         event_budget = events_by_genre[genre]
         num_songs = songs_by_genre[genre]
-        quota = GenerationQuota.for_genre(genre, event_budget)
+        quota = GenerationQuota.for_genre(
+            genre, event_budget, triad_target_scale=triad_target_scale
+        )
         song_profiles = [
             VOICER_FAMILIES[index % len(VOICER_FAMILIES)]
             for index in range(num_songs)
@@ -1413,6 +1423,12 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--no-chord-rate", type=float, default=0.01)
     parser.add_argument("--no-chord-off", action="store_true")
+    parser.add_argument(
+        "--triad-target-scale",
+        type=float,
+        default=2.5,
+        help="Scaling factor for rare triad targets (sus2, sus4, diminished, augmented). Default 2.5 to increase rare triad density and reduce plain major chord dominance while preserving rare extension quotas.",
+    )
     parser.add_argument("--dist-dir", default=_DEFAULT_DIST_DIR)
     parser.add_argument(
         "--out-dir",
@@ -1508,6 +1524,7 @@ def main() -> None:
         no_chord_rate=0.0 if args.no_chord_off else args.no_chord_rate,
         random_bpm=random_bpm,
         random_bpm_range=bpm_range,
+        triad_target_scale=args.triad_target_scale,
     )
     print("Done.")
 

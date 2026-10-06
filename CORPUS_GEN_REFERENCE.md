@@ -12,6 +12,8 @@ test -f /usr/share/sounds/sf2/FluidR3_GM.sf2 && echo "SoundFont found"
 
 # 1. Generate the quota-aware target corpus:
 #    5,000 songs total (3,500 pop/rock, 1,500 jazz; 70/30 split) and 500,000 chord events total.
+#    --triad-target-scale 2.5: scales rare triad quotas (sus2, sus4, diminished, augmented) by 2.5x,
+#    displacing unextended plain major filler while preserving all rare extension quotas intact.
 #    Output directories will be:
 #      ./gen/acr-target-500k/jazz-labels
 #      ./gen/acr-target-500k/pop-rock-labels
@@ -19,6 +21,7 @@ python3 target_corpus_gen.py \
   --target-events 500000 \
   --total-songs 5000 \
   --pop-rock-ratio 0.7 \
+  --triad-target-scale 2.5 \
   --debug \
   --seed 15001 \
   --dist-dir ./distributions \
