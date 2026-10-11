@@ -287,6 +287,10 @@ class MelodyGenerationConfig:
     label_safety_policy: str = "naturalistic"
     masking_cost_enabled: bool = False
     melody_collapse_probability: float = 0.25
+    phrase_bars: int = 4
+    breath_beats: float = 2.0
+    stepwise_bonus: float = 2.00
+    repeat_penalty: float = -0.60
 
     def __post_init__(self) -> None:
         for name in (
@@ -298,6 +302,7 @@ class MelodyGenerationConfig:
             "beam_width",
             "candidate_limit_per_onset",
             "local_key_window_bars",
+            "phrase_bars",
         ):
             value = getattr(self, name)
             if (
@@ -325,6 +330,9 @@ class MelodyGenerationConfig:
             ("local_key_persistence_cost", self.local_key_persistence_cost),
             ("local_key_confidence_floor", self.local_key_confidence_floor),
             ("melody_collapse_probability", self.melody_collapse_probability),
+            ("breath_beats", self.breath_beats),
+            ("stepwise_bonus", self.stepwise_bonus),
+            ("repeat_penalty", self.repeat_penalty),
         ):
             if (
                 isinstance(value, bool)
@@ -334,6 +342,8 @@ class MelodyGenerationConfig:
                 raise ValueError(f"{name} must be finite")
         if self.local_key_persistence_cost < 0:
             raise ValueError("local_key_persistence_cost must be non-negative")
+        if self.breath_beats < 0:
+            raise ValueError("breath_beats must be non-negative")
         if not 0 <= self.local_key_confidence_floor <= 1:
             raise ValueError("local_key_confidence_floor must be from 0 to 1")
         if not 0 <= self.melody_collapse_probability <= 1:
@@ -356,6 +366,10 @@ class MelodyGenerationConfig:
             "label_safety_policy": self.label_safety_policy,
             "masking_cost_enabled": self.masking_cost_enabled,
             "melody_collapse_probability": self.melody_collapse_probability,
+            "phrase_bars": self.phrase_bars,
+            "breath_beats": self.breath_beats,
+            "stepwise_bonus": self.stepwise_bonus,
+            "repeat_penalty": self.repeat_penalty,
         }
 
 
@@ -481,15 +495,15 @@ def _profile(
 
 
 _DEFAULT_BEHAVIORS = {
-    "chord_tone": 5.0,
-    "extension": 2.4,
-    "scale_tone": 1.2,
-    "passing": 0.18,
-    "neighbor": 0.18,
-    "approach": 0.22,
-    "enclosure": 0.08,
-    "suspension": 0.12,
-    "appoggiatura": 0.08,
+    "chord_tone": 3.5,
+    "extension": 4.0,
+    "scale_tone": 2.0,
+    "passing": 2.6,
+    "suspension": 2.4,
+    "neighbor": 2.4,
+    "approach": 2.2,
+    "enclosure": 2.0,
+    "appoggiatura": 2.0,
 }
 
 MELODY_PROFILES = MappingProxyType({
@@ -502,9 +516,9 @@ MELODY_PROFILES = MappingProxyType({
         88,
         9,
         {"sparse": 0.70, "moderate": 0.25, "active": 0.05},
-        {"sixteenth": 0.05, "eighth": 0.35, "quarter": 0.45, "half": 0.15},
+        {"sixteenth": 0.05, "eighth": 0.25, "quarter": 0.25, "half": 0.45},
         _DEFAULT_BEHAVIORS,
-        0.32,
+        0.15,
         0.35,
     ),
     "lead-mid-neutral": _profile(
@@ -516,10 +530,10 @@ MELODY_PROFILES = MappingProxyType({
         86,
         10,
         {"sparse": 0.25, "moderate": 0.60, "active": 0.15},
-        {"sixteenth": 0.12, "eighth": 0.50, "quarter": 0.30, "half": 0.08},
+        {"sixteenth": 0.08, "eighth": 0.35, "quarter": 0.32, "half": 0.25},
         _DEFAULT_BEHAVIORS,
-        0.18,
-        0.22,
+        0.12,
+        0.28,
     ),
     "lead-mid-active": _profile(
         "lead-mid-active",
@@ -530,10 +544,10 @@ MELODY_PROFILES = MappingProxyType({
         90,
         12,
         {"sparse": 0.10, "moderate": 0.45, "active": 0.45},
-        {"sixteenth": 0.40, "eighth": 0.45, "quarter": 0.13, "half": 0.02},
+        {"sixteenth": 0.30, "eighth": 0.35, "quarter": 0.20, "half": 0.15},
         _DEFAULT_BEHAVIORS,
-        0.10,
-        0.12,
+        0.08,
+        0.20,
     ),
 })
 
@@ -645,12 +659,27 @@ def melody_inclusion_plan(
 compute_melody_inclusion_plan = melody_inclusion_plan
 
 
-def _song(progression: dict | Song) -> Song:
+def _song(progression: dict | list | tuple | Song) -> Song:
     if isinstance(progression, Song):
         return progression
-    if not isinstance(progression, dict):
-        raise TypeError("progression must be a dict or Song")
-    return Song.from_dict(progression)
+    if isinstance(progression, (list, tuple)):
+        prog_dict = {
+            "genre": "pop_rock",
+            "tonic_pc": 0,
+            "bpm": 120,
+            "chords": list(progression),
+        }
+        return Song.from_dict(prog_dict)
+    if isinstance(progression, dict):
+        d = dict(progression)
+        if "genre" not in d:
+            d["genre"] = "pop_rock"
+        if "tonic_pc" not in d:
+            d["tonic_pc"] = 0
+        if "chords" not in d:
+            d["chords"] = []
+        return Song.from_dict(d)
+    raise TypeError("progression must be a dict, list, tuple, or Song")
 
 
 def resolve_scale_pcs(
@@ -773,7 +802,7 @@ def _nearest_legal_pitches(
     anchor = previous_midi if previous_midi is not None else profile.preferred_center
     legal.sort(key=lambda midi: (abs(midi - anchor), abs(midi - profile.preferred_center), midi))
     # Retain a small octave neighborhood, not every MIDI pitch in the range.
-    return legal[:3]
+    return legal[:2]
 
 
 def _next_target_pc(song: Song, event_index: int) -> int | None:
@@ -786,6 +815,10 @@ def _next_target_pc(song: Song, event_index: int) -> int | None:
             continue
         root_pc = (song.tonic_pc + event.root_interval) % 12
         return root_pc
+    if song.chords:
+        first = song.chords[0]
+        if not first.is_no_chord:
+            return (song.tonic_pc + first.root_interval) % 12
     return None
 
 
@@ -943,6 +976,8 @@ def enumerate_melody_candidates(
             ("neighbor", 1),
             ("enclosure", -2),
             ("enclosure", 2),
+            ("suspension", 1),
+            ("suspension", 2),
             ("appoggiatura", -1),
             ("appoggiatura", 1),
         )
@@ -956,6 +991,8 @@ def enumerate_melody_candidates(
             weight = float(profile_obj.behavior_weights.get(role, 0.0))
             if metric == "strong" and role in {"approach", "neighbor"}:
                 weight *= 0.55
+            elif metric in {"strong", "medium"} and role == "suspension":
+                weight *= 1.25
             if metric == "offbeat":
                 weight *= 1.15
             if weight <= 0:
@@ -1206,12 +1243,22 @@ def _build_rhythm_plan(
     song: Song,
     profile: MelodyProfile,
     seed: int,
+    phrase_bars: int = 4,
+    breath_beats: float = 2.0,
 ) -> list[_RhythmSlot]:
     starts, ends = _timeline(song)
     total = ends[-1] if ends else 0
     rng = child_rng(seed, "melody-rhythm")
     slots: list[_RhythmSlot] = []
     position = 0
+
+    phrase_sixteenths = max(16, phrase_bars * 16)
+    if profile.rest_probability <= 0.0 or breath_beats <= 0.0:
+        breath_sixteenths = 0
+    else:
+        breath_sixteenths = max(1, int(round(breath_beats * 4)))
+    active_sixteenths = max(8, phrase_sixteenths - breath_sixteenths)
+
     while position < total:
         event_index = next(
             index
@@ -1231,13 +1278,30 @@ def _build_rhythm_plan(
             ))
             position = ends[event_index]
             continue
-        duration = min(remaining, max(1, _rhythm_units(profile, rng)))
-        factor = _density_factor(profile, rng)
-        rest = rng.random() < min(0.9, profile.rest_probability / factor)
+
+        cycle_pos = position % phrase_sixteenths
+        if breath_sixteenths > 0 and cycle_pos >= active_sixteenths:
+            # Breath pause between phrases
+            breath_rem = phrase_sixteenths - cycle_pos
+            duration = min(remaining, breath_rem)
+            slots.append(_RhythmSlot(
+                position,
+                duration,
+                (event_index,),
+                event_index,
+                _metric_strength(position),
+                True,
+            ))
+            position += duration
+            continue
+
+        active_rem = active_sixteenths - cycle_pos
+        unit = _rhythm_units(profile, rng)
+        duration = min(remaining, active_rem, max(1, unit))
+        rest = False
         covered = [event_index]
         if (
-            not rest
-            and rng.random() < profile.hold_probability
+            rng.random() < profile.hold_probability
             and position + duration >= ends[event_index]
         ):
             next_index = event_index + 1
@@ -1245,6 +1309,7 @@ def _build_rhythm_plan(
                 next_index < len(song.chords)
                 and not song.chords[next_index].is_no_chord
                 and len(covered) < 3
+                and ((position + duration + (ends[next_index] - starts[next_index])) % phrase_sixteenths) <= active_sixteenths
             ):
                 duration += ends[next_index] - starts[next_index]
                 covered.append(next_index)
@@ -1267,6 +1332,8 @@ def _candidate_score(
     profile: MelodyProfile,
     local_key: LocalKeyContext | None,
     is_last: bool,
+    across_rest: bool = False,
+    stepwise_bonus: float = 2.00,
 ) -> float:
     if candidate.midi is None:
         score = math.log(max(candidate.weight, 0.0001)) - (
@@ -1276,11 +1343,16 @@ def _candidate_score(
     score = math.log(max(candidate.weight, 0.0001))
     if previous_midi is not None:
         leap = abs(candidate.midi - previous_midi)
-        score -= 0.16 * leap
+        penalty_rate = 0.08 if across_rest else 0.22
+        score -= penalty_rate * leap
         if leap > profile.max_leap_semitones:
             score -= 100.0
-        if leap == 0:
-            score -= 0.15
+        elif leap > 5:
+            score -= 0.85
+        elif 3 <= leap <= 5:
+            score -= 0.35
+        if not across_rest and (1 <= leap <= 2):
+            score += stepwise_bonus
     if profile.tessitura_min <= candidate.midi <= profile.tessitura_max:
         score += 0.75
     else:
@@ -1293,20 +1365,23 @@ def _candidate_score(
             score += 0.24
         elif candidate.role == "scale_tone":
             score -= 0.25
-    if candidate.metric_strength == "strong" and candidate.role in {
-        "chord_tone",
-        "extension",
-        "held",
-    }:
-        score += 0.7
-    if candidate.role in {
-        "approach",
-        "passing",
-        "neighbor",
-        "enclosure",
-        "appoggiatura",
-    }:
-        score -= 0.15 if candidate.metric_strength != "strong" else 0.65
+    if candidate.metric_strength == "strong":
+        if candidate.role in {"chord_tone", "extension", "held"}:
+            score += 0.35
+        elif candidate.role in {"approach", "neighbor"}:
+            score -= 0.20
+    else:
+        if candidate.role in {
+            "approach",
+            "passing",
+            "neighbor",
+            "enclosure",
+            "appoggiatura",
+            "suspension",
+        }:
+            score += 2.10
+    if candidate.role == "extension":
+        score += 0.25
     if is_last and candidate.role in {"chord_tone", "extension"}:
         score += 0.55
     return score
@@ -1347,11 +1422,14 @@ def _choose_random_walk(
     profile: MelodyProfile,
     contexts: Sequence[LocalKeyContext],
     seed: int,
+    stepwise_bonus: float = 0.40,
+    repeat_penalty: float = -0.60,
 ) -> list[MelodyCandidate]:
     rng = child_rng(seed, "melody-candidate")
     chosen: list[MelodyCandidate] = []
     previous_midi = None
     pending_target = None
+    had_rest = False
     for index, candidates in enumerate(candidate_lists):
         legal = _legal_candidates(candidates, previous_midi, profile, pending_target)
         if not legal:
@@ -1361,19 +1439,46 @@ def _choose_random_walk(
             ]
         if not legal:
             legal = list(candidates)
-        scored = [
-            (
+        scored = []
+        for candidate in legal:
+            score_val = _candidate_score(
                 candidate,
-                math.exp(max(-30.0, min(30.0, _candidate_score(
-                    candidate,
-                    previous_midi,
-                    profile,
-                    contexts[index],
-                    index == len(candidate_lists) - 1,
-                )))) * max(candidate.weight, 0.0001),
+                previous_midi,
+                profile,
+                contexts[index],
+                index == len(candidate_lists) - 1,
+                across_rest=had_rest,
+                stepwise_bonus=stepwise_bonus,
             )
-            for candidate in legal
-        ]
+            if candidate.midi is not None and previous_midi == candidate.midi and not had_rest:
+                rep_count = 0
+                for prior in reversed(chosen):
+                    if prior.midi is None:
+                        break
+                    if prior.midi == candidate.midi:
+                        rep_count += 1
+                    else:
+                        break
+                if rep_count == 1:
+                    score_val -= 0.30
+                elif rep_count == 2:
+                    score_val += repeat_penalty
+                elif rep_count >= 3:
+                    score_val -= 1.50
+
+            if candidate.midi is not None and previous_midi is not None and chosen:
+                last_sounding = next((p for p in reversed(chosen) if p.midi is not None), None)
+                if (
+                    last_sounding is not None
+                    and last_sounding.role == "suspension"
+                    and last_sounding.metric_strength in {"strong", "medium"}
+                    and candidate.role in {"chord_tone", "extension"}
+                    and (1 <= previous_midi - candidate.midi <= 2)
+                ):
+                    score_val += 0.80
+
+            weight = math.exp(max(-30.0, min(30.0, score_val)))
+            scored.append((candidate, weight))
         selected = rng.choices(
             [candidate for candidate, _ in scored],
             weights=[weight for _, weight in scored],
@@ -1382,10 +1487,7 @@ def _choose_random_walk(
         chosen.append(selected)
         if selected.midi is not None:
             previous_midi = selected.midi
-        else:
-            previous_midi = None
-            pending_target = None
-        if selected.midi is not None:
+            had_rest = False
             pending_target = (
                 selected.resolution_target
                 if selected.role in {
@@ -1398,6 +1500,9 @@ def _choose_random_walk(
                 }
                 else None
             )
+        else:
+            had_rest = True
+            pending_target = None
     return chosen
 
 
@@ -1415,11 +1520,13 @@ def _choose_sequence_beam(
         expanded: list[tuple[float, float, _BeamState, MelodyCandidate]] = []
         for state in states:
             previous_midi = None
+            had_rest = False
             for prior in reversed(state.candidates):
-                if prior.midi is None:
+                if prior.midi is not None:
+                    previous_midi = prior.midi
                     break
-                previous_midi = prior.midi
-                break
+                else:
+                    had_rest = True
             legal = _legal_candidates(
                 candidates,
                 previous_midi,
@@ -1437,9 +1544,36 @@ def _choose_sequence_beam(
                     profile,
                     contexts[index],
                     index == len(candidate_lists) - 1,
+                    across_rest=had_rest,
+                    stepwise_bonus=config.stepwise_bonus,
                 )
-                if state.candidates and candidate.midi is not None and previous_midi == candidate.midi:
-                    value -= 0.10
+                if candidate.midi is not None and previous_midi == candidate.midi and not had_rest:
+                    repeat_count = 0
+                    for prior in reversed(state.candidates):
+                        if prior.midi is None:
+                            break
+                        if prior.midi == candidate.midi:
+                            repeat_count += 1
+                        else:
+                            break
+                    if repeat_count == 1:
+                        value -= 0.30
+                    elif repeat_count == 2:
+                        value += config.repeat_penalty
+                    elif repeat_count >= 3:
+                        value -= 1.50
+
+                if candidate.midi is not None and previous_midi is not None and state.candidates:
+                    last_sounding = next((p for p in reversed(state.candidates) if p.midi is not None), None)
+                    if (
+                        last_sounding is not None
+                        and last_sounding.role == "suspension"
+                        and last_sounding.metric_strength in {"strong", "medium"}
+                        and candidate.role in {"chord_tone", "extension"}
+                        and (1 <= previous_midi - candidate.midi <= 2)
+                    ):
+                        value += 0.80
+
                 pending_target = (
                     candidate.resolution_target
                     if candidate.role in {
@@ -1632,7 +1766,13 @@ def generate_melody(
                 return context
         return contexts[-1]
 
-    slots = _build_rhythm_plan(song, profile_obj, seed)
+    slots = _build_rhythm_plan(
+        song,
+        profile_obj,
+        seed,
+        phrase_bars=config.phrase_bars,
+        breath_beats=config.breath_beats,
+    )
     candidate_lists = []
     previous_midi = None
     for slot in slots:
@@ -1648,7 +1788,6 @@ def generate_melody(
                     source_event_indices=slot.source_event_indices,
                 ),
             ))
-            previous_midi = None
             continue
         candidates = enumerate_melody_candidates(
             song,
@@ -1731,6 +1870,8 @@ def generate_melody(
             profile_obj,
             [context_for(slot.onset) for slot in slots],
             seed,
+            stepwise_bonus=config.stepwise_bonus,
+            repeat_penalty=config.repeat_penalty,
         )
     if len(selected) != len(slots):
         selected = [

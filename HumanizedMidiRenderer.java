@@ -269,43 +269,121 @@ public class HumanizedMidiRenderer {
             events.sort(HumanizedMidiRenderer::compareEvents);
             List<Long> sourceBoundaries = readArpeggioBoundaries(events);
 
-            // ── 2. Assign one timing offset per chord group ───────────────
+            Map<Integer, Integer> channelProgram = new HashMap<>();
+            for (MidiEvent event : events) {
+                if (event.getMessage() instanceof ShortMessage) {
+                    ShortMessage sm = (ShortMessage) event.getMessage();
+                    if (sm.getCommand() == ShortMessage.PROGRAM_CHANGE) {
+                        channelProgram.put(sm.getChannel(), sm.getData1());
+                    }
+                }
+            }
+
+            // ── 2. Assign timing offsets and group chords ─────────────────
             Map<Integer, Queue<Long>> noteOnOffsets = new HashMap<>();
-            Map<Integer, Long>        lastOnTick    = new HashMap<>();
-            Map<Integer, Long>        lastOnDelta   = new HashMap<>();
             Map<MidiEvent, Long> sourceBoundaryByOn = new IdentityHashMap<>();
 
+            // Group Note-Ons into chords per channel
+            Map<Integer, List<List<MidiEvent>>> channelChords = new LinkedHashMap<>();
             for (MidiEvent event : events) {
                 if (!isNoteOn(event)) continue;
-                
                 ShortMessage sm = (ShortMessage) event.getMessage();
-                int ch   = sm.getChannel();
+                int ch = sm.getChannel();
                 long tick = event.getTick();
-                int key  = (ch << 7) | sm.getData1();
-                // V2 melody notes use their own symbolic durations and must
-                // not be clipped by V0 arpeggio source boundaries.
                 if (ch != 2) {
                     sourceBoundaryByOn.put(
                         event, nextSourceBoundary(sourceBoundaries, tick)
                     );
                 }
-
-                Long prevTick  = lastOnTick.get(ch);
-                Long prevDelta = lastOnDelta.get(ch);
-
-                long delta;
-                if (prevTick != null && (tick - prevTick) <= chordGroupingWindow && prevDelta != null) {
-                    delta = prevDelta;
+                List<List<MidiEvent>> chords = channelChords.computeIfAbsent(ch, k -> new ArrayList<>());
+                if (chords.isEmpty()) {
+                    List<MidiEvent> first = new ArrayList<>();
+                    first.add(event);
+                    chords.add(first);
                 } else {
-                    double biasMs    = CHANNEL_BIAS_MS.getOrDefault(ch, 0.0);
-                    double biasTicks = biasMs / msPerTick;
-                    delta = Math.round(rng.nextGaussian() * tickSigma + biasTicks);
-                    lastOnTick.put(ch, tick);
-                    lastOnDelta.put(ch, delta);
+                    List<MidiEvent> lastChord = chords.get(chords.size() - 1);
+                    long firstTick = lastChord.get(0).getTick();
+                    if ((tick - firstTick) <= chordGroupingWindow) {
+                        lastChord.add(event);
+                    } else {
+                        List<MidiEvent> nextChord = new ArrayList<>();
+                        nextChord.add(event);
+                        chords.add(nextChord);
+                    }
+                }
+            }
+
+            List<MidiEvent> pedalEvents = new ArrayList<>();
+            final long strumDelayTicks = Math.max(1, Math.round(7.0 / msPerTick)); // 7ms stagger
+
+            for (Map.Entry<Integer, List<List<MidiEvent>>> entry : channelChords.entrySet()) {
+                int ch = entry.getKey();
+                List<List<MidiEvent>> chords = entry.getValue();
+                Integer prog = channelProgram.get(ch);
+                boolean isGuitar = (prog != null && prog >= 24 && prog <= 31);
+                boolean isPiano = (prog != null && prog >= 0 && prog <= 7) || (prog == null && ch == 0);
+
+                double biasMs = CHANNEL_BIAS_MS.getOrDefault(ch, 0.0);
+                double biasTicks = biasMs / msPerTick;
+
+                List<Long> baseDeltas = new ArrayList<>();
+                for (int chordIdx = 0; chordIdx < chords.size(); chordIdx++) {
+                    List<MidiEvent> chord = chords.get(chordIdx);
+                    long baseDelta = Math.round(rng.nextGaussian() * tickSigma + biasTicks);
+                    baseDeltas.add(baseDelta);
+
+                    if (isGuitar && chord.size() > 1) {
+                        boolean downstroke = (chordIdx % 2 == 0);
+                        if (downstroke) {
+                            chord.sort(Comparator.comparingInt(e -> ((ShortMessage) e.getMessage()).getData1()));
+                        } else {
+                            chord.sort((e1, e2) -> Integer.compare(
+                                ((ShortMessage) e2.getMessage()).getData1(),
+                                ((ShortMessage) e1.getMessage()).getData1()
+                            ));
+                        }
+                        for (int k = 0; k < chord.size(); k++) {
+                            MidiEvent ev = chord.get(k);
+                            int pitch = ((ShortMessage) ev.getMessage()).getData1();
+                            int key = (ch << 7) | pitch;
+                            long noteDelta = baseDelta + k * strumDelayTicks;
+                            noteOnOffsets.computeIfAbsent(key, kn -> new LinkedList<>()).add(noteDelta);
+                        }
+                    } else {
+                        for (MidiEvent ev : chord) {
+                            int pitch = ((ShortMessage) ev.getMessage()).getData1();
+                            int key = (ch << 7) | pitch;
+                            noteOnOffsets.computeIfAbsent(key, kn -> new LinkedList<>()).add(baseDelta);
+                        }
+                    }
                 }
 
-                noteOnOffsets.computeIfAbsent(key, k -> new LinkedList<>()).add(delta);
+                if (isPiano && !chords.isEmpty()) {
+                    for (int chordIdx = 0; chordIdx < chords.size(); chordIdx++) {
+                        List<MidiEvent> chord = chords.get(chordIdx);
+                        long baseDelta = baseDeltas.get(chordIdx);
+                        long onsetTick = Math.max(0, chord.get(0).getTick() + baseDelta);
+                        try {
+                            ShortMessage ccDown = new ShortMessage();
+                            ccDown.setMessage(ShortMessage.CONTROL_CHANGE, ch, 64, 127);
+                            pedalEvents.add(new MidiEvent(ccDown, onsetTick));
+
+                            long releaseTick;
+                            if (chordIdx < chords.size() - 1) {
+                                long nextOnset = Math.max(0, chords.get(chordIdx + 1).get(0).getTick() + baseDeltas.get(chordIdx + 1));
+                                releaseTick = Math.max(onsetTick + minNoteDurationTicks, nextOnset - Math.max(1, ppq / 48));
+                            } else {
+                                releaseTick = onsetTick + minNoteDurationTicks * 2;
+                            }
+                            ShortMessage ccUp = new ShortMessage();
+                            ccUp.setMessage(ShortMessage.CONTROL_CHANGE, ch, 64, 0);
+                            pedalEvents.add(new MidiEvent(ccUp, releaseTick));
+                        } catch (InvalidMidiDataException ignored) {}
+                    }
+                }
             }
+
+            events.addAll(pedalEvents);
 
             // ── 3 & 4. Apply offsets and velocity jitter ──────────────────
             // Pair overlapping notes in source order. A map of one active

@@ -339,3 +339,45 @@ def test_melody_enablement_does_not_change_accompaniment_tracks():
     assert enabled.chord_track == disabled.chord_track
     assert enabled.bass_track == disabled.bass_track
     assert enabled.percussion_track == disabled.percussion_track
+
+
+def test_mixed_melody_profile_plan_and_rendering():
+    from render import _melody_profile_plan, render_song_tracks
+
+    plan, effective = _melody_profile_plan("mixed", 9, seed=42)
+    assert effective == "mixed"
+    assert len(plan) == 9
+    assert set(plan) == {"lead-high-sparse", "lead-mid-neutral", "lead-mid-active"}
+    assert plan[0] != plan[1]
+
+    # Test single-song render with mixed profile resolves deterministically
+    progression = {
+        "genre": "pop_rock",
+        "tonic_pc": 0,
+        "bpm": 120,
+        "chords": [
+            {
+                "root_interval": 0,
+                "triad": "major",
+                "bass_interval": 0,
+                "seventh": "N",
+                "duration_token": "q",
+            },
+        ],
+    }
+    rendered_a = render_song_tracks(
+        progression,
+        seed=100,
+        mode="pads",
+        melody_condition="naturalistic",
+        melody_profile="mixed",
+    )
+    rendered_b = render_song_tracks(
+        progression,
+        seed=100,
+        mode="pads",
+        melody_condition="naturalistic",
+        melody_profile="mixed",
+    )
+    assert rendered_a.melody_track == rendered_b.melody_track
+

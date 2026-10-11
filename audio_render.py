@@ -22,6 +22,10 @@ from sound_design import (
     REFERENCE_RENDER_PROFILE,
     SEED_DERIVATION_VERSION,
     derive_seed,
+    resolve_soundfonts,
+    sample_detune_for_ordinal,
+    sample_gain_jitter_for_ordinal,
+    sample_soundfont_for_ordinal,
     soundfont_asset_manifest,
 )
 
@@ -154,11 +158,69 @@ def _encode_flac(
     )
 
 
+def _generate_synthetic_rir(
+    reverb_type: str,
+    sample_rate_hz: int,
+    out_dir: Path,
+) -> Path:
+    """Deterministically synthesize a room impulse response WAV file.
+
+    Generates exponential decay noise e^{-t/tau} matching studio room acoustics.
+    """
+    import math
+    import wave
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    rir_path = out_dir / f"rir_{reverb_type}_{sample_rate_hz}.wav"
+    if rir_path.is_file():
+        return rir_path
+
+    # Duration and decay constants
+    if reverb_type == "hall":
+        duration_s = 1.2
+        tau = 0.25
+    elif reverb_type == "plate":
+        duration_s = 0.8
+        tau = 0.15
+    else:  # room / studio default
+        duration_s = 0.4
+        tau = 0.08
+
+    num_samples = int(duration_s * sample_rate_hz)
+    # Deterministic pseudo-random sequence for RIR
+    a = 1664525
+    c = 1013904223
+    m = 2**32
+    state = 123456789
+
+    samples = bytearray()
+    for n in range(num_samples):
+        state = (a * state + c) % m
+        noise = (state / m) * 2.0 - 1.0
+        t = n / sample_rate_hz
+        envelope = math.exp(-t / tau)
+        val = int(noise * envelope * 0.7 * 32767)
+        val = max(-32768, min(32767, val))
+        samples.extend(val.to_bytes(2, byteorder="little", signed=True))
+
+    with wave.open(str(rir_path), "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(sample_rate_hz)
+        wf.writeframes(samples)
+
+    return rir_path
+
+
 def _mix_flac(
     executable: str,
     wav_paths: list[tuple[str, Path]],
     flac_path: Path,
     profile: Mapping[str, Any],
+    *,
+    reverb: str | None = None,
+    detune_cents: float = 0.0,
+    temp_dir: Path | None = None,
 ) -> None:
     if not wav_paths:
         raise ValueError("cannot mix an empty role selection")
@@ -167,12 +229,15 @@ def _mix_flac(
     filters: list[str] = []
     labels: list[str] = []
     gains = profile["role_gains_db"]
+    sample_rate = profile["sample_rate_hz"]
+
     for index, (track, wav_path) in enumerate(wav_paths):
         input_args.extend(["-i", str(wav_path)])
         label = f"role{index}"
         role = TRACK_TO_ROLE[track]
+        gain = float(gains[role])
         filters.append(
-            f"[{index}:a]volume={float(gains[role]):g}dB[{label}]"
+            f"[{index}:a]volume={gain:g}dB[{label}]"
         )
         labels.append(f"[{label}]")
 
@@ -181,17 +246,47 @@ def _mix_flac(
         f"TP={float(profile['true_peak_ceiling_dbtp']):g}:"
         "LRA=7:print_format=none"
     )
+
     if len(wav_paths) == 1:
-        filters.append(f"{labels[0]}{loudness}[mix]")
+        mix_label = labels[0]
     else:
         filters.append(
             "".join(labels)
             + (
                 f"amix=inputs={len(wav_paths)}:duration=longest:"
-                "dropout_transition=0:normalize=0,"
-                f"{loudness}[mix]"
+                "dropout_transition=0:normalize=0[summed]"
             )
         )
+        mix_label = "[summed]"
+
+    current_label = mix_label
+
+    # Studio convolution reverb via afir filter
+    if reverb and reverb.lower() not in ("none", "off", "false"):
+        rir_dir = temp_dir if temp_dir is not None else flac_path.parent
+        rir_path = _generate_synthetic_rir(reverb.lower(), sample_rate, rir_dir)
+        rir_index = len(wav_paths)
+        input_args.extend(["-i", str(rir_path)])
+        # asplit to dry and wet paths, convolve wet with RIR, then blend
+        filters.append(
+            f"{current_label}asplit[dry_sig][to_rev];"
+            f"[to_rev][{rir_index}:a]afir=dry=0:wet=1[wet_sig];"
+            f"[dry_sig][wet_sig]amix=inputs=2:weights=0.82 0.18[reverbed]"
+        )
+        current_label = "[reverbed]"
+
+    # Micro-tuning pitch drift via asetrate & aresample
+    if abs(detune_cents) > 0.001:
+        factor = 2.0 ** (detune_cents / 1200.0)
+        target_rate = int(round(sample_rate * factor))
+        filters.append(
+            f"{current_label}asetrate={target_rate},aresample={sample_rate}[detuned]"
+        )
+        current_label = "[detuned]"
+
+    # Final loudness normalization
+    filters.append(f"{current_label}{loudness}[mix]")
+
     flac_path.parent.mkdir(parents=True, exist_ok=True)
     sample_fmt = "s16" if profile["bit_depth"] == 16 else "s32"
     subprocess.run(
@@ -298,6 +393,9 @@ def _render_song_audio(
     effective_profile: Mapping[str, Any],
     seed: int,
     render_mix: bool = True,
+    gain_jitter_db: float = 0.0,
+    reverb: str | None = None,
+    detune_cents: float = 0.0,
 ) -> tuple[str, dict[str, Any]]:
     song_dir = root / f"song_{ordinal}"
     song_dir.mkdir(parents=True, exist_ok=True)
@@ -323,6 +421,18 @@ def _render_song_audio(
             stem_records[track] = _file_record(stem_path)
 
         mix_record = None
+        # Per-song dynamic gain jitter
+        song_profile = dict(effective_profile)
+        song_gains = dict(effective_profile["role_gains_db"])
+        jitter = sample_gain_jitter_for_ordinal(seed, ordinal, gain_jitter_db)
+        for role, delta in jitter.items():
+            if role in song_gains:
+                song_gains[role] = float(song_gains[role]) + delta
+        song_profile["role_gains_db"] = song_gains
+
+        # Per-song detune cents
+        song_detune = sample_detune_for_ordinal(seed, ordinal, detune_cents) if detune_cents > 0.0 else 0.0
+
         if render_mix:
             if role_records:
                 selected_tracks = [
@@ -357,22 +467,36 @@ def _render_song_audio(
                 mix_inputs = [("chords", mixed_wav)]
 
             mix_path = song_dir / "mix.flac"
-            _mix_flac(ffmpeg, mix_inputs, mix_path, effective_profile)
+            mix_kwargs: dict[str, Any] = {}
+            if reverb is not None:
+                mix_kwargs["reverb"] = reverb
+            if abs(song_detune) > 0.001:
+                mix_kwargs["detune_cents"] = song_detune
+            if temporary_dir is not None and (reverb is not None or abs(song_detune) > 0.001):
+                mix_kwargs["temp_dir"] = temporary_dir
+            _mix_flac(ffmpeg, mix_inputs, mix_path, song_profile, **mix_kwargs)
             mix_record = _file_record(mix_path)
 
         result_payload: dict[str, Any] = {
             "render_seed": derive_seed(seed, "audio-render", ordinal),
             "selected_roles": list(selected_roles),
             "stems": stem_records,
+            "soundfont": soundfont_asset_manifest(soundfont_path),
             "format": effective_profile["format"],
             "sample_rate_hz": effective_profile["sample_rate_hz"],
             "bit_depth": effective_profile["bit_depth"],
             "channels": effective_profile["channels"],
             "tail_policy": effective_profile["tail_policy"],
             "role_gains_db": {
-                role: effective_profile["role_gains_db"][role]
+                role: song_gains[role]
                 for role in selected_roles
             },
+            "gain_jitter_applied_db": {
+                role: jitter[role]
+                for role in selected_roles
+            },
+            "detune_cents_applied": song_detune,
+            "reverb_applied": reverb,
         }
         if mix_record is not None:
             result_payload["mix"] = mix_record
@@ -390,19 +514,31 @@ def render_audio_bundle(
     midi_records: Mapping[str, Any],
     output_dir: str | Path,
     *,
-    soundfont: str | Path,
+    soundfont: str | Path | None = None,
+    soundfonts: list[str | Path] | None = None,
+    soundfont_dir: str | Path | None = None,
     seed: int,
     fluidsynth_bin: str = "fluidsynth",
     ffmpeg_bin: str = "ffmpeg",
     profile: Mapping[str, Any] = REFERENCE_RENDER_PROFILE,
     render_mix: bool = True,
+    gain_jitter_db: float = 0.0,
+    reverb: str | None = None,
+    detune_cents: float = 0.0,
 ) -> dict[str, Any]:
     """Render role stems and full mixes from a MIDI manifest."""
     if isinstance(seed, bool) or not isinstance(seed, int):
         raise ValueError("audio rendering seed must be an integer")
     effective_profile = _validate_profile(profile)
-    soundfont_path = Path(soundfont).expanduser().resolve()
-    asset = soundfont_asset_manifest(soundfont_path)
+
+    available_soundfonts = resolve_soundfonts(
+        soundfonts=soundfonts,
+        soundfont_dir=soundfont_dir,
+        soundfont=soundfont,
+    )
+    if not available_soundfonts:
+        raise ValueError("at least one SoundFont is required for audio rendering")
+
     fluidsynth = _resolve_executable(fluidsynth_bin, "FluidSynth")
     ffmpeg = _resolve_executable(ffmpeg_bin, "ffmpeg")
     fluidsynth_version = _tool_version(fluidsynth, "--version")
@@ -433,6 +569,7 @@ def render_audio_bundle(
         if isinstance(ordinal, bool) or not isinstance(ordinal, int):
             raise ValueError("manifest record ordinal must be an integer")
         selected_roles = _selected_roles(raw_record, manifest)
+        song_sf = sample_soundfont_for_ordinal(available_soundfonts, seed, ordinal)
         song_args.append((
             ordinal,
             selected_roles,
@@ -441,10 +578,13 @@ def render_audio_bundle(
             root,
             fluidsynth,
             ffmpeg,
-            soundfont_path,
+            song_sf,
             effective_profile,
             seed,
             render_mix,
+            gain_jitter_db,
+            reverb,
+            detune_cents,
         ))
 
     total = len(records)
@@ -474,6 +614,14 @@ def render_audio_bundle(
                     flush=True,
                 )
 
+    assets = [soundfont_asset_manifest(sf) for sf in available_soundfonts]
+    mixer_graph = "role_gain -> amix"
+    if reverb and reverb.lower() not in ("none", "off", "false"):
+        mixer_graph += " -> afir"
+    if abs(detune_cents) > 0.001:
+        mixer_graph += " -> asetrate/aresample"
+    mixer_graph += " -> loudnorm"
+
     return {
         "renderer": {
             "engine": "FluidSynth",
@@ -484,13 +632,17 @@ def render_audio_bundle(
             "engine": "ffmpeg",
             "executable": ffmpeg,
             "version": ffmpeg_version,
-            "graph": "role_gain -> amix -> loudnorm",
+            "graph": mixer_graph,
         },
-        "asset": asset,
+        "asset": assets[0] if len(assets) == 1 else assets,
+        "available_soundfonts": [str(sf) for sf in available_soundfonts],
         "profile": effective_profile,
         "profile_id": effective_profile["profile_id"],
         "seed_derivation_version": SEED_DERIVATION_VERSION,
         "output_dir": str(root),
+        "gain_jitter_db": gain_jitter_db,
+        "reverb": reverb,
+        "detune_cents": detune_cents,
         "records": audio_records,
     }
 
@@ -503,6 +655,9 @@ def _mix_song_from_stems(
     ffmpeg: str,
     effective_profile: Mapping[str, Any],
     seed: int,
+    gain_jitter_db: float = 0.0,
+    reverb: str | None = None,
+    detune_cents: float = 0.0,
 ) -> tuple[str, dict[str, Any]]:
     song_dir.mkdir(parents=True, exist_ok=True)
     selected_tracks = [
@@ -521,8 +676,22 @@ def _mix_song_from_stems(
         (track, Path(stem_paths[track]))
         for track in selected_tracks
     ]
+    song_profile = dict(effective_profile)
+    song_gains = dict(effective_profile["role_gains_db"])
+    jitter = sample_gain_jitter_for_ordinal(seed, ordinal, gain_jitter_db)
+    for role, delta in jitter.items():
+        if role in song_gains:
+            song_gains[role] = float(song_gains[role]) + delta
+    song_profile["role_gains_db"] = song_gains
+    song_detune = sample_detune_for_ordinal(seed, ordinal, detune_cents) if detune_cents > 0.0 else 0.0
+
     mix_path = song_dir / "mix.flac"
-    _mix_flac(ffmpeg, mix_inputs, mix_path, effective_profile)
+    mix_kwargs: dict[str, Any] = {}
+    if reverb is not None:
+        mix_kwargs["reverb"] = reverb
+    if abs(song_detune) > 0.001:
+        mix_kwargs["detune_cents"] = song_detune
+    _mix_flac(ffmpeg, mix_inputs, mix_path, song_profile, **mix_kwargs)
     stem_records = {
         track: _file_record(Path(stem_paths[track]))
         for track in selected_tracks
@@ -538,9 +707,15 @@ def _mix_song_from_stems(
         "channels": effective_profile["channels"],
         "tail_policy": effective_profile["tail_policy"],
         "role_gains_db": {
-            role: effective_profile["role_gains_db"][role]
+            role: song_gains[role]
             for role in selected_roles
         },
+        "gain_jitter_applied_db": {
+            role: jitter[role]
+            for role in selected_roles
+        },
+        "detune_cents_applied": song_detune,
+        "reverb_applied": reverb,
     }
 
 
@@ -558,6 +733,9 @@ def mix_audio_bundle_from_stems(
     profile: Mapping[str, Any] = REFERENCE_RENDER_PROFILE,
     renderer_info: Mapping[str, Any] | None = None,
     asset_info: Mapping[str, Any] | None = None,
+    gain_jitter_db: float = 0.0,
+    reverb: str | None = None,
+    detune_cents: float = 0.0,
 ) -> dict[str, Any]:
     """Mix pre-rendered role stems into full condition mixes."""
     if isinstance(seed, bool) or not isinstance(seed, int):
@@ -606,6 +784,9 @@ def mix_audio_bundle_from_stems(
             ffmpeg,
             effective_profile,
             seed,
+            gain_jitter_db,
+            reverb,
+            detune_cents,
         ))
 
     total = len(records)
@@ -635,28 +816,48 @@ def mix_audio_bundle_from_stems(
                     flush=True,
                 )
 
+    mixer_graph = "role_gain -> amix"
+    if reverb and reverb.lower() not in ("none", "off", "false"):
+        mixer_graph += " -> afir"
+    if abs(detune_cents) > 0.001:
+        mixer_graph += " -> asetrate/aresample"
+    mixer_graph += " -> loudnorm"
+
     result = {
         "mixer": {
             "engine": "ffmpeg",
             "executable": ffmpeg,
             "version": ffmpeg_version,
-            "graph": "role_gain -> amix -> loudnorm",
+            "graph": mixer_graph,
         },
         "profile": effective_profile,
         "profile_id": effective_profile["profile_id"],
         "seed_derivation_version": SEED_DERIVATION_VERSION,
         "output_dir": str(root),
+        "gain_jitter_db": gain_jitter_db,
+        "reverb": reverb,
+        "detune_cents": detune_cents,
         "records": audio_records,
     }
     if renderer_info is not None:
-        result["renderer"] = dict(renderer_info)
+        if isinstance(renderer_info, Mapping):
+            result["renderer"] = dict(renderer_info)
+        elif isinstance(renderer_info, list):
+            result["renderer"] = [dict(r) if isinstance(r, Mapping) else r for r in renderer_info]
+        else:
+            result["renderer"] = renderer_info
     else:
         result["renderer"] = {
             "engine": "FluidSynth",
             "reused_stems": True,
         }
     if asset_info is not None:
-        result["asset"] = dict(asset_info)
+        if isinstance(asset_info, Mapping):
+            result["asset"] = dict(asset_info)
+        elif isinstance(asset_info, list):
+            result["asset"] = [dict(a) if isinstance(a, Mapping) else a for a in asset_info]
+        else:
+            result["asset"] = asset_info
     return result
 
 
@@ -699,10 +900,15 @@ def main() -> None:
     parser.add_argument("--manifest", required=True)
     parser.add_argument("--midi-dir", required=True)
     parser.add_argument("--output-dir", required=True)
-    parser.add_argument("--soundfont", required=True)
+    parser.add_argument("--soundfont", default=None)
+    parser.add_argument("--soundfonts", nargs="*", default=None)
+    parser.add_argument("--soundfont-dir", default=None)
     parser.add_argument("--seed", type=int)
     parser.add_argument("--fluidsynth", default="fluidsynth")
     parser.add_argument("--ffmpeg", default="ffmpeg")
+    parser.add_argument("--gain-jitter-db", type=float, default=0.0)
+    parser.add_argument("--reverb", default=None, help="Convolution reverb type ('studio', 'room', 'hall', 'plate')")
+    parser.add_argument("--detune-cents", type=float, default=0.0)
     parser.add_argument(
         "--no-mix",
         action="store_true",
@@ -721,10 +927,15 @@ def main() -> None:
         midi_records,
         args.output_dir,
         soundfont=args.soundfont,
+        soundfonts=args.soundfonts,
+        soundfont_dir=args.soundfont_dir,
         seed=seed,
         fluidsynth_bin=args.fluidsynth,
         ffmpeg_bin=args.ffmpeg,
         render_mix=not args.no_mix,
+        gain_jitter_db=args.gain_jitter_db,
+        reverb=args.reverb,
+        detune_cents=args.detune_cents,
     )
     manifest["sound_design"] = dict(manifest.get("sound_design", {}))
     manifest["sound_design"]["audio_rendered"] = True

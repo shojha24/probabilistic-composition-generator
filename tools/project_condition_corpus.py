@@ -265,17 +265,13 @@ def _resolve_or_render_stems(
     role_paths: dict[str, Path],
     output_root: Path,
     seed: int,
-    soundfont: str | Path | None,
+    soundfont: str | Path | None = None,
+    soundfonts: list[str | Path] | None = None,
+    soundfont_dir: str | Path | None = None,
     stems_dir: str | Path | None = None,
     fluidsynth_bin: str = "fluidsynth",
     ffmpeg_bin: str = "ffmpeg",
 ) -> dict[str, Any]:
-    if soundfont is None:
-        raise ValueError("stage 'audio' requires a SoundFont path")
-    soundfont_path = Path(soundfont).expanduser().resolve()
-    if not soundfont_path.is_file():
-        raise FileNotFoundError(f"SoundFont is missing: {soundfont_path}")
-
     # 1. Check if canonical manifest has audio already rendered
     canonical_audio = canonical_manifest.get("sound_design", {}).get("audio")
     if (
@@ -388,11 +384,16 @@ def _resolve_or_render_stems(
         f"[stems] Synthesizing audio stems for {len(records)} songs into {audio_output}...",
         flush=True,
     )
+    soundfont = (str(soundfont).strip() or None) if soundfont else None
+    soundfont_dir = (str(soundfont_dir).strip() or None) if soundfont_dir else None
+    soundfonts = [sf for sf in soundfonts if str(sf).strip()] or None if soundfonts else None
     stems_audio = render_audio_bundle(
         all_roles_manifest,
         role_midi_records,
         audio_output,
-        soundfont=soundfont_path,
+        soundfont=soundfont,
+        soundfonts=soundfonts,
+        soundfont_dir=soundfont_dir,
         seed=seed,
         fluidsynth_bin=fluidsynth_bin,
         ffmpeg_bin=ffmpeg_bin,
@@ -437,7 +438,12 @@ def _project_one(
     melody_percent: float,
     percussion_percent: float,
     stage: str,
-    soundfont: str | Path | None,
+    soundfont: str | Path | None = None,
+    soundfonts: list[str | Path] | None = None,
+    soundfont_dir: str | Path | None = None,
+    gain_jitter_db: float = 0.0,
+    reverb: str | None = None,
+    detune_cents: float = 0.0,
     stems_data: dict[str, Any] | None = None,
     fluidsynth_bin: str,
     ffmpeg_bin: str,
@@ -576,8 +582,18 @@ def _project_one(
         }
         if stage == "audio":
             if stems_data is None:
-                if soundfont is None:
-                    raise ValueError("stage 'audio' requires a SoundFont path")
+                from sound_design import resolve_soundfonts
+                soundfont_norm = (str(soundfont).strip() or None) if soundfont else None
+                soundfont_dir_norm = (str(soundfont_dir).strip() or None) if soundfont_dir else None
+                soundfonts_norm = [sf for sf in soundfonts if str(sf).strip()] or None if soundfonts else None
+                try:
+                    resolve_soundfonts(
+                        soundfont=soundfont_norm,
+                        soundfonts=soundfonts_norm,
+                        soundfont_dir=soundfont_dir_norm,
+                    )
+                except FileNotFoundError as err:
+                    raise ValueError(f"stage 'audio' could not resolve SoundFont: {err}") from err
                 stems_data = _resolve_or_render_stems(
                     canonical_path=canonical_path,
                     canonical_manifest=canonical_manifest,
@@ -585,7 +601,9 @@ def _project_one(
                     role_paths=role_paths,
                     output_root=output_root,
                     seed=seed,
-                    soundfont=soundfont,
+                    soundfont=soundfont_norm,
+                    soundfonts=soundfonts_norm,
+                    soundfont_dir=soundfont_dir_norm,
                     stems_dir=None,
                     fluidsynth_bin=fluidsynth_bin,
                     ffmpeg_bin=ffmpeg_bin,
@@ -602,6 +620,9 @@ def _project_one(
                 ffmpeg_bin=ffmpeg_bin,
                 renderer_info=stems_data.get("renderer"),
                 asset_info=stems_data.get("asset"),
+                gain_jitter_db=gain_jitter_db,
+                reverb=reverb,
+                detune_cents=detune_cents,
             )
             manifest["sound_design"]["stage"] = "audio"
             manifest["sound_design"]["audio_rendered"] = True
@@ -631,6 +652,11 @@ def project_conditions(
     percussion_percent: float = 70.0,
     stage: str = "score",
     soundfont: str | Path | None = None,
+    soundfonts: list[str | Path] | None = None,
+    soundfont_dir: str | Path | None = None,
+    gain_jitter_db: float = 0.0,
+    reverb: str | None = None,
+    detune_cents: float = 0.0,
     stems_dir: str | Path | None = None,
     fluidsynth_bin: str = "fluidsynth",
     ffmpeg_bin: str = "ffmpeg",
@@ -659,11 +685,6 @@ def project_conditions(
         raise ValueError(f"unsupported condition(s): {', '.join(unknown)}")
     if stage not in {"score", "midi", "audio"}:
         raise ValueError("stage must be 'score', 'midi', or 'audio'")
-    if stage == "audio":
-        if soundfont is None:
-            raise ValueError("stage 'audio' requires a SoundFont path")
-        if not Path(soundfont).expanduser().is_file():
-            raise FileNotFoundError(f"SoundFont is missing: {soundfont}")
     output_root = Path(output_root)
     output_root.mkdir(parents=True, exist_ok=True)
     print(
@@ -672,6 +693,18 @@ def project_conditions(
     )
     stems_data = None
     if stage == "audio":
+        from sound_design import resolve_soundfonts
+        soundfont_norm = (str(soundfont).strip() or None) if soundfont else None
+        soundfont_dir_norm = (str(soundfont_dir).strip() or None) if soundfont_dir else None
+        soundfonts_norm = [sf for sf in soundfonts if str(sf).strip()] or None if soundfonts else None
+        try:
+            resolve_soundfonts(
+                soundfont=soundfont_norm,
+                soundfonts=soundfonts_norm,
+                soundfont_dir=soundfont_dir_norm,
+            )
+        except FileNotFoundError as err:
+            raise ValueError(f"stage 'audio' could not resolve SoundFont: {err}") from err
         print(
             f"[audio] Resolving shared audio stems in {stems_dir or output_root / '_stems'}...",
             flush=True,
@@ -683,7 +716,9 @@ def project_conditions(
             role_paths=role_paths,
             output_root=output_root,
             seed=resolved_seed,
-            soundfont=soundfont,
+            soundfont=soundfont_norm,
+            soundfonts=soundfonts_norm,
+            soundfont_dir=soundfont_dir_norm,
             stems_dir=stems_dir,
             fluidsynth_bin=fluidsynth_bin,
             ffmpeg_bin=ffmpeg_bin,
@@ -703,6 +738,11 @@ def project_conditions(
             percussion_percent=percussion_percent,
             stage=stage,
             soundfont=soundfont,
+            soundfonts=soundfonts,
+            soundfont_dir=soundfont_dir,
+            gain_jitter_db=gain_jitter_db,
+            reverb=reverb,
+            detune_cents=detune_cents,
             stems_data=stems_data,
             fluidsynth_bin=fluidsynth_bin,
             ffmpeg_bin=ffmpeg_bin,
@@ -741,8 +781,29 @@ def main() -> None:
     )
     parser.add_argument(
         "--soundfont",
-        help="SoundFont path required when --stage audio is selected.",
+        default=None,
+        help="SoundFont path used when --stage audio is selected.",
     )
+    parser.add_argument(
+        "--soundfonts",
+        nargs="*",
+        default=None,
+        help="List of SoundFont paths to rotate across songs.",
+    )
+    parser.add_argument(
+        "--soundfont-dir",
+        default=None,
+        help="Directory containing SoundFonts to rotate across songs.",
+    )
+    parser.add_argument("--gain-jitter-db", type=float, default=0.0)
+    parser.add_argument(
+        "--reverb",
+        nargs="?",
+        const="room",
+        default=None,
+        help="Convolution reverb type ('studio', 'room', 'hall', 'plate', or flag for default 'room')",
+    )
+    parser.add_argument("--detune-cents", type=float, default=0.0)
     parser.add_argument(
         "--stems-dir",
         help="Directory to store or reuse shared audio stems (defaults to <out-dir>/_stems).",
@@ -758,6 +819,9 @@ def main() -> None:
         help="ffmpeg executable or full path used for encoding and mixing.",
     )
     args = parser.parse_args()
+    soundfont = (args.soundfont.strip() or None) if args.soundfont and args.soundfont.strip() else None
+    soundfont_dir = (args.soundfont_dir.strip() or None) if args.soundfont_dir and args.soundfont_dir.strip() else None
+    soundfonts = [sf.strip() for sf in args.soundfonts if sf.strip()] or None if args.soundfonts else None
     outputs = project_conditions(
         args.canonical,
         args.out_dir,
@@ -767,7 +831,12 @@ def main() -> None:
         melody_percent=args.melody_percent,
         percussion_percent=args.percussion_percent,
         stage=args.stage,
-        soundfont=args.soundfont,
+        soundfont=soundfont,
+        soundfonts=soundfonts,
+        soundfont_dir=soundfont_dir,
+        gain_jitter_db=args.gain_jitter_db,
+        reverb=args.reverb,
+        detune_cents=args.detune_cents,
         stems_dir=args.stems_dir,
         fluidsynth_bin=args.fluidsynth,
         ffmpeg_bin=args.ffmpeg,

@@ -854,7 +854,13 @@ class Engine:
         required_roles = {degree.role for degree in required_degrees}
         missing_required = required_roles - emitted_roles
         if missing_required:
-            if not missing_required <= dropped:
+            allowed_missing = set(dropped)
+            if self.policy.instrument == "guitar":
+                if chord.triad in ("major", "minor", "sus4", "sus2"):
+                    allowed_missing.add("5th")
+                if bass_active and allow_dropped:
+                    allowed_missing.add("root")
+            if not missing_required <= allowed_missing:
                 return False
 
         if selected.root_omitted and "root" in emitted_roles:
@@ -934,13 +940,18 @@ class Engine:
             if ok:
                 break
         if not ok:
-            return False
+            if relax_any_branch and self.policy.instrument == "guitar":
+                ok = True
+            else:
+                return False
         # §5.3 secondary differentiators: predicate (b) alone
         for role in secondary_roles:
             sec_pitches = [p for p, r in zip(candidate.pitches, candidate.roles) if r == role]
             if not sec_pitches:
                 return False
             if not any(secondary_ok(p, candidate.pitches) for p in sec_pitches):
+                if relax_any_branch and self.policy.instrument == "guitar":
+                    continue
                 return False
         return True
 

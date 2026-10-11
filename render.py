@@ -23,6 +23,8 @@ from chord_module import ChordModule, POLICIES
 from instruments import ARPEGGIO_PROFILES
 from melody_module import (
     MelodyGenerationConfig,
+    MelodyProfile,
+    MELODY_PROFILES,
     build_melody_manifest,
     disabled_melody_record,
     derive_child_seed,
@@ -258,6 +260,47 @@ def _melody_decoder(value: str) -> str:
             "or 'sequence_beam'"
         )
     return value
+
+
+def _resolve_melody_profile(
+    profile: str | MelodyProfile,
+    seed: int | None = None,
+) -> MelodyProfile:
+    """Resolve a melody profile, selecting deterministically if mixed."""
+    if isinstance(profile, MelodyProfile):
+        return profile
+    if not isinstance(profile, str):
+        raise TypeError("profile must be a profile name or MelodyProfile")
+    if profile == "mixed":
+        profile_names = tuple(MELODY_PROFILES)
+        if seed is None:
+            chosen_name = random.choice(profile_names)
+        else:
+            chosen_name = profile_names[seed % len(profile_names)]
+        return MELODY_PROFILES[chosen_name]
+    return get_melody_profile(profile)
+
+
+def _melody_profile_plan(
+    melody_profile: str,
+    file_count: int,
+    seed: int,
+) -> tuple[list[str], str]:
+    """Return deterministic per-song melody profiles and effective profile mode."""
+    if melody_profile not in (*tuple(MELODY_PROFILES), "mixed"):
+        raise ValueError(
+            f"unknown melody profile {melody_profile!r}; "
+            f"expected one of {(*tuple(MELODY_PROFILES), 'mixed')}"
+        )
+    if melody_profile != "mixed":
+        return [melody_profile] * file_count, melody_profile
+    profile_names = tuple(MELODY_PROFILES)
+    plan = [
+        profile_names[(seed + index) % len(profile_names)]
+        for index in range(file_count)
+    ]
+    return plan, "mixed"
+
 
 
 def _melody_collapse_probability(value: float | int) -> float:
@@ -636,10 +679,14 @@ def _render_progression(
     melody_omission_reason: str | None = None,
     melody_collapse_probability: float = 0.25,
     melody_decoder: str = "sequence_beam",
+    melody_phrase_bars: int = 4,
+    melody_breath_beats: float = 2.0,
+    melody_stepwise_bonus: float = 0.40,
+    melody_repeat_penalty: float = -0.60,
 ) -> dict:
     percussion_percent = _percussion_inclusion_percent(percussion_percent)
     melody_condition = _melody_condition(melody_condition)
-    profile_obj = get_melody_profile(melody_profile)
+    profile_obj = _resolve_melody_profile(melody_profile, seed=seed)
     melody_collapse_probability = _melody_collapse_probability(
         melody_collapse_probability
     )
@@ -699,6 +746,10 @@ def _render_progression(
             generation_config = MelodyGenerationConfig(
                 decoder=melody_decoder,
                 melody_collapse_probability=melody_collapse_probability,
+                phrase_bars=melody_phrase_bars,
+                breath_beats=melody_breath_beats,
+                stepwise_bonus=melody_stepwise_bonus,
+                repeat_penalty=melody_repeat_penalty,
             )
             realized_voicings = [
                 {
@@ -867,6 +918,10 @@ def render_song_tracks(
     melody_included: bool = True,
     melody_collapse_probability: float = 0.25,
     melody_decoder: str = "sequence_beam",
+    melody_phrase_bars: int = 4,
+    melody_breath_beats: float = 2.0,
+    melody_stepwise_bonus: float = 0.40,
+    melody_repeat_penalty: float = -0.60,
 ) -> RenderedSongTracks:
     """Render one progression once and retain all synchronized role strings."""
     result = _render_progression(
@@ -882,6 +937,10 @@ def render_song_tracks(
         melody_selection_mode="single_song_resolved",
         melody_collapse_probability=melody_collapse_probability,
         melody_decoder=melody_decoder,
+        melody_phrase_bars=melody_phrase_bars,
+        melody_breath_beats=melody_breath_beats,
+        melody_stepwise_bonus=melody_stepwise_bonus,
+        melody_repeat_penalty=melody_repeat_penalty,
     )
     return result["tracks"]
 
@@ -897,6 +956,10 @@ def render_song(
     melody_included: bool = True,
     melody_collapse_probability: float = 0.25,
     melody_decoder: str = "sequence_beam",
+    melody_phrase_bars: int = 4,
+    melody_breath_beats: float = 2.0,
+    melody_stepwise_bonus: float = 0.40,
+    melody_repeat_penalty: float = -0.60,
 ) -> str:
     return render_song_tracks(
         progression,
@@ -908,6 +971,10 @@ def render_song(
         melody_included=melody_included,
         melody_collapse_probability=melody_collapse_probability,
         melody_decoder=melody_decoder,
+        melody_phrase_bars=melody_phrase_bars,
+        melody_breath_beats=melody_breath_beats,
+        melody_stepwise_bonus=melody_stepwise_bonus,
+        melody_repeat_penalty=melody_repeat_penalty,
     ).mixed_line
 
 
@@ -1164,6 +1231,10 @@ def render_directory(
     melody_percent: float | int = 70.0,
     melody_collapse_probability: float = 0.25,
     melody_decoder: str = "sequence_beam",
+    melody_phrase_bars: int = 4,
+    melody_breath_beats: float = 2.0,
+    melody_stepwise_bonus: float = 0.40,
+    melody_repeat_penalty: float = -0.60,
     condition: str | None = None,
     stage: str = "score",
     midi_output: str | Path | None = None,
@@ -1200,7 +1271,11 @@ def render_directory(
         if melody_condition == "naturalistic"
         else ("V0", "V1", "V9")
     )
-    profile_obj = get_melody_profile(melody_profile)
+    melody_profile_plan_values, effective_melody_profile = _melody_profile_plan(
+        melody_profile,
+        len(files),
+        seed,
+    )
     melody_percent = _percentage(melody_percent, "melody_percent")
     melody_collapse_probability = _melody_collapse_probability(
         melody_collapse_probability
@@ -1287,7 +1362,9 @@ def render_directory(
                         percussion_inclusion_plan[batch_start + offset],
                         {
                             "melody_condition": melody_condition,
-                            "melody_profile": profile_obj.name,
+                            "melody_profile": melody_profile_plan_values[
+                                batch_start + offset
+                            ],
                             "melody_included": melody_inclusion_plan_values[
                                 batch_start + offset
                             ],
@@ -1308,6 +1385,10 @@ def render_directory(
                                 melody_collapse_probability
                             ),
                             "melody_decoder": melody_decoder,
+                            "melody_phrase_bars": melody_phrase_bars,
+                            "melody_breath_beats": melody_breath_beats,
+                            "melody_stepwise_bonus": melody_stepwise_bonus,
+                            "melody_repeat_penalty": melody_repeat_penalty,
                         },
                     )
                     for offset, (
@@ -1520,6 +1601,8 @@ def render_directory(
             "melody_inclusion": (
                 {
                     "requested_percent": melody_percent,
+                    "profile_mode": effective_melody_profile,
+                    "profile_counts": dict(Counter(melody_profile_plan_values)),
                     "eligible_song_count": len(files),
                     "target_song_count": sum(melody_inclusion_plan_values),
                     "realized_song_count": sum(
@@ -1756,8 +1839,14 @@ def main() -> None:
     )
     parser.add_argument(
         "--melody-profile",
-        choices=("lead-high-sparse", "lead-mid-neutral", "lead-mid-active"),
-        default="lead-high-sparse",
+        choices=(
+            "lead-high-sparse",
+            "lead-mid-neutral",
+            "lead-mid-active",
+            "mixed",
+        ),
+        default="mixed",
+        help="Melody profile or 'mixed' for balanced rotation across profiles.",
     )
     parser.add_argument(
         "--melody-percent",
@@ -1775,6 +1864,30 @@ def main() -> None:
         "--melody-decoder",
         choices=("chord_centered_random_walk", "sequence_beam"),
         default="sequence_beam",
+    )
+    parser.add_argument(
+        "--melody-phrase-bars",
+        type=int,
+        default=4,
+        help="Melody phrase length in bars (default: 4).",
+    )
+    parser.add_argument(
+        "--melody-breath-beats",
+        type=float,
+        default=2.0,
+        help="Melody breath pause duration in beats (default: 2.0).",
+    )
+    parser.add_argument(
+        "--melody-stepwise-bonus",
+        type=float,
+        default=0.40,
+        help="Log-score bonus for stepwise melodic intervals (default: 0.40).",
+    )
+    parser.add_argument(
+        "--melody-repeat-penalty",
+        type=float,
+        default=-0.60,
+        help="Log-score penalty for 2 consecutive pitch repeats (default: -0.60).",
     )
     parser.add_argument(
         "--condition",
@@ -1828,6 +1941,10 @@ def main() -> None:
         melody_percent=args.melody_percent,
         melody_collapse_probability=args.melody_collapse_probability,
         melody_decoder=args.melody_decoder,
+        melody_phrase_bars=args.melody_phrase_bars,
+        melody_breath_beats=args.melody_breath_beats,
+        melody_stepwise_bonus=args.melody_stepwise_bonus,
+        melody_repeat_penalty=args.melody_repeat_penalty,
         condition=args.condition,
         stage=args.stage,
         midi_output=args.midi_output,

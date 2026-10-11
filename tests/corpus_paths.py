@@ -14,8 +14,11 @@ def corpus_dir(name: str) -> Path:
     target = GEN_DIR / f"target-{name}"
     if target.is_dir():
         return target
+    acr_target = GEN_DIR / "acr-target-500k" / name
+    if acr_target.is_dir():
+        return acr_target
     raise FileNotFoundError(
-        f"Neither corpus directory exists: {canonical} or {target}"
+        f"Neither corpus directory exists: {canonical} or {target} or {acr_target}"
     )
 
 

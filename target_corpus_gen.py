@@ -354,10 +354,10 @@ class GenerationQuota:
 
         def scaled(source: Dict[str, int], scale: float = 1.0) -> Dict[str, int]:
             return {
-                key: max(
-                    1,
-                    int(round((value * scale * total_events + reference_events // 2)
-                    // reference_events)),
+                key: (
+                    max(1, int(round((value * scale * total_events + reference_events // 2) // reference_events)))
+                    if total_events >= 500 or int(round((value * scale * total_events) / reference_events)) > 0
+                    else int(round((value * scale * total_events) / reference_events))
                 )
                 for key, value in source.items()
                 if value > 0
@@ -1222,12 +1222,20 @@ def generate_target_corpus(
     no_chord_rate: float = 0.01,
     no_chord_seed: int | None = None,
     triad_target_scale: float = 1.0,
+    bimodal_natural_ratio: float = 0.0,
 ) -> Dict[str, List[List[dict]]]:
-    """Generate the quota-driven §08 corpus without mixing genre models."""
+    """Generate the quota-driven §08 corpus without mixing genre models.
+
+    When bimodal_natural_ratio > 0.0 (e.g. 0.60), the corpus is partitioned into
+    natural songs (cohort: 'natural', sampling from empirical distributions) and
+    targeted songs (cohort: 'targeted', quota-guided).
+    """
     if events_per_genre <= 0:
         raise ValueError("events_per_genre must be positive")
     if songs_per_genre <= 0:
         raise ValueError("songs_per_genre must be positive")
+    if not (0.0 <= bimodal_natural_ratio <= 1.0):
+        raise ValueError("bimodal_natural_ratio must be between 0.0 and 1.0 inclusive")
     if events_by_genre is None:
         events_by_genre = {
             genre: events_per_genre
@@ -1280,9 +1288,10 @@ def generate_target_corpus(
     for genre_index, genre in enumerate(VALID_GENRES):
         event_budget = events_by_genre[genre]
         num_songs = songs_by_genre[genre]
-        quota = GenerationQuota.for_genre(
-            genre, event_budget, triad_target_scale=triad_target_scale
-        )
+
+        num_natural = int(round(num_songs * bimodal_natural_ratio))
+        num_targeted = num_songs - num_natural
+
         song_profiles = [
             VOICER_FAMILIES[index % len(VOICER_FAMILIES)]
             for index in range(num_songs)
@@ -1326,18 +1335,89 @@ def generate_target_corpus(
             if random_bpm
             else None
         )
-        songs = generator.generate_batch(
-            num_songs,
-            event_budget,
-            quota=quota,
-            song_tonics=song_tonics,
-            song_bpms=song_bpms,
-            song_profiles=song_profiles,
-        )
-        if not quota.meets_targets():
-            raise RuntimeError(
-                f"Could not meet {genre} generation targets: {quota.deficits()}"
+
+        songs: List[List[dict]] = []
+        cohort_labels: List[str] = []
+
+        if num_natural == 0:
+            # Entire corpus is targeted
+            quota = GenerationQuota.for_genre(
+                genre, event_budget, triad_target_scale=triad_target_scale
             )
+            songs = generator.generate_batch(
+                num_songs,
+                event_budget,
+                quota=quota,
+                song_tonics=song_tonics,
+                song_bpms=song_bpms,
+                song_profiles=song_profiles,
+            )
+            if not quota.meets_targets():
+                raise RuntimeError(
+                    f"Could not meet {genre} generation targets: {quota.deficits()}"
+                )
+            cohort_labels = ["targeted"] * num_songs
+        elif num_targeted == 0:
+            # Entire corpus is natural
+            songs = generator.generate_batch(
+                num_songs,
+                event_budget,
+                quota=None,
+                song_tonics=song_tonics,
+                song_bpms=song_bpms,
+                song_profiles=song_profiles,
+            )
+            cohort_labels = ["natural"] * num_songs
+        else:
+            # Bimodal split
+            natural_budget = int(round(event_budget * (num_natural / num_songs)))
+            targeted_budget = event_budget - natural_budget
+
+            # Generate natural cohort first (unconstrained)
+            natural_songs = generator.generate_batch(
+                num_natural,
+                natural_budget,
+                quota=None,
+                song_tonics=song_tonics[:num_natural] if song_tonics else None,
+                song_bpms=song_bpms[:num_natural] if song_bpms else None,
+                song_profiles=song_profiles[:num_natural],
+            )
+
+            # Quota for targeted cohort: accounts for targets scaled to targeted_budget
+            quota = GenerationQuota.for_genre(
+                genre, targeted_budget, triad_target_scale=triad_target_scale
+            )
+            # Count any targets naturally produced by the natural cohort towards quotas
+            for song in natural_songs:
+                for event in song:
+                    triad = str(event["triad"])
+                    if triad in quota.triad_counts:
+                        quota.triad_counts[triad] += 1
+                    for slot in EXT_SLOTS:
+                        val = str(event[slot])
+                        if val in quota.extension_counts:
+                            quota.extension_counts[val] += 1
+                    active_count = sum(str(event[s]) != "N" for s in EXT_SLOTS)
+                    for min_act in quota.dense_counts:
+                        if active_count >= min_act:
+                            quota.dense_counts[min_act] += 1
+
+            # Generate targeted cohort second (quota-constrained)
+            targeted_songs = generator.generate_batch(
+                num_targeted,
+                targeted_budget,
+                quota=quota,
+                song_tonics=song_tonics[num_natural:] if song_tonics else None,
+                song_bpms=song_bpms[num_natural:] if song_bpms else None,
+                song_profiles=song_profiles[num_natural:],
+            )
+            if not quota.meets_targets():
+                raise RuntimeError(
+                    f"Could not meet {genre} generation targets for targeted cohort: {quota.deficits()}"
+                )
+            songs = natural_songs + targeted_songs
+            cohort_labels = ["natural"] * num_natural + ["targeted"] * num_targeted
+
         songs = apply_no_chord_filter(
             songs,
             rate=no_chord_rate,
@@ -1353,10 +1433,14 @@ def generate_target_corpus(
                 if song_bpms is not None:
                     generator.bpm = song_bpms[index]
                 generator.instrument_profile = song_profiles[index]
-                generator.write_song(
-                    os.path.join(output_dirs[genre], f"song_{index}.json"),
-                    events,
-                )
+                song_path = os.path.join(output_dirs[genre], f"song_{index}.json")
+                generator.write_song(song_path, events)
+                # Tag cohort in song header
+                with open(song_path, "r", encoding="utf-8") as sf:
+                    song_json = json.load(sf)
+                song_json["cohort"] = cohort_labels[index]
+                with open(song_path, "w", encoding="utf-8") as sf:
+                    json.dump(song_json, sf, indent=2)
 
     return result
 
@@ -1428,6 +1512,12 @@ def parse_args():
         type=float,
         default=2.5,
         help="Scaling factor for rare triad targets (sus2, sus4, diminished, augmented). Default 2.5 to increase rare triad density and reduce plain major chord dominance while preserving rare extension quotas.",
+    )
+    parser.add_argument(
+        "--bimodal-natural-ratio",
+        type=float,
+        default=0.60,
+        help="Proportion of corpus generated from empirical distributions without quota targeting (cohort: 'natural'). Remaining proportion is quota-targeted (cohort: 'targeted'). Default: 0.60 (60/40 split).",
     )
     parser.add_argument("--dist-dir", default=_DEFAULT_DIST_DIR)
     parser.add_argument(
@@ -1525,6 +1615,7 @@ def main() -> None:
         random_bpm=random_bpm,
         random_bpm_range=bpm_range,
         triad_target_scale=args.triad_target_scale,
+        bimodal_natural_ratio=args.bimodal_natural_ratio,
     )
     print("Done.")
 

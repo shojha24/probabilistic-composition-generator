@@ -98,3 +98,121 @@ def parameter_manifest(
             key: "cli" for key in sorted(config)
         },
     }
+
+
+def resolve_soundfonts(
+    soundfont: str | Path | None = None,
+    soundfonts: list[str | Path] | None = None,
+    soundfont_dir: str | Path | None = None,
+) -> list[Path]:
+    """Resolve available General MIDI SoundFonts with clean fallback."""
+    # Normalize empty/whitespace strings to None
+    if soundfont is not None:
+        soundfont_str = str(soundfont).strip()
+        soundfont = soundfont_str if soundfont_str else None
+
+    if soundfont_dir is not None:
+        soundfont_dir_str = str(soundfont_dir).strip()
+        soundfont_dir = soundfont_dir_str if soundfont_dir_str else None
+
+    if soundfonts is not None:
+        soundfonts = [sf for sf in soundfonts if str(sf).strip()]
+        if not soundfonts:
+            soundfonts = None
+
+    candidates: list[Path] = []
+    if soundfonts:
+        for sf in soundfonts:
+            p = Path(sf).expanduser().resolve()
+            if p.is_file() and p not in candidates:
+                candidates.append(p)
+    elif soundfont_dir:
+        pdir = Path(soundfont_dir).expanduser().resolve()
+        if pdir.is_dir():
+            for entry in sorted(pdir.glob("*.sf2")):
+                ep = entry.resolve()
+                if ep.is_file() and ep not in candidates:
+                    candidates.append(ep)
+    elif soundfont is not None:
+        p = Path(soundfont).expanduser().resolve()
+        if p.is_file():
+            candidates.append(p)
+        elif p.is_dir():
+            for entry in sorted(p.glob("*.sf2")):
+                ep = entry.resolve()
+                if ep.is_file() and ep not in candidates:
+                    candidates.append(ep)
+
+    if not candidates:
+        if soundfont is not None:
+            p = Path(soundfont).expanduser().resolve()
+            raise FileNotFoundError(f"SoundFont is missing: {p}")
+        if soundfont_dir is not None:
+            pdir = Path(soundfont_dir).expanduser().resolve()
+            raise FileNotFoundError(f"SoundFont directory contains no .sf2 files: {pdir}")
+        # Default project and system search
+        for default_path in (
+            Path(__file__).resolve().parent / "soundfonts",
+            "/usr/share/sounds/sf2/FluidR3_GM.sf2",
+            "/usr/share/sounds/sf2/default-GM.sf2",
+            Path.home() / ".gervill/soundbank-emg.sf2",
+        ):
+            p = Path(default_path).resolve()
+            if p.is_dir():
+                for entry in sorted(p.glob("*.sf2")):
+                    ep = entry.resolve()
+                    if ep.is_file() and ep not in candidates:
+                        candidates.append(ep)
+            elif p.is_file() and p not in candidates:
+                candidates.append(p)
+
+    return candidates
+
+
+def sample_soundfont_for_ordinal(
+    available_soundfonts: list[Path],
+    root_seed: int,
+    ordinal: int,
+) -> Path:
+    """Deterministically rotate SoundFonts across songs."""
+    if not available_soundfonts:
+        raise ValueError("available_soundfonts must not be empty")
+    if len(available_soundfonts) == 1:
+        return available_soundfonts[0]
+    seed = derive_seed(root_seed, "soundfont-selection", ordinal)
+    return available_soundfonts[seed % len(available_soundfonts)]
+
+
+def sample_gain_jitter_for_ordinal(
+    root_seed: int,
+    ordinal: int,
+    gain_jitter_db: float = 3.0,
+) -> dict[str, float]:
+    """Deterministically jitter role gains per song in dB."""
+    if gain_jitter_db <= 0.0:
+        return {"V0": 0.0, "V1": 0.0, "V2": 0.0, "V9": 0.0}
+    seed = derive_seed(root_seed, "role-gain-jitter", ordinal)
+    import random
+    rng = random.Random(seed)
+    s = gain_jitter_db / 3.0
+    return {
+        "V0": rng.uniform(-3.0 * s, 3.0 * s),
+        "V1": rng.uniform(-3.0 * s, 3.0 * s),
+        "V2": rng.uniform(-3.0 * s, 4.0 * s),
+        "V9": rng.uniform(-4.0 * s, 4.0 * s),
+    }
+
+
+def sample_detune_for_ordinal(
+    root_seed: int,
+    ordinal: int,
+    detune_cents: float = 25.0,
+) -> float:
+    """Deterministically sample micro-tuning pitch drift in cents."""
+    if detune_cents <= 0.0:
+        return 0.0
+    seed = derive_seed(root_seed, "detune-cents", ordinal)
+    import random
+    rng = random.Random(seed)
+    return rng.uniform(-detune_cents, detune_cents)
+
