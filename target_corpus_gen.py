@@ -41,6 +41,7 @@ from chord_gen import (
     walk_extension_trie,
     weighted_choice,
 )
+from bass_module import slice_chord_events
 
 VOICER_FAMILIES = ("piano", "guitar", "synth")
 GUITAR_MAX_ACTIVE_EXTENSIONS = 2
@@ -1223,6 +1224,7 @@ def generate_target_corpus(
     no_chord_seed: int | None = None,
     triad_target_scale: float = 1.0,
     bimodal_natural_ratio: float = 0.0,
+    slice_inversions: bool = False,
 ) -> Dict[str, List[List[dict]]]:
     """Generate the quota-driven §08 corpus without mixing genre models.
 
@@ -1424,8 +1426,7 @@ def generate_target_corpus(
             mode="exact",
             seed=no_chord_seed if no_chord_seed is not None else genre_seed,
         )
-        result[genre] = songs
-
+        final_songs = []
         if output_dirs is not None:
             for index, events in enumerate(songs):
                 if song_tonics is not None:
@@ -1434,13 +1435,48 @@ def generate_target_corpus(
                     generator.bpm = song_bpms[index]
                 generator.instrument_profile = song_profiles[index]
                 song_path = os.path.join(output_dirs[genre], f"song_{index}.json")
-                generator.write_song(song_path, events)
+                if slice_inversions:
+                    slicing_seed = (
+                        genre_seed + 19_841 + index
+                        if genre_seed is not None
+                        else None
+                    )
+                    events_to_write = slice_chord_events(
+                        events,
+                        genre=genre,
+                        tonic_pc=generator.tonic_pc,
+                        bpm=generator.bpm,
+                        seed=slicing_seed,
+                    )
+                else:
+                    events_to_write = events
+                final_songs.append(events_to_write)
+                generator.write_song(song_path, events_to_write)
                 # Tag cohort in song header
                 with open(song_path, "r", encoding="utf-8") as sf:
                     song_json = json.load(sf)
                 song_json["cohort"] = cohort_labels[index]
                 with open(song_path, "w", encoding="utf-8") as sf:
                     json.dump(song_json, sf, indent=2)
+        elif slice_inversions:
+            for index, events in enumerate(songs):
+                slicing_seed = (
+                    genre_seed + 19_841 + index
+                    if genre_seed is not None
+                    else None
+                )
+                events_to_write = slice_chord_events(
+                    events,
+                    genre=genre,
+                    tonic_pc=song_tonics[index] if song_tonics is not None else fixed_tonic,
+                    bpm=song_bpms[index] if song_bpms is not None else bpm,
+                    seed=slicing_seed,
+                )
+                final_songs.append(events_to_write)
+        else:
+            final_songs = songs
+
+        result[genre] = final_songs
 
     return result
 
@@ -1518,6 +1554,12 @@ def parse_args():
         type=float,
         default=0.60,
         help="Proportion of corpus generated from empirical distributions without quota targeting (cohort: 'natural'). Remaining proportion is quota-targeted (cohort: 'targeted'). Default: 0.60 (60/40 split).",
+    )
+    parser.add_argument(
+        "--slice-inversions",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Sub-measure inversion slicing for basslines (Spec 17). Default: True.",
     )
     parser.add_argument("--dist-dir", default=_DEFAULT_DIST_DIR)
     parser.add_argument(
@@ -1616,6 +1658,7 @@ def main() -> None:
         random_bpm_range=bpm_range,
         triad_target_scale=args.triad_target_scale,
         bimodal_natural_ratio=args.bimodal_natural_ratio,
+        slice_inversions=args.slice_inversions,
     )
     print("Done.")
 

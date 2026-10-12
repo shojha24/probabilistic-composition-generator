@@ -216,3 +216,19 @@ def sample_detune_for_ordinal(
     rng = random.Random(seed)
     return rng.uniform(-detune_cents, detune_cents)
 
+
+def sample_eq_tilt_for_ordinal(
+    root_seed: int,
+    ordinal: int,
+    min_tilt_db: float = 1.5,
+    max_tilt_db: float = 3.0,
+) -> float:
+    """Deterministically sample high/low shelf EQ tilt around 1.5 kHz in dB (Spec 17 §4.3)."""
+    seed = derive_seed(root_seed, "eq-tilt-jitter", ordinal)
+    import random
+    rng = random.Random(seed)
+    magnitude = rng.uniform(min_tilt_db, max_tilt_db)
+    sign = rng.choice([-1.0, 1.0])
+    return sign * magnitude
+
+

@@ -24,6 +24,7 @@ from sound_design import (
     derive_seed,
     resolve_soundfonts,
     sample_detune_for_ordinal,
+    sample_eq_tilt_for_ordinal,
     sample_gain_jitter_for_ordinal,
     sample_soundfont_for_ordinal,
     soundfont_asset_manifest,
@@ -220,6 +221,8 @@ def _mix_flac(
     *,
     reverb: str | None = None,
     detune_cents: float = 0.0,
+    production_fx: bool = False,
+    eq_tilt_db: float = 0.0,
     temp_dir: Path | None = None,
 ) -> None:
     if not wav_paths:
@@ -283,6 +286,22 @@ def _mix_flac(
             f"{current_label}asetrate={target_rate},aresample={sample_rate}[detuned]"
         )
         current_label = "[detuned]"
+
+    # Studio production FX (Spec 17 §4: EQ tilt, tape saturation, dynamic bus compand)
+    if production_fx:
+        if abs(eq_tilt_db) > 0.01:
+            filters.append(
+                f"{current_label}lowshelf=f=1500:g={eq_tilt_db:g}:t=q,highshelf=f=1500:g={-eq_tilt_db:g}:t=q[eq_tilted]"
+            )
+            current_label = "[eq_tilted]"
+        filters.append(
+            f"{current_label}aeval='val(0)-0.1*val(0)*val(0)*val(0)|val(1)-0.1*val(1)*val(1)*val(1)'[saturated]"
+        )
+        current_label = "[saturated]"
+        filters.append(
+            f"{current_label}compand=attacks=0.02:decays=0.15:points=-80/-80|-24/-24|-12/-8|0/-3[compressed]"
+        )
+        current_label = "[compressed]"
 
     # Final loudness normalization
     filters.append(f"{current_label}{loudness}[mix]")
@@ -396,6 +415,7 @@ def _render_song_audio(
     gain_jitter_db: float = 0.0,
     reverb: str | None = None,
     detune_cents: float = 0.0,
+    production_fx: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     song_dir = root / f"song_{ordinal}"
     song_dir.mkdir(parents=True, exist_ok=True)
@@ -432,6 +452,7 @@ def _render_song_audio(
 
         # Per-song detune cents
         song_detune = sample_detune_for_ordinal(seed, ordinal, detune_cents) if detune_cents > 0.0 else 0.0
+        song_eq_tilt = sample_eq_tilt_for_ordinal(seed, ordinal) if production_fx else 0.0
 
         if render_mix:
             if role_records:
@@ -472,7 +493,10 @@ def _render_song_audio(
                 mix_kwargs["reverb"] = reverb
             if abs(song_detune) > 0.001:
                 mix_kwargs["detune_cents"] = song_detune
-            if temporary_dir is not None and (reverb is not None or abs(song_detune) > 0.001):
+            if production_fx:
+                mix_kwargs["production_fx"] = True
+                mix_kwargs["eq_tilt_db"] = song_eq_tilt
+            if temporary_dir is not None and (reverb is not None or abs(song_detune) > 0.001 or production_fx):
                 mix_kwargs["temp_dir"] = temporary_dir
             _mix_flac(ffmpeg, mix_inputs, mix_path, song_profile, **mix_kwargs)
             mix_record = _file_record(mix_path)
@@ -497,6 +521,8 @@ def _render_song_audio(
             },
             "detune_cents_applied": song_detune,
             "reverb_applied": reverb,
+            "production_fx_applied": production_fx,
+            "eq_tilt_db_applied": song_eq_tilt,
         }
         if mix_record is not None:
             result_payload["mix"] = mix_record
@@ -525,6 +551,7 @@ def render_audio_bundle(
     gain_jitter_db: float = 0.0,
     reverb: str | None = None,
     detune_cents: float = 0.0,
+    production_fx: bool = False,
 ) -> dict[str, Any]:
     """Render role stems and full mixes from a MIDI manifest."""
     if isinstance(seed, bool) or not isinstance(seed, int):
@@ -585,6 +612,7 @@ def render_audio_bundle(
             gain_jitter_db,
             reverb,
             detune_cents,
+            production_fx,
         ))
 
     total = len(records)
@@ -620,6 +648,8 @@ def render_audio_bundle(
         mixer_graph += " -> afir"
     if abs(detune_cents) > 0.001:
         mixer_graph += " -> asetrate/aresample"
+    if production_fx:
+        mixer_graph += " -> eq_tilt -> tape_sat -> compand"
     mixer_graph += " -> loudnorm"
 
     return {
@@ -643,6 +673,7 @@ def render_audio_bundle(
         "gain_jitter_db": gain_jitter_db,
         "reverb": reverb,
         "detune_cents": detune_cents,
+        "production_fx": production_fx,
         "records": audio_records,
     }
 
@@ -658,6 +689,7 @@ def _mix_song_from_stems(
     gain_jitter_db: float = 0.0,
     reverb: str | None = None,
     detune_cents: float = 0.0,
+    production_fx: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     song_dir.mkdir(parents=True, exist_ok=True)
     selected_tracks = [
@@ -684,6 +716,7 @@ def _mix_song_from_stems(
             song_gains[role] = float(song_gains[role]) + delta
     song_profile["role_gains_db"] = song_gains
     song_detune = sample_detune_for_ordinal(seed, ordinal, detune_cents) if detune_cents > 0.0 else 0.0
+    song_eq_tilt = sample_eq_tilt_for_ordinal(seed, ordinal) if production_fx else 0.0
 
     mix_path = song_dir / "mix.flac"
     mix_kwargs: dict[str, Any] = {}
@@ -691,6 +724,9 @@ def _mix_song_from_stems(
         mix_kwargs["reverb"] = reverb
     if abs(song_detune) > 0.001:
         mix_kwargs["detune_cents"] = song_detune
+    if production_fx:
+        mix_kwargs["production_fx"] = True
+        mix_kwargs["eq_tilt_db"] = song_eq_tilt
     _mix_flac(ffmpeg, mix_inputs, mix_path, song_profile, **mix_kwargs)
     stem_records = {
         track: _file_record(Path(stem_paths[track]))
@@ -716,6 +752,8 @@ def _mix_song_from_stems(
         },
         "detune_cents_applied": song_detune,
         "reverb_applied": reverb,
+        "production_fx_applied": production_fx,
+        "eq_tilt_db_applied": song_eq_tilt,
     }
 
 
@@ -736,6 +774,7 @@ def mix_audio_bundle_from_stems(
     gain_jitter_db: float = 0.0,
     reverb: str | None = None,
     detune_cents: float = 0.0,
+    production_fx: bool = False,
 ) -> dict[str, Any]:
     """Mix pre-rendered role stems into full condition mixes."""
     if isinstance(seed, bool) or not isinstance(seed, int):
@@ -787,6 +826,7 @@ def mix_audio_bundle_from_stems(
             gain_jitter_db,
             reverb,
             detune_cents,
+            production_fx,
         ))
 
     total = len(records)
@@ -821,6 +861,8 @@ def mix_audio_bundle_from_stems(
         mixer_graph += " -> afir"
     if abs(detune_cents) > 0.001:
         mixer_graph += " -> asetrate/aresample"
+    if production_fx:
+        mixer_graph += " -> eq_tilt -> tape_sat -> compand"
     mixer_graph += " -> loudnorm"
 
     result = {
@@ -837,6 +879,7 @@ def mix_audio_bundle_from_stems(
         "gain_jitter_db": gain_jitter_db,
         "reverb": reverb,
         "detune_cents": detune_cents,
+        "production_fx": production_fx,
         "records": audio_records,
     }
     if renderer_info is not None:

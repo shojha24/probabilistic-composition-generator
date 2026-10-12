@@ -1242,6 +1242,7 @@ def render_directory(
     soundfont: str | Path | None = None,
     fluidsynth_bin: str = "fluidsynth",
     ffmpeg_bin: str = "ffmpeg",
+    production_fx: bool = True,
 ) -> None:
     if not isinstance(seed, int) or isinstance(seed, bool):
         raise ValueError("render_directory requires an explicit integer seed")
@@ -1768,6 +1769,7 @@ def render_directory(
                 seed=seed,
                 fluidsynth_bin=fluidsynth_bin,
                 ffmpeg_bin=ffmpeg_bin,
+                production_fx=production_fx,
             )
             manifest["sound_design"]["stage"] = "audio"
             manifest["sound_design"]["audio_rendered"] = True
@@ -1926,6 +1928,12 @@ def main() -> None:
         default="ffmpeg",
         help="ffmpeg executable or full path used for encoding and mixing.",
     )
+    parser.add_argument(
+        "--production-fx",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Apply dynamic compand, tape saturation, and spectral EQ tilt in final mix (default: True).",
+    )
     args = parser.parse_args()
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     render_directory(
@@ -1952,6 +1960,7 @@ def main() -> None:
         soundfont=args.soundfont,
         fluidsynth_bin=args.fluidsynth,
         ffmpeg_bin=args.ffmpeg,
+        production_fx=args.production_fx,
     )
 
 

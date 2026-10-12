@@ -391,6 +391,9 @@ MELODY_INSTRUMENTS = (
     Instrument("tenor-sax", 66, frozenset(("melody",))),
     Instrument("clarinet", 71, frozenset(("melody",))),
     Instrument("synth-lead-square", 80, frozenset(("melody",))),
+    Instrument("choir-aahs", 52, frozenset(("melody",))),
+    Instrument("voice-oohs", 53, frozenset(("melody",))),
+    Instrument("synth-voice", 54, frozenset(("melody",))),
 )
 
 MELODY_PROFILE_PREFERRED_INSTRUMENTS = {
@@ -399,12 +402,12 @@ MELODY_PROFILE_PREFERRED_INSTRUMENTS = {
         "clarinet", "shakuhachi",
     ),
     "lead-mid-neutral": (
-        "viola", "trumpet", "electric-guitar-clean", "clarinet",
-        "tenor-sax", "fiddle",
+        "voice-oohs", "choir-aahs", "synth-voice", "electric-guitar-clean",
+        "viola",
     ),
     "lead-mid-active": (
-        "overdriven-guitar", "distortion-guitar", "trombone",
-        "tenor-sax", "synth-lead-square", "viola",
+        "choir-aahs", "synth-voice", "voice-oohs", "overdriven-guitar",
+        "tenor-sax",
     ),
 }
 

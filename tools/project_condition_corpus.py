@@ -444,6 +444,7 @@ def _project_one(
     gain_jitter_db: float = 0.0,
     reverb: str | None = None,
     detune_cents: float = 0.0,
+    production_fx: bool = True,
     stems_data: dict[str, Any] | None = None,
     fluidsynth_bin: str,
     ffmpeg_bin: str,
@@ -623,6 +624,7 @@ def _project_one(
                 gain_jitter_db=gain_jitter_db,
                 reverb=reverb,
                 detune_cents=detune_cents,
+                production_fx=production_fx,
             )
             manifest["sound_design"]["stage"] = "audio"
             manifest["sound_design"]["audio_rendered"] = True
@@ -657,6 +659,7 @@ def project_conditions(
     gain_jitter_db: float = 0.0,
     reverb: str | None = None,
     detune_cents: float = 0.0,
+    production_fx: bool = True,
     stems_dir: str | Path | None = None,
     fluidsynth_bin: str = "fluidsynth",
     ffmpeg_bin: str = "ffmpeg",
@@ -743,6 +746,7 @@ def project_conditions(
             gain_jitter_db=gain_jitter_db,
             reverb=reverb,
             detune_cents=detune_cents,
+            production_fx=production_fx,
             stems_data=stems_data,
             fluidsynth_bin=fluidsynth_bin,
             ffmpeg_bin=ffmpeg_bin,
@@ -805,6 +809,12 @@ def main() -> None:
     )
     parser.add_argument("--detune-cents", type=float, default=0.0)
     parser.add_argument(
+        "--production-fx",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Apply dynamic compand, tape saturation, and spectral EQ tilt in final mix (default: True).",
+    )
+    parser.add_argument(
         "--stems-dir",
         help="Directory to store or reuse shared audio stems (defaults to <out-dir>/_stems).",
     )
@@ -837,6 +847,7 @@ def main() -> None:
         gain_jitter_db=args.gain_jitter_db,
         reverb=args.reverb,
         detune_cents=args.detune_cents,
+        production_fx=args.production_fx,
         stems_dir=args.stems_dir,
         fluidsynth_bin=args.fluidsynth,
         ffmpeg_bin=args.ffmpeg,
