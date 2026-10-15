@@ -41,7 +41,7 @@ Empirical analysis and sim-to-real transfer benchmarks confirm that **5,000 song
 ### Step 1: Generate 5k Target Corpus with Sustained Inversions & Sub-Measure Slicing
 
 - **5,000 songs total** (~500,000 chord events; 3,250 pop/rock, 1,750 jazz; 65/35 split).
-- **`--bimodal-natural-ratio 0.5`**: 50% natural distribution (safeguarding real-world frame accuracy and common-chord priors), 50% targeted rare distribution.
+- **`--bimodal-natural-ratio 0.5`**: 50% natural distribution (safeguarding real-world frame accuracy and common-chord priors), 50% targeted rare distribution. (Note: pure targeted generation with `--bimodal-natural-ratio 0.0` is also supported for stress-testing rare chord quotas without deficit).
 - **`--triad-target-scale 3.0`**: Scales rare triad quotas (`sus2`, `sus4`, `diminished`, `augmented`) by 3.0x within the targeted cohort.
 - **`--sustained-inversion-rate 0.10`**: Generates sustained first (`/3`) and second (`/5`) inversion chords across half-note (`h`) and whole-note (`w`) durations (Spec 18 §3.2).
 - **`--slice-inversions`** (enabled by default): Splits walking basslines, root-5th alternations, and approach notes into sub-measure time-aligned Harte labels (e.g. `0.000 2.000 C:maj`, `2.000 4.000 C:maj/5`, `C:maj/3`, `C:maj/7`). Guarantees that synthetic non-root bass rates reach **12%–15%**, matching physical acoustic reality.
@@ -96,7 +96,7 @@ python3 render.py \
 ```
 
 ### Step 3: Project Conditions & Multi-SoundFont Audio Render with Low-End DSP & Production FX
-
+/
 - Reuses canonical V0/V1/V2/V9 blocks without symbolic regeneration.
 - **Multi-SoundFont Rotation**: Deterministically rotates across installed SoundFonts per song ordinal.
 - **Low-End Mix Engineering & DSP (Spec 18 §2)**:

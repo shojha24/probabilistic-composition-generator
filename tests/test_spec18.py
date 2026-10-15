@@ -362,3 +362,22 @@ def test_spec18_end_to_end_audio_mix_execution(tmp_path):
 
     assert out_flac.is_file()
     assert out_flac.stat().st_size > 500
+
+
+def test_spec18_target_corpus_generation_meets_quotas_with_sustained_inversions():
+    """Verify target corpus generation satisfies quotas with sustained inversions (Spec 18 §3.2, §5.1)."""
+    from target_corpus_gen import GenerationQuota, TargetChordGenerator, GenParams
+
+    generator = TargetChordGenerator(
+        genre="pop_rock",
+        tonic_pc=0,
+        bpm=120,
+        dist_dir="./distributions",
+        params=GenParams(),
+        sustained_inversion_rate=0.10,
+        seed=15001,
+    )
+    quota = GenerationQuota.for_genre("pop_rock", 1000, triad_target_scale=3.0)
+    songs = generator.generate_batch(10, 1000, quota=quota)
+    assert len(songs) == 10
+    assert quota.meets_targets(), f"Deficits remain: {quota.deficits()}"

@@ -436,7 +436,7 @@ class GenerationQuota:
         return self.position - self.last_target_position >= self.min_target_spacing
 
     def mark_target(self) -> None:
-        self.last_target_position = self.position
+        self.last_target_position = max(0, self.position - 1)
 
     def record(
         self,
@@ -1033,36 +1033,58 @@ class TargetChordGenerator(ChordGenerator):
                 seventh, ninth, eleventh, thirteenth = "N", "N", "N", "N"
             else:
                 target_tuple = None
-                if state_hist.pending_target_state is None:
-                    dense_due = (
-                        self.instrument_profile != "guitar"
-                        and any(quota.dense_is_due(m) for m in quota.dense_targets)
-                    ) if quota is not None else False
-                    if dense_due:
-                        dense_target = self._target_dense_extension(
-                            chosen_state, triad, quota
+                dense_due = (
+                    self.instrument_profile != "guitar"
+                    and any(quota.dense_is_due(m) for m in quota.dense_targets)
+                ) if quota is not None else False
+                if dense_due:
+                    dense_target = self._target_dense_extension(
+                        chosen_state, triad, quota
+                    )
+                    if dense_target is not None:
+                        minimum_active, dense_trie = dense_target
+                        target_tuple = walk_extension_trie_density(
+                            dense_trie,
+                            bass_str,
+                            state_hist.ext_prev_str,
+                            minimum_active,
+                            self.params,
+                            self.rng,
                         )
-                        if dense_target is not None:
-                            minimum_active, dense_trie = dense_target
+                        if target_tuple is None and bass_str != "0":
                             target_tuple = walk_extension_trie_density(
                                 dense_trie,
-                                bass_str,
+                                "0",
                                 state_hist.ext_prev_str,
                                 minimum_active,
                                 self.params,
                                 self.rng,
                             )
-                            targeted_dense = target_tuple is not None
+                            if target_tuple is not None:
+                                bass_str = "0"
+                                bass_interval = 0
+                        targeted_dense = target_tuple is not None
 
-                    if target_tuple is None:
-                        target = self._target_extension(
-                            chosen_state, triad, quota
+                if target_tuple is None:
+                    target = self._target_extension(
+                        chosen_state, triad, quota
+                    )
+                    if target is not None:
+                        target_slot, target_value, target_trie = target
+                        target_tuple = walk_extension_trie_target(
+                            target_trie,
+                            bass_str,
+                            state_hist.ext_prev_str,
+                            target_slot,
+                            target_value,
+                            self.params,
+                            self.rng,
+                            self._max_active_extensions(),
                         )
-                        if target is not None:
-                            target_slot, target_value, target_trie = target
+                        if target_tuple is None and bass_str != "0":
                             target_tuple = walk_extension_trie_target(
                                 target_trie,
-                                bass_str,
+                                "0",
                                 state_hist.ext_prev_str,
                                 target_slot,
                                 target_value,
@@ -1070,22 +1092,37 @@ class TargetChordGenerator(ChordGenerator):
                                 self.rng,
                                 self._max_active_extensions(),
                             )
+                            if target_tuple is not None:
+                                bass_str = "0"
+                                bass_interval = 0
 
-                    if target_tuple is None and not dense_due:
-                        dense_target = self._target_dense_extension(
-                            chosen_state, triad, quota
+                if target_tuple is None and not dense_due:
+                    dense_target = self._target_dense_extension(
+                        chosen_state, triad, quota
+                    )
+                    if dense_target is not None:
+                        minimum_active, dense_trie = dense_target
+                        target_tuple = walk_extension_trie_density(
+                            dense_trie,
+                            bass_str,
+                            state_hist.ext_prev_str,
+                            minimum_active,
+                            self.params,
+                            self.rng,
                         )
-                        if dense_target is not None:
-                            minimum_active, dense_trie = dense_target
+                        if target_tuple is None and bass_str != "0":
                             target_tuple = walk_extension_trie_density(
                                 dense_trie,
-                                bass_str,
+                                "0",
                                 state_hist.ext_prev_str,
                                 minimum_active,
                                 self.params,
                                 self.rng,
                             )
-                            targeted_dense = target_tuple is not None
+                            if target_tuple is not None:
+                                bass_str = "0"
+                                bass_interval = 0
+                        targeted_dense = target_tuple is not None
 
                 if target_tuple is not None:
                     seventh, ninth, eleventh, thirteenth = target_tuple
@@ -1147,7 +1184,7 @@ class TargetChordGenerator(ChordGenerator):
                 )
                 if targeted_triad or targeted_extension_value or targeted_dense:
                     quota.mark_target()
-                    if state_hist.pending_target_state is None:
+                    if state_hist.pending_target_state is None and targeted_triad:
                         state_hist.require_observed_successor = True
 
             state_hist.prev_states.append(chosen_state)
