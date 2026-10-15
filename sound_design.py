@@ -27,7 +27,7 @@ REFERENCE_RENDER_PROFILE = {
     "tail_policy": "preserve_release",
     "loudness_target_lufs": -18.0,
     "true_peak_ceiling_dbtp": -1.0,
-    "role_gains_db": {"V0": 0.0, "V1": 3.0, "V2": -1.0, "V9": -6.0},
+    "role_gains_db": {"V0": 0.0, "V1": 1.0, "V2": -1.0, "V9": -1.5},
 }
 ASSET_REGISTRY = {
     "general-midi-fallback-v1": {

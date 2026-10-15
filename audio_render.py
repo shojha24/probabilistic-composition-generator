@@ -234,13 +234,26 @@ def _mix_flac(
     gains = profile["role_gains_db"]
     sample_rate = profile["sample_rate_hz"]
 
+    v1_filter = "aeval='val(0)-0.05*val(0)*val(0)*val(0)':c=same,lowshelf=f=120:g=2.0:t=q,lowpass=f=3500"
+
     for index, (track, wav_path) in enumerate(wav_paths):
         input_args.extend(["-i", str(wav_path)])
         label = f"role{index}"
         role = TRACK_TO_ROLE[track]
         gain = float(gains[role])
+        role_filter_parts = [f"volume={gain:g}dB"]
+        if role == "V1":
+            role_filter_parts.append(v1_filter)
+        if profile.get("channels") == 2:
+            if role == "V0":
+                role_filter_parts.append("pan=stereo|c0=0.6*c0|c1=0.4*c0")
+            elif role == "V9":
+                role_filter_parts.append("pan=stereo|c0=0.4*c0|c1=0.6*c0")
+            else:
+                role_filter_parts.append("pan=stereo|c0=0.5*c0|c1=0.5*c0")
+        filter_str = ",".join(role_filter_parts)
         filters.append(
-            f"[{index}:a]volume={gain:g}dB[{label}]"
+            f"[{index}:a]{filter_str}[{label}]"
         )
         labels.append(f"[{label}]")
 
@@ -264,16 +277,17 @@ def _mix_flac(
 
     current_label = mix_label
 
-    # Studio convolution reverb via afir filter
+    # Studio convolution reverb via afir filter (Spec 18 §2.1 split-band low-end anchor)
     if reverb and reverb.lower() not in ("none", "off", "false"):
         rir_dir = temp_dir if temp_dir is not None else flac_path.parent
         rir_path = _generate_synthetic_rir(reverb.lower(), sample_rate, rir_dir)
         rir_index = len(wav_paths)
         input_args.extend(["-i", str(rir_path)])
-        # asplit to dry and wet paths, convolve wet with RIR, then blend
+        # asplit to dry and wet paths, highpass wet at 150Hz before RIR convolution, then blend
         filters.append(
             f"{current_label}asplit[dry_sig][to_rev];"
-            f"[to_rev][{rir_index}:a]afir=dry=0:wet=1[wet_sig];"
+            f"[to_rev]highpass=f=150[hp_rev];"
+            f"[hp_rev][{rir_index}:a]afir=dry=0:wet=1[wet_sig];"
             f"[dry_sig][wet_sig]amix=inputs=2:weights=0.82 0.18[reverbed]"
         )
         current_label = "[reverbed]"

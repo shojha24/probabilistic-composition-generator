@@ -103,7 +103,7 @@ def test_mix_command_contains_role_gains_and_master_policy(tmp_path, monkeypatch
     command = " ".join(captured["command"])
     assert "-nostdin" in command
     assert "volume=0dB" in command
-    assert "volume=3dB" in command
+    assert "volume=1dB" in command
     assert "amix=inputs=2" in command
     assert "loudnorm=I=-18:TP=-1" in command
 

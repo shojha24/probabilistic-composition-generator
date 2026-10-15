@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+import random
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
@@ -372,6 +373,31 @@ BASS_INSTRUMENTS = (
     Instrument("sawtooth-wave", 81, frozenset(("bass",))),
     Instrument("basslead", 87, frozenset(("bass",))),
 )
+
+# Spec 18 §3.3 patch selection weights: prioritize natural acoustic and electric
+# basses (GM 33, 34, 32, 35) and reduce probability for synthetic/slap timbres.
+BASS_INSTRUMENT_WEIGHTS = {
+    "electric-bass-finger": 35.0,  # GM 33: warm, natural fundamental
+    "electric-bass-pick": 25.0,    # GM 34: articulate attack with transient punch
+    "acoustic-bass": 20.0,         # GM 32: woody double bass body resonance
+    "fretless-bass": 15.0,         # GM 35: smooth, expressive mid-range
+    "slap-bass-1": 1.5,
+    "synth-bass-1": 1.5,
+    "contrabass": 1.0,
+    "cello": 0.5,
+    "sawtooth-wave": 0.2,
+    "basslead": 0.1,
+    "slap-bass-2": 0.08,           # Deprecated: artificial synthetic envelope
+    "synth-bass-2": 0.08,          # Deprecated: artificial synthetic envelope
+    "square-wave": 0.04,           # Deprecated: artificial synthetic envelope
+}
+
+
+def sample_bass_instrument(rng: random.Random) -> Instrument:
+    """Sample a bass instrument weighted according to Spec 18 patch priorities."""
+    weights = [BASS_INSTRUMENT_WEIGHTS.get(inst.name, 1.0) for inst in BASS_INSTRUMENTS]
+    return rng.choices(BASS_INSTRUMENTS, weights=weights, k=1)[0]
+
 
 # Melody patches are intentionally separate from the chord and bass catalogs.
 # ``Instrument.program`` is the zero-based raw GM program used by JFugue.

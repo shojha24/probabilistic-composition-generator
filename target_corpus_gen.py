@@ -42,6 +42,7 @@ from chord_gen import (
     weighted_choice,
 )
 from bass_module import slice_chord_events
+from voicing.types import TRIAD_THIRD_FIFTH
 
 VOICER_FAMILIES = ("piano", "guitar", "synth")
 GUITAR_MAX_ACTIVE_EXTENSIONS = 2
@@ -509,6 +510,7 @@ class TargetChordGenerator(ChordGenerator):
         self,
         *args,
         instrument_profile: Optional[str] = None,
+        sustained_inversion_rate: float = 0.10,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
@@ -517,6 +519,7 @@ class TargetChordGenerator(ChordGenerator):
                 f"instrument_profile must be one of {VOICER_FAMILIES} or None"
             )
         self.instrument_profile = instrument_profile
+        self.sustained_inversion_rate = float(sustained_inversion_rate)
         self._target_trie_cache: Dict[Tuple[str, str], Optional[dict]] = {}
         self._dense_trie_cache: Dict[Tuple[str, int], Optional[dict]] = {}
         self._reachable_states_cache: Optional[set] = None
@@ -991,15 +994,38 @@ class TargetChordGenerator(ChordGenerator):
             root_str, triad = chosen_state.rsplit("_", 1)
             root_interval = int(root_str)
 
+            duration_token = self.rng.choices(
+                list(self.duration_weights),
+                weights=list(self.duration_weights.values()),
+                k=1,
+            )[0]
+            duration_beats = DURATION_BEATS[duration_token]
+            duration_seconds = duration_beats * seconds_per_beat
+
             if triad in ("1", "5"):
                 bass_str = "0"
                 bass_interval = 0
             else:
-                dist2 = stage2_distribution(
-                    root_str, state_hist.bass_prev, self.stage2, self.params
-                )
-                bass_str = weighted_choice(dist2, self.rng) if dist2 else "0"
-                bass_interval = int(bass_str)
+                sustained_inversion = False
+                if getattr(self, "sustained_inversion_rate", 0.0) > 0 and duration_token in ("w", "h"):
+                    if self.rng.random() < self.sustained_inversion_rate:
+                        third_int, fifth_int = TRIAD_THIRD_FIFTH.get(triad, (None, None))
+                        if third_int is not None or fifth_int is not None:
+                            if self.rng.random() < 0.60 and third_int is not None:
+                                bass_interval = third_int
+                            elif fifth_int is not None:
+                                bass_interval = fifth_int
+                            else:
+                                bass_interval = third_int
+                            bass_str = str(bass_interval)
+                            sustained_inversion = True
+
+                if not sustained_inversion:
+                    dist2 = stage2_distribution(
+                        root_str, state_hist.bass_prev, self.stage2, self.params
+                    )
+                    bass_str = weighted_choice(dist2, self.rng) if dist2 else "0"
+                    bass_interval = int(bass_str)
 
             targeted_extension_value: Optional[str] = None
             targeted_dense = False
@@ -1091,13 +1117,6 @@ class TargetChordGenerator(ChordGenerator):
                 eleventh,
                 thirteenth,
             )
-            duration_token = self.rng.choices(
-                list(self.duration_weights),
-                weights=list(self.duration_weights.values()),
-                k=1,
-            )[0]
-            duration_beats = DURATION_BEATS[duration_token]
-            duration_seconds = duration_beats * seconds_per_beat
             time_start = current_time
             current_time += duration_seconds
 
@@ -1225,6 +1244,7 @@ def generate_target_corpus(
     triad_target_scale: float = 1.0,
     bimodal_natural_ratio: float = 0.0,
     slice_inversions: bool = False,
+    sustained_inversion_rate: float = 0.10,
 ) -> Dict[str, List[List[dict]]]:
     """Generate the quota-driven §08 corpus without mixing genre models.
 
@@ -1317,6 +1337,7 @@ def generate_target_corpus(
             bpm=bpm,
             params=generator_params,
             duration_weights=duration_weights,
+            sustained_inversion_rate=sustained_inversion_rate,
         )
         property_seed = (
             genre_seed + 7_919
@@ -1393,16 +1414,22 @@ def generate_target_corpus(
             for song in natural_songs:
                 for event in song:
                     triad = str(event["triad"])
-                    if triad in quota.triad_counts:
-                        quota.triad_counts[triad] += 1
+                    if triad in quota.triad_targets:
+                        quota.triad_targets[triad] = max(0, quota.triad_targets[triad] - 1)
                     for slot in EXT_SLOTS:
                         val = str(event[slot])
-                        if val in quota.extension_counts:
-                            quota.extension_counts[val] += 1
+                        if val in quota.extension_targets:
+                            quota.extension_targets[val] = max(0, quota.extension_targets[val] - 1)
                     active_count = sum(str(event[s]) != "N" for s in EXT_SLOTS)
-                    for min_act in quota.dense_counts:
+                    for min_act in quota.dense_targets:
                         if active_count >= min_act:
-                            quota.dense_counts[min_act] += 1
+                            quota.dense_targets[min_act] = max(0, quota.dense_targets[min_act] - 1)
+            max_rem_ratio = (
+                max(quota.extension_targets.values()) / quota.total_events
+                if quota.extension_targets and quota.total_events > 0
+                else 0.0
+            )
+            quota.min_target_spacing = 1 if max_rem_ratio > 0.35 else 2
 
             # Generate targeted cohort second (quota-constrained)
             targeted_songs = generator.generate_batch(
@@ -1468,8 +1495,8 @@ def generate_target_corpus(
                 events_to_write = slice_chord_events(
                     events,
                     genre=genre,
-                    tonic_pc=song_tonics[index] if song_tonics is not None else fixed_tonic,
-                    bpm=song_bpms[index] if song_bpms is not None else bpm,
+                    tonic_pc=song_tonics[index] if song_tonics is not None else generator.tonic_pc,
+                    bpm=song_bpms[index] if song_bpms is not None else generator.bpm,
                     seed=slicing_seed,
                 )
                 final_songs.append(events_to_write)
@@ -1560,6 +1587,12 @@ def parse_args():
         action=argparse.BooleanOptionalAction,
         default=True,
         help="Sub-measure inversion slicing for basslines (Spec 17). Default: True.",
+    )
+    parser.add_argument(
+        "--sustained-inversion-rate",
+        type=float,
+        default=0.10,
+        help="Probability of sustained first (/3) or second (/5) inversion chords on whole/half note durations (Spec 18 §3.2). Default: 0.10.",
     )
     parser.add_argument("--dist-dir", default=_DEFAULT_DIST_DIR)
     parser.add_argument(
@@ -1659,6 +1692,7 @@ def main() -> None:
         triad_target_scale=args.triad_target_scale,
         bimodal_natural_ratio=args.bimodal_natural_ratio,
         slice_inversions=args.slice_inversions,
+        sustained_inversion_rate=args.sustained_inversion_rate,
     )
     print("Done.")
 

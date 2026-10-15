@@ -30,42 +30,55 @@ python3 -c 'from sound_design import resolve_soundfonts; sfs = resolve_soundfont
 
 ---
 
-## 10,000 Song Production Pipeline (Spec 17)
+## 5,000 Song Production Pipeline (Spec 18)
 
-### Step 1: Generate 10k Target Corpus with Sub-Measure Inversion Slicing
+### Why 5,000 Songs vs. 10,000 Songs (Spec 18 §5.1)
+Empirical analysis and sim-to-real transfer benchmarks confirm that **5,000 songs is the optimal corpus scale**:
+- **300 Audio Hours / 60,000 Augmented Passes**: 5,000 songs with 12-pitch shift augmentation ($5,000 \times 12 = 60,000$) provides full harmonic coverage and CQT representation learning without representational rigidity on synthetic soundfont envelopes.
+- **Statistical Coverage**: Exceeds >1,000 instances per rare chord class.
+- **Pipeline Turnaround**: ~2 hours audio render / ~2.5 hours pretraining on modern GPUs.
 
-- **10,000 songs total** (~1,000,000 chord events; 6,500 pop/rock, 3,500 jazz; 65/35 split).
+### Step 1: Generate 5k Target Corpus with Sustained Inversions & Sub-Measure Slicing
+
+- **5,000 songs total** (~500,000 chord events; 3,250 pop/rock, 1,750 jazz; 65/35 split).
 - **`--bimodal-natural-ratio 0.5`**: 50% natural distribution (safeguarding real-world frame accuracy and common-chord priors), 50% targeted rare distribution.
 - **`--triad-target-scale 3.0`**: Scales rare triad quotas (`sus2`, `sus4`, `diminished`, `augmented`) by 3.0x within the targeted cohort.
+- **`--sustained-inversion-rate 0.10`**: Generates sustained first (`/3`) and second (`/5`) inversion chords across half-note (`h`) and whole-note (`w`) durations (Spec 18 §3.2).
 - **`--slice-inversions`** (enabled by default): Splits walking basslines, root-5th alternations, and approach notes into sub-measure time-aligned Harte labels (e.g. `0.000 2.000 C:maj`, `2.000 4.000 C:maj/5`, `C:maj/3`, `C:maj/7`). Guarantees that synthetic non-root bass rates reach **12%–15%**, matching physical acoustic reality.
 
 ```bash
 python3 target_corpus_gen.py \
-  --target-events 1000000 \
-  --total-songs 10000 \
+  --target-events 500000 \
+  --total-songs 5000 \
   --pop-rock-ratio 0.65 \
   --bimodal-natural-ratio 0.5 \
   --triad-target-scale 3.0 \
+  --sustained-inversion-rate 0.10 \
   --slice-inversions \
   --debug \
   --seed 15001 \
   --dist-dir ./distributions \
-  --out-dir ./gen/acr-target-10k
+  --out-dir ./gen/acr-target-5k
 ```
 
 ### Step 2: Canonical Multi-Role Rendering
 
 - Renders V0 chords/arpeggios, V1 bass, V2 melody, V9 percussion.
 - 30% arpeggios / 70% pads; melody and percussion included in canonical master.
+- **Extended Bass Tessitura & Patch Prioritization (Spec 18 §3)**:
+  - Explores E1 (MIDI 28) to G3 (MIDI 55) with 20% octave jitter to high walking/slap registers.
+  - Prioritizes GM 33 (*electric-bass-finger*), GM 34 (*electric-bass-pick*), GM 32 (*acoustic-bass*), and GM 35 (*fretless-bass*), while deprecating plain synth/slap rompler patches.
+- **Percussion Velocity Humanization (Spec 18 §4)**:
+  - Drum hits incorporate Gaussian velocity jitter: kick and snare ($100 \pm 8$), closed/pedal hi-hat ($80 \pm 12$).
 - **Human Vocal Formants (Spec 17 §3)**: Melody engine catalog integrates GM programs 52 (*Choir Aahs*), 53 (*Voice Oohs*), and 54 (*Synth Voice*), prioritized for pop/rock verses, choruses, and ballads ($\ge 25\%$ vocal lead selection rate).
 - Melody generation automatically applies legato phrase-level breathing, voice-leading memory, and stepwise motion.
 - Only the `score` stage is needed here; condition projection handles MIDI & audio.
 
 ```bash
 python3 render.py \
-  --in-dir ./gen/acr-target-10k/pop-rock-labels \
-  --in-dir ./gen/acr-target-10k/jazz-labels \
-  --out ./gen/acr-canonical-10k-all-roles.txt \
+  --in-dir ./gen/acr-target-5k/pop-rock-labels \
+  --in-dir ./gen/acr-target-5k/jazz-labels \
+  --out ./gen/acr-canonical-5k-all-roles.txt \
   --seed 25001 \
   --mode mixed \
   --arpeggio-percent 30 \
@@ -82,10 +95,15 @@ python3 render.py \
   --stage score
 ```
 
-### Step 3: Project Conditions & Multi-SoundFont Audio Render with Studio Production FX
+### Step 3: Project Conditions & Multi-SoundFont Audio Render with Low-End DSP & Production FX
 
 - Reuses canonical V0/V1/V2/V9 blocks without symbolic regeneration.
 - **Multi-SoundFont Rotation**: Deterministically rotates across installed SoundFonts per song ordinal.
+- **Low-End Mix Engineering & DSP (Spec 18 §2)**:
+  - **Split-Band Dry Low-End Reverb Anchor**: Wet convolution path applies a high-pass filter at 150 Hz (`highpass=f=150`) before RIR convolution, keeping sub-150 Hz bass fundamentals completely dry, punchy, and phase-coherent.
+  - **Bass Amp Drive & Cabinet Saturation**: FFmpeg filter on `V1` applies soft cubic saturation (`aeval='val(0)-0.05*val(0)^3'`), 120 Hz low-shelf warmth (`lowshelf=f=120:g=2.0`), and 3500 Hz low-pass filter (`lowpass=f=3500`) to remove harsh GM click noise.
+  - **Stem Level Rebalancing**: `V0: 0.0 dB`, `V1: 1.0 dB` (down from +3.0 dB), `V2: -1.0 dB`, `V9: -1.5 dB` (up from -6.0 dB for realistic kick-bass masking).
+  - **Stereo Spatialization**: `V1` and `V2` anchored dead-center; `V0` and `V9` receive subtle $\pm 20\%$ stereo panning in stereo profiles.
 - **Studio Production FX (`--production-fx`, default True)**:
   - **Dynamic Bus Compression (`compand`)**: Moderate attack (20ms) and decay (150ms) for consistent RMS density.
   - **Analog Tape Saturation (`aeval`)**: Soft polynomial overdrive saturation (`val(0)-0.1*val(0)^3|val(1)-0.1*val(1)^3`) emulating vintage console tape harmonics.
@@ -99,8 +117,8 @@ SOUNDFONT_DIR="./soundfonts"
 FALLBACK_SOUNDFONT="./soundfonts/FluidR3_GM.sf2"
 
 python3 tools/project_condition_corpus.py \
-  --canonical ./gen/acr-canonical-10k-all-roles.txt \
-  --out-dir ./gen/acr-conditions-10k \
+  --canonical ./gen/acr-canonical-5k-all-roles.txt \
+  --out-dir ./gen/acr-conditions-5k \
   --conditions naturalistic \
   --seed 25001 \
   --melody-percent 70 \
@@ -120,17 +138,18 @@ In `ChordFormer-Artificial-Dataset-Benchmarking`:
 
 ```bash
 # Convert sliced labels to Harte format
-python convert_synth_labels.py --input_dir ../probabilistic-composition-generator/gen/acr-target-10k
+python convert_synth_labels.py --input_dir ../probabilistic-composition-generator/gen/acr-target-5k
 
 # Extract CQT spectrograms and labels
 python extract_synth_cqt.py
 python extract_synth_xchord.py
 
-# Pretrain Stage 1 (scales to ~11k steps for 10k songs)
-python pretrain_synthetic.py --total_songs 10000
+# Pretrain Stage 1 (7-8 epochs, ~11,000 steps at batch_size=36)
+# LR schedule: 1e-3 (4 epochs) -> 1e-4 (2 epochs) -> 1e-5 (1-2 epochs)
+python pretrain_synthetic.py --total_songs 5000 --epochs 8
 
-# Fine-Tune Stage 2 with Inverted Discriminative LR and 20% Replay
-python finetune_real_fold.py 0 --no_load_checkpoint --replay_ratio 0.2
+# Fine-Tune Stage 2 with Fast CRF and Replay Floor
+python finetune_real_fold.py 0 --replay_floor 0.15 --no_logit_adj
 ```
 
 ---
@@ -139,19 +158,22 @@ python finetune_real_fold.py 0 --no_load_checkpoint --replay_ratio 0.2
 
 Condition outputs are written under:
 ```
-gen/acr-conditions-10k/<condition>/scores.txt
-gen/acr-conditions-10k/<condition>/scores.txt.manifest.json
-gen/acr-conditions-10k/<condition>/midi/START_SONG_<ordinal>.mid
-gen/acr-conditions-10k/<condition>/audio/song_<ordinal>/mix.flac
+gen/acr-conditions-5k/<condition>/scores.txt
+gen/acr-conditions-5k/<condition>/scores.txt.manifest.json
+gen/acr-conditions-5k/<condition>/midi/START_SONG_<ordinal>.mid
+gen/acr-conditions-5k/<condition>/audio/song_<ordinal>/mix.flac
 ```
 
 Shared canonical audio stems are rendered once under:
 ```
-gen/acr-conditions-10k/_stems/audio/song_<ordinal>/<track>.flac
+gen/acr-conditions-5k/_stems/audio/song_<ordinal>/<track>.flac
 ```
 
 Condition audio mixes are generated by mixing the active role stems via FFmpeg:
 ```
-role_gain -> amix -> afir -> eq_tilt -> tape_sat -> compand -> loudnorm
+[V1 stem]  --> [amp_sat + lowshelf + lowpass] --------+
+[V0 stem]  --> [panning +-20%] -----------------------+--> amix --> [split dry] -----------------------------------------+--> eq_tilt --> tape_sat --> compand --> loudnorm
+[V2 stem]  --> [center] ------------------------------+             --> [highpass=150] --> afir(RIR) --> amix(dry+wet) -+
+[V9 stem]  --> [panning -+20%] -----------------------+
 ```
 The condition manifests retain the full provenance: audio checksums, SoundFont checksums, renderer versions, selected role mask, mix profile, EQ tilt applied, and production FX metadata.

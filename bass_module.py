@@ -7,13 +7,29 @@ from typing import Any, Mapping
 
 from chord_gen import DURATION_BEATS, PC_TO_NOTE, reconstruct_harte
 from chord_module import midi_to_jfugue
-from instruments import BASS_INSTRUMENTS, Instrument
+from instruments import BASS_INSTRUMENTS, Instrument, sample_bass_instrument
 from voicing.types import ChordEvent, Song
 
 INTERVAL_TO_DEGREE = {
     0: "1", 1: "b2", 2: "2", 3: "b3", 4: "3", 5: "4",
     6: "#4", 7: "5", 8: "b6", 9: "6", 10: "b7", 11: "7"
 }
+
+
+def resolve_bass_pitch(bass_pc: int, tonic_pc: int, rng: random.Random) -> int:
+    """Generate authentic bass pitch within standard 4-string bass range (E1 to G3, Spec 18 §3.1)."""
+    # Base octave in Octave 1: C1 (24) to B1 (35)
+    base_midi = 24 + ((bass_pc + tonic_pc) % 12)
+
+    # 4-string electric/upright bass bottom limit is E1 (MIDI 28)
+    if base_midi < 28:
+        base_midi += 12  # Transpose low C, C#, D, D# up to Octave 2
+
+    # 20% probability of an octave jump to high walking/slap register (Octave 2-3)
+    # Allows notes up to G3 (MIDI 55)
+    if rng.random() < 0.20 and base_midi + 12 <= 55:
+        return base_midi + 12
+    return base_midi
 
 
 def slice_chord_events(
@@ -54,9 +70,9 @@ def slice_chord_events(
         if is_no_chord:
             sliced_events.append({
                 "is_no_chord": True,
-                "root_interval": 0,
+                "root_interval": None,
                 "triad": None,
-                "bass_interval": 0,
+                "bass_interval": None,
                 "seventh": "N",
                 "ninth": "N",
                 "eleventh": "N",
@@ -142,6 +158,21 @@ def slice_chord_events(
                 "time_start": t_start,
                 "time_end": t_start + d_sec,
             }
+
+        base_bass_interval = (
+            event.bass_interval if isinstance(event, ChordEvent)
+            else event.get("bass_interval", 0)
+        )
+        if base_bass_interval != 0:
+            inv_bass_pc = (root_pc + base_bass_interval) % 12
+            inv_bass_name = PC_TO_NOTE[inv_bass_pc]
+            inv_deg = INTERVAL_TO_DEGREE.get(base_bass_interval, inv_bass_name)
+            inv_harte = base_harte if (base_harte and "/" in base_harte) else f"{base_harte_no_slash}/{inv_deg}"
+            sliced_events.append(
+                make_slice(time_start, duration_token, duration_beats, base_bass_interval, inv_bass_name, inv_harte)
+            )
+            current_time = time_start + duration_seconds
+            continue
 
         if duration_token not in ("w", "h.", "h"):
             sliced_events.append(
@@ -348,7 +379,7 @@ class BassModule:
             self.last_instrument = pad_instrument
             program = pad_instrument.program
         elif self.instrument is None:
-            self.last_instrument = rng.choice(BASS_INSTRUMENTS)
+            self.last_instrument = sample_bass_instrument(rng)
             program = self.last_instrument.program
         else:
             program = self.instrument
@@ -376,10 +407,10 @@ class BassModule:
                 continue
             root_interval = event["root_interval"] if isinstance(event, dict) else event.root_interval
             bass_interval = event.get("bass_interval", 0) if isinstance(event, dict) else event.bass_interval
-            bass_pc = (root_interval + bass_interval + song.tonic_pc) % 12
-            midi = 36 + bass_pc
+            bass_pc = (root_interval + bass_interval) % 12
+            midi = resolve_bass_pitch(bass_pc, song.tonic_pc, rng)
             chord_pitches = chord_midis[index] if chord_midis and index < len(chord_midis) else ()
-            if 40 <= midi <= 47 and any(40 <= pitch <= 47 for pitch in chord_pitches):
+            if any(pitch == midi for pitch in chord_pitches) and midi - 12 >= 28:
                 midi -= 12
 
             # If the progression is already explicitly sliced, render directly
@@ -405,10 +436,17 @@ class BassModule:
                 next_root = next_event["root_interval"] if isinstance(next_event, dict) else next_event.root_interval
                 next_bass = next_event.get("bass_interval", 0) if isinstance(next_event, dict) else next_event.bass_interval
                 next_bass_pc = (next_root + next_bass + song.tonic_pc) % 12
-                next_midi = 36 + next_bass_pc
-                approach_midi = rng.choice([next_midi - 1, next_midi + 1])
-                fifth_midi = midi + 7 if midi + 7 <= 48 else midi - 5
-                third_midi = midi + 4 if midi + 4 <= 48 else midi - 8
+                next_base = 24 + next_bass_pc
+                if next_base < 28:
+                    next_base += 12
+                if abs((next_base + 12) - midi) < abs(next_base - midi) and next_base + 12 <= 55:
+                    next_midi = next_base + 12
+                else:
+                    next_midi = next_base
+                app_choices = [p for p in (next_midi - 1, next_midi + 1) if 28 <= p <= 55]
+                approach_midi = rng.choice(app_choices) if app_choices else next_midi
+                fifth_midi = midi + 7 if midi + 7 <= 55 else midi - 5
+                third_midi = midi + 4 if midi + 4 <= 55 else midi - 8
 
                 pattern_roll = rng.random()
                 if duration == "w":
@@ -433,7 +471,7 @@ class BassModule:
                             tokens.append(f"{midi_to_jfugue(midi)}h {midi_to_jfugue(fifth_midi)}h")
                         else:
                             # 20% complex passing line
-                            passing_midi = midi + 2 if midi + 2 <= 48 else midi - 10
+                            passing_midi = midi + 2 if midi + 2 <= 55 else midi - 10
                             tokens.append(
                                 f"{midi_to_jfugue(midi)}q {midi_to_jfugue(passing_midi)}q "
                                 f"{midi_to_jfugue(third_midi)}q {midi_to_jfugue(approach_midi)}q"

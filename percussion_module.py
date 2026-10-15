@@ -27,6 +27,7 @@ class PercussionModule:
 
     seed: int | None = None
     omission_probability: float = PERCUSSION_OMISSION_PROBABILITY
+    velocity_humanization: bool = True
     last_included: bool = field(default=False, init=False)
     last_feel: str = field(default="normal", init=False)
     last_kit: dict[str, str] = field(default_factory=dict, init=False)
@@ -127,6 +128,24 @@ class PercussionModule:
             return None
         raise ValueError(f"Unknown percussion symbol {symbol!r}")
 
+    @staticmethod
+    def _sample_velocity(symbol: str, rng: random.Random) -> int:
+        """Sample Gaussian velocity jitter for drum hits (Spec 18 §4.1)."""
+        if symbol in ("O", "S", "C"):
+            base = 100.0
+            sigma = 8.0
+        elif symbol == "s":
+            base = 65.0
+            sigma = 8.0
+        elif symbol == "^":
+            base = 80.0
+            sigma = 12.0
+        else:
+            base = 90.0
+            sigma = 10.0
+        val = int(round(rng.gauss(base, sigma)))
+        return max(1, min(127, val))
+
     @classmethod
     def _render_slot(
         cls,
@@ -135,6 +154,7 @@ class PercussionModule:
         cymbal: str,
         kit: dict[str, str],
         cymbal_on_both_halves: bool = False,
+        rng: random.Random | None = None,
     ) -> tuple[str, str]:
         """Render one eighth-note slot as two sixteenth-note tokens."""
         halves: list[list[str]] = [[], []]
@@ -142,9 +162,11 @@ class PercussionModule:
             hit = cls._sound_for_symbol(symbol, kit)
             if hit is not None:
                 sound, half = hit
-                halves[half].append(f"[{sound}]s")
+                vel_suffix = f"a{cls._sample_velocity(symbol, rng)}" if rng is not None else ""
+                halves[half].append(f"[{sound}]s{vel_suffix}")
                 if cymbal_on_both_halves and symbol == "^":
-                    halves[1].append(f"[{sound}]s")
+                    cymbal_vel_suffix = f"a{cls._sample_velocity(symbol, rng)}" if rng is not None else ""
+                    halves[1].append(f"[{sound}]s{cymbal_vel_suffix}")
 
         return tuple(
             "+".join(notes) if notes else "Rs"
@@ -245,5 +267,6 @@ class PercussionModule:
                 cymbal_bar[bar_slot],
                 self.last_kit,
                 cymbal_on_both_halves=self.last_feel == "cut_time",
+                rng=rng if self.velocity_humanization else None,
             ))
         return "V9" + (" " + " ".join(tokens) if tokens else "")
