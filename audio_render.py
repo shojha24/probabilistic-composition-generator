@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from sound_design import (
+    POWER_CHORD_DISTORTION_FILTER,
     REFERENCE_RENDER_PROFILE,
     SEED_DERIVATION_VERSION,
     derive_seed,
@@ -224,6 +225,7 @@ def _mix_flac(
     production_fx: bool = False,
     eq_tilt_db: float = 0.0,
     temp_dir: Path | None = None,
+    power_chord_distortion: bool = False,
 ) -> None:
     if not wav_paths:
         raise ValueError("cannot mix an empty role selection")
@@ -244,6 +246,8 @@ def _mix_flac(
         role_filter_parts = [f"volume={gain:g}dB"]
         if role == "V1":
             role_filter_parts.append(v1_filter)
+        if role == "V0" and power_chord_distortion:
+            role_filter_parts.append(POWER_CHORD_DISTORTION_FILTER)
         if profile.get("channels") == 2:
             if role == "V0":
                 role_filter_parts.append("pan=stereo|c0=0.6*c0|c1=0.4*c0")
@@ -430,6 +434,7 @@ def _render_song_audio(
     reverb: str | None = None,
     detune_cents: float = 0.0,
     production_fx: bool = False,
+    power_chord_distortion: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     song_dir = root / f"song_{ordinal}"
     song_dir.mkdir(parents=True, exist_ok=True)
@@ -510,7 +515,9 @@ def _render_song_audio(
             if production_fx:
                 mix_kwargs["production_fx"] = True
                 mix_kwargs["eq_tilt_db"] = song_eq_tilt
-            if temporary_dir is not None and (reverb is not None or abs(song_detune) > 0.001 or production_fx):
+            if power_chord_distortion:
+                mix_kwargs["power_chord_distortion"] = True
+            if temporary_dir is not None and (reverb is not None or abs(song_detune) > 0.001 or production_fx or power_chord_distortion):
                 mix_kwargs["temp_dir"] = temporary_dir
             _mix_flac(ffmpeg, mix_inputs, mix_path, song_profile, **mix_kwargs)
             mix_record = _file_record(mix_path)
@@ -537,6 +544,7 @@ def _render_song_audio(
             "reverb_applied": reverb,
             "production_fx_applied": production_fx,
             "eq_tilt_db_applied": song_eq_tilt,
+            "power_chord_distortion_applied": power_chord_distortion,
         }
         if mix_record is not None:
             result_payload["mix"] = mix_record
@@ -566,6 +574,7 @@ def render_audio_bundle(
     reverb: str | None = None,
     detune_cents: float = 0.0,
     production_fx: bool = False,
+    power_chord_distortion: bool = False,
 ) -> dict[str, Any]:
     """Render role stems and full mixes from a MIDI manifest."""
     if isinstance(seed, bool) or not isinstance(seed, int):
@@ -611,6 +620,10 @@ def render_audio_bundle(
             raise ValueError("manifest record ordinal must be an integer")
         selected_roles = _selected_roles(raw_record, manifest)
         song_sf = sample_soundfont_for_ordinal(available_soundfonts, seed, ordinal)
+        song_pcd = bool(
+            raw_record.get("power_chord_distortion")
+            or (power_chord_distortion and (raw_record.get("has_power_chords", True)))
+        )
         song_args.append((
             ordinal,
             selected_roles,
@@ -627,6 +640,7 @@ def render_audio_bundle(
             reverb,
             detune_cents,
             production_fx,
+            song_pcd,
         ))
 
     total = len(records)
@@ -664,6 +678,8 @@ def render_audio_bundle(
         mixer_graph += " -> asetrate/aresample"
     if production_fx:
         mixer_graph += " -> eq_tilt -> tape_sat -> compand"
+    if power_chord_distortion:
+        mixer_graph += " -> power_chord_distortion"
     mixer_graph += " -> loudnorm"
 
     return {
@@ -688,6 +704,7 @@ def render_audio_bundle(
         "reverb": reverb,
         "detune_cents": detune_cents,
         "production_fx": production_fx,
+        "power_chord_distortion": power_chord_distortion,
         "records": audio_records,
     }
 
@@ -704,6 +721,7 @@ def _mix_song_from_stems(
     reverb: str | None = None,
     detune_cents: float = 0.0,
     production_fx: bool = False,
+    power_chord_distortion: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     song_dir.mkdir(parents=True, exist_ok=True)
     selected_tracks = [
@@ -741,6 +759,8 @@ def _mix_song_from_stems(
     if production_fx:
         mix_kwargs["production_fx"] = True
         mix_kwargs["eq_tilt_db"] = song_eq_tilt
+    if power_chord_distortion:
+        mix_kwargs["power_chord_distortion"] = True
     _mix_flac(ffmpeg, mix_inputs, mix_path, song_profile, **mix_kwargs)
     stem_records = {
         track: _file_record(Path(stem_paths[track]))
@@ -768,6 +788,7 @@ def _mix_song_from_stems(
         "reverb_applied": reverb,
         "production_fx_applied": production_fx,
         "eq_tilt_db_applied": song_eq_tilt,
+        "power_chord_distortion_applied": power_chord_distortion,
     }
 
 
@@ -789,6 +810,7 @@ def mix_audio_bundle_from_stems(
     reverb: str | None = None,
     detune_cents: float = 0.0,
     production_fx: bool = False,
+    power_chord_distortion: bool = False,
 ) -> dict[str, Any]:
     """Mix pre-rendered role stems into full condition mixes."""
     if isinstance(seed, bool) or not isinstance(seed, int):
@@ -829,6 +851,10 @@ def mix_audio_bundle_from_stems(
                     stem_paths_for_ordinal[track] = Path(val)
 
         song_dir = root / f"song_{ordinal}"
+        song_pcd = bool(
+            raw_record.get("power_chord_distortion")
+            or (power_chord_distortion and (raw_record.get("has_power_chords", True)))
+        )
         song_args.append((
             ordinal,
             selected_roles,
@@ -841,6 +867,7 @@ def mix_audio_bundle_from_stems(
             reverb,
             detune_cents,
             production_fx,
+            song_pcd,
         ))
 
     total = len(records)
@@ -877,6 +904,8 @@ def mix_audio_bundle_from_stems(
         mixer_graph += " -> asetrate/aresample"
     if production_fx:
         mixer_graph += " -> eq_tilt -> tape_sat -> compand"
+    if power_chord_distortion:
+        mixer_graph += " -> power_chord_distortion"
     mixer_graph += " -> loudnorm"
 
     result = {
@@ -894,6 +923,7 @@ def mix_audio_bundle_from_stems(
         "reverb": reverb,
         "detune_cents": detune_cents,
         "production_fx": production_fx,
+        "power_chord_distortion": power_chord_distortion,
         "records": audio_records,
     }
     if renderer_info is not None:

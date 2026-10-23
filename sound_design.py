@@ -39,6 +39,14 @@ ASSET_REGISTRY = {
     },
 }
 
+# Spec 19 §4.3: overdriven power chord guitar filter
+POWER_CHORD_DISTORTION_FILTER = (
+    "lowshelf=f=100:g=-3.0,"  # cut sub-mud before clipping
+    "aeval='(3/2)*val(0)*(1-(val(0)*val(0))/3)':c=same,"  # cubic soft-clipping overdrive
+    "highshelf=f=4500:g=-6.0,"  # cabinet frequency roll-off
+    "lowshelf=f=250:g=2.5"     # warm body resonance
+)
+
 
 def soundfont_asset_manifest(
     soundfont: str | Path,

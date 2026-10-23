@@ -271,6 +271,7 @@ def _resolve_or_render_stems(
     stems_dir: str | Path | None = None,
     fluidsynth_bin: str = "fluidsynth",
     ffmpeg_bin: str = "ffmpeg",
+    power_chord_distortion: bool = True,
 ) -> dict[str, Any]:
     # 1. Check if canonical manifest has audio already rendered
     canonical_audio = canonical_manifest.get("sound_design", {}).get("audio")
@@ -398,6 +399,7 @@ def _resolve_or_render_stems(
         fluidsynth_bin=fluidsynth_bin,
         ffmpeg_bin=ffmpeg_bin,
         render_mix=False,
+        power_chord_distortion=power_chord_distortion,
     )
 
     _write_json(
@@ -445,6 +447,7 @@ def _project_one(
     reverb: str | None = None,
     detune_cents: float = 0.0,
     production_fx: bool = True,
+    power_chord_distortion: bool = True,
     stems_data: dict[str, Any] | None = None,
     fluidsynth_bin: str,
     ffmpeg_bin: str,
@@ -625,6 +628,7 @@ def _project_one(
                 reverb=reverb,
                 detune_cents=detune_cents,
                 production_fx=production_fx,
+                power_chord_distortion=power_chord_distortion,
             )
             manifest["sound_design"]["stage"] = "audio"
             manifest["sound_design"]["audio_rendered"] = True
@@ -660,6 +664,7 @@ def project_conditions(
     reverb: str | None = None,
     detune_cents: float = 0.0,
     production_fx: bool = True,
+    power_chord_distortion: bool = True,
     stems_dir: str | Path | None = None,
     fluidsynth_bin: str = "fluidsynth",
     ffmpeg_bin: str = "ffmpeg",
@@ -725,6 +730,7 @@ def project_conditions(
             stems_dir=stems_dir,
             fluidsynth_bin=fluidsynth_bin,
             ffmpeg_bin=ffmpeg_bin,
+            power_chord_distortion=power_chord_distortion,
         )
     results = [
         _project_one(
@@ -747,6 +753,7 @@ def project_conditions(
             reverb=reverb,
             detune_cents=detune_cents,
             production_fx=production_fx,
+            power_chord_distortion=power_chord_distortion,
             stems_data=stems_data,
             fluidsynth_bin=fluidsynth_bin,
             ffmpeg_bin=ffmpeg_bin,
@@ -760,7 +767,7 @@ def project_conditions(
     return results
 
 
-def main() -> None:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--canonical", required=True, help="Canonical all-role score.")
     parser.add_argument(
@@ -815,6 +822,12 @@ def main() -> None:
         help="Apply dynamic compand, tape saturation, and spectral EQ tilt in final mix (default: True).",
     )
     parser.add_argument(
+        "--power-chord-distortion",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Apply asymmetric tube overdrive to V0 on songs featuring guitar power chords (default: True).",
+    )
+    parser.add_argument(
         "--stems-dir",
         help="Directory to store or reuse shared audio stems (defaults to <out-dir>/_stems).",
     )
@@ -828,6 +841,11 @@ def main() -> None:
         default="ffmpeg",
         help="ffmpeg executable or full path used for encoding and mixing.",
     )
+    return parser
+
+
+def main() -> None:
+    parser = build_parser()
     args = parser.parse_args()
     soundfont = (args.soundfont.strip() or None) if args.soundfont and args.soundfont.strip() else None
     soundfont_dir = (args.soundfont_dir.strip() or None) if args.soundfont_dir and args.soundfont_dir.strip() else None
@@ -848,6 +866,7 @@ def main() -> None:
         reverb=args.reverb,
         detune_cents=args.detune_cents,
         production_fx=args.production_fx,
+        power_chord_distortion=args.power_chord_distortion,
         stems_dir=args.stems_dir,
         fluidsynth_bin=args.fluidsynth,
         ffmpeg_bin=args.ffmpeg,

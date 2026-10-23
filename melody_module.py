@@ -822,6 +822,19 @@ def _next_target_pc(song: Song, event_index: int) -> int | None:
     return None
 
 
+def filter_melody_pitch_candidates(candidates: list[int], triad: str, root_pc: int) -> list[int]:
+    """Prevent third-leakage into third-less chord events (Spec 19 §4.2)."""
+    if triad == "5":
+        allowed = {0, 5, 7, 10}
+        filtered = [p for p in candidates if ((p - root_pc) % 12) in allowed]
+        return filtered if filtered else candidates
+    elif triad in ("sus4", "sus2", "1"):
+        forbidden_intervals = {3, 4}  # minor 3rd, major 3rd
+        filtered = [p for p in candidates if ((p - root_pc) % 12) not in forbidden_intervals]
+        return filtered if filtered else candidates
+    return candidates
+
+
 def enumerate_melody_candidates(
     progression: dict | Song,
     event_index: int,
@@ -1029,10 +1042,21 @@ def enumerate_melody_candidates(
     ))
 
     candidates: dict[tuple[int | None, str, str | None], MelodyCandidate] = {}
+    triad = getattr(event, "triad", None)
+    event_root_pc = (song.tonic_pc + event.root_interval) % 12
     for midi, role, degree_role, source, weight, resolution, merged in raw:
-        if midi is not None and previous_midi is not None:
-            if abs(midi - previous_midi) > profile_obj.max_leap_semitones:
+        if midi is not None:
+            if previous_midi is not None and abs(midi - previous_midi) > profile_obj.max_leap_semitones:
                 continue
+            if triad in ("5", "sus4", "sus2", "1"):
+                interval = (midi - event_root_pc) % 12
+                if interval in {3, 4}:
+                    continue
+                if triad == "5" and interval not in {0, 5, 7, 10}:
+                    continue
+        if resolution is not None and triad in ("5", "sus4", "sus2", "1"):
+            if ((resolution - event_root_pc) % 12) in {3, 4}:
+                resolution = None
         candidate = MelodyCandidate(
             midi=midi,
             role=role,

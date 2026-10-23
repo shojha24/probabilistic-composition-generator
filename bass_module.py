@@ -235,11 +235,11 @@ def slice_chord_events(
                         make_slice(time_start, "w", 4.0, 0, root_name, base_harte_no_slash)
                     )
                 elif pattern_roll < 0.85:
-                    # 25% root-5th alternation (h + h)
-                    sliced_events.extend([
-                        make_slice(time_start, "h", 2.0, 0, root_name, base_harte_no_slash),
-                        make_slice(time_start + 2.0 * seconds_per_beat, "h", 2.0, fifth_interval, fifth_name, fifth_harte),
-                    ])
+                    # 25% root groove: bass audio alternates root-5th, but label remains root-position
+                    # to match Billboard/Isophonics annotation conventions (Spec 19 §4.1)
+                    sliced_events.append(
+                        make_slice(time_start, "w", 4.0, 0, root_name, base_harte_no_slash)
+                    )
                 else:
                     # 15% end-of-phrase approach on beat 4 (h. + q)
                     sliced_events.extend([
@@ -413,8 +413,13 @@ class BassModule:
             if any(pitch == midi for pitch in chord_pitches) and midi - 12 >= 28:
                 midi -= 12
 
-            # If the progression is already explicitly sliced, render directly
-            if has_submeasure_slices or bass_interval != 0:
+            # If the progression is already explicitly sliced, render sub-measure slices directly.
+            # For whole notes (w) with root bass (bass_interval == 0), allow groove rendering
+            # per Spec 19 §4.1: bass audio alternates root-5th, but label remains root-position.
+            if duration != "w" and has_submeasure_slices:
+                tokens.append(f"{midi_to_jfugue(midi)}{duration}")
+                continue
+            if bass_interval != 0:
                 tokens.append(f"{midi_to_jfugue(midi)}{duration}")
                 continue
 

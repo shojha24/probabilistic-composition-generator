@@ -844,6 +844,17 @@ def _render_progression(
             _arpeggio_manifest(chord_module)
             if mode == "arpeggios" else None
         ),
+        "has_power_chords": any(
+            (c.triad == "5" if hasattr(c, "triad") else c.get("triad") == "5")
+            for c in (progression.get("chords", []) if isinstance(progression, dict) else getattr(progression, "chords", []))
+        ),
+        "power_chord_distortion": (
+            "guitar" in str(chord_module.last_voicer_family or "").lower()
+            and any(
+                (c.triad == "5" if hasattr(c, "triad") else c.get("triad") == "5")
+                for c in (progression.get("chords", []) if isinstance(progression, dict) else getattr(progression, "chords", []))
+            )
+        ),
     }
 
 

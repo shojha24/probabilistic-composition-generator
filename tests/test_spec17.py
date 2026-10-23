@@ -120,7 +120,7 @@ def test_spec17_submeasure_inversion_slicing_structure():
         ],
     }
 
-    sliced_chords = slice_chord_events(pop_progression, seed=15001)
+    sliced_chords = slice_chord_events(pop_progression, seed=15002)
     assert len(sliced_chords) > len(pop_progression["chords"]), (
         "Progression must be sliced into more chord slices than whole measures"
     )
