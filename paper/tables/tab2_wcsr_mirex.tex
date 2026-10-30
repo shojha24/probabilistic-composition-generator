@@ -1,0 +1,24 @@
+% Auto-generated Table 2: Standard mir_eval WCSR and MIREX Benchmark Comparison
+\begin{table}[t]
+\centering
+\small
+\caption{Standard MIR evaluation benchmark: Weighted Chord Symbol Recall (WCSR, \%) across 5-fold cross-validation on 1,217 real songs (mean $\pm$ std across splits $s_0$--$s_4$). Control: 1,217-song real baseline. Experimental: Synthetic pretraining + real finetuning. Superior values are \textbf{bolded}.}
+\label{tab:wcsr_mirex}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Evaluation Rule} & \textbf{Control (\%)} & \textbf{Experimental (\%)} & \textbf{$\Delta$ (pp)} \\
+\midrule
+  Root Pitch Only                  & \textbf{83.77 $\pm$ 1.88} & 82.30 $\pm$ 1.58 & -1.47 \\
+  Major / Minor                    & \textbf{79.78 $\pm$ 2.38} & 77.04 $\pm$ 1.71 & -2.74 \\
+  Major / Minor + Inversions       & \textbf{77.77 $\pm$ 2.22} & 75.17 $\pm$ 1.71 & -2.60 \\
+  Triads (Full Quality)            & \textbf{75.01 $\pm$ 2.72} & 72.88 $\pm$ 1.97 & -2.13 \\
+  Triads + Inversions              & \textbf{73.15 $\pm$ 2.58} & 71.13 $\pm$ 1.95 & -2.02 \\
+  Sevenths (Standard)              & \textbf{66.46 $\pm$ 2.46} & 62.46 $\pm$ 1.73 & -4.00 \\
+  Sevenths + Inversions            & \textbf{65.12 $\pm$ 2.42} & 61.18 $\pm$ 1.72 & -3.94 \\
+  Tetrads (Extended)               & \textbf{61.62 $\pm$ 2.73} & 58.20 $\pm$ 1.74 & -3.42 \\
+  Tetrads + Inversions             & \textbf{60.38 $\pm$ 2.69} & 57.02 $\pm$ 1.75 & -3.36 \\
+\midrule
+  \textbf{MIREX Metric (Overall)}  & \textbf{81.49 $\pm$ 2.56} & 79.59 $\pm$ 1.85 & -1.90 \\
+\bottomrule
+\end{tabular}
+\end{table}

@@ -1,0 +1,20 @@
+Category,Chord_Class,Real_Duration_Sec,Real_Proportion_Pct,Synth_Duration_Sec,Synth_Proportion_Pct,Ratio_Synth_to_Real
+Triad Quality,maj,174493.41,65.7455,947546.05,57.1776,0.87
+Triad Quality,min,58819.68,22.1621,335137.42,20.2231,0.91
+Triad Quality,sus4,5852.67,2.2052,87538.61,5.2823,2.4
+Triad Quality,sus2,905.62,0.3412,87951.22,5.3072,15.55
+Triad Quality,dim,1305.66,0.4919,75017.67,4.5268,9.2
+Triad Quality,aug,551.1,0.2076,29251.8,1.7651,8.5
+Triad Quality,5,6743.03,2.5406,52876.98,3.1907,1.26
+Triad Quality,1,3659.7,1.3789,26041.46,1.5714,1.14
+Triad Quality,N,13076.33,4.9269,15836.26,0.9556,0.19
+7th Extension,7,9447.83,3.5598,102431.22,6.181,1.74
+7th Extension,b7,53871.73,20.2978,688591.05,41.5515,2.05
+7th Extension,bb7,4312.27,1.6248,59904.44,3.6148,2.22
+Upper Extension,9,13001.58,4.8987,103976.24,6.2742,1.28
+Upper Extension,#9,1489.79,0.5613,20631.78,1.245,2.22
+Upper Extension,b9,332.42,0.1253,25482.01,1.5377,12.28
+Upper Extension,11,3310.19,1.2472,22609.56,1.3643,1.09
+Upper Extension,#11,344.28,0.1297,15314.78,0.9241,7.12
+Upper Extension,13,1084.05,0.4084,11720.9,0.7073,1.73
+Upper Extension,b13,216.5,0.0816,11280.2,0.6807,8.34

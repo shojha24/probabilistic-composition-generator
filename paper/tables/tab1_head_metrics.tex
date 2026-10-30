@@ -1,0 +1,27 @@
+% Auto-generated Table 1: Structured 6-Head Decomposition & Rare Triad Performance
+\begin{table*}[t]
+\centering
+\small
+\caption{Macro Recall and $F_1$-score across the 6 structural classification heads and isolated triad quality subsets over 5-fold cross-validation (mean $\pm$ standard deviation across splits $s_0$--$s_4$). Control denotes baseline ChordFormer trained purely on the 1,217 real songs; Experimental denotes pretraining on 5,000 synthetic songs followed by real finetuning. $\Delta = \text{Experimental} - \text{Control}$. Superior values in each pair are \textbf{bolded}.}
+\label{tab:head_metrics}
+\begin{tabular}{lcccccc}
+\toprule
+\textbf{Structural Output Head} & \textbf{Control Rec. (\%)} & \textbf{Exp. Rec. (\%)} & \textbf{$\Delta$ Rec.} & \textbf{Control $F_1$ (\%)} & \textbf{Exp. $F_1$ (\%)} & \textbf{$\Delta$ $F_1$} \\
+\midrule
+\multicolumn{7}{l}{\textit{Primary 6-Head Multi-Task Decomposition:}} \\
+  Root + Triad (97 classes)                     & 41.21 $\pm$ 3.12 & \textbf{42.66 $\pm$ 2.59} & +1.45 & 36.57 $\pm$ 2.07 & \textbf{36.70 $\pm$ 1.68} & +0.13 \\
+  Bass Pitch (13 classes)                       & \textbf{84.81 $\pm$ 1.73} & 82.93 $\pm$ 1.51 & -1.88 & \textbf{84.72 $\pm$ 1.77} & 83.01 $\pm$ 1.57 & -1.70 \\
+  7th Extension (4 classes)                     & \textbf{62.69 $\pm$ 4.27} & 62.55 $\pm$ 3.14 & -0.14 & \textbf{57.67 $\pm$ 2.73} & 56.99 $\pm$ 1.48 & -0.67 \\
+  9th Extension (4 classes)                     & 35.33 $\pm$ 2.68 & \textbf{43.58 $\pm$ 7.54} & +8.25 & 34.98 $\pm$ 2.96 & \textbf{39.01 $\pm$ 6.25} & +4.03 \\
+  11th Extension (3 classes)                    & 38.74 $\pm$ 7.85 & \textbf{41.71 $\pm$ 8.03} & +2.97 & 37.35 $\pm$ 3.60 & \textbf{42.14 $\pm$ 7.04} & +4.79 \\
+  13th Extension (3 classes)                    & \textbf{35.36 $\pm$ 3.74} & 34.26 $\pm$ 1.95 & -1.10 & \textbf{36.09 $\pm$ 4.82} & 34.47 $\pm$ 2.47 & -1.62 \\
+\midrule
+  Macro Average (6 Heads)                       & 49.69 $\pm$ 2.10 & \textbf{51.28 $\pm$ 1.94} & +1.59 & 47.90 $\pm$ 1.69 & \textbf{48.72 $\pm$ 1.86} & +0.82 \\
+\midrule
+\multicolumn{7}{l}{\textit{Targeted Triad Quality Breakdown:}} \\
+  Triad Quality (all 9 classes)                 & 50.23 $\pm$ 4.53 & \textbf{53.42 $\pm$ 3.96} & +3.19 & 45.52 $\pm$ 3.40 & \textbf{46.91 $\pm$ 2.57} & +1.39 \\
+  Common Triads (\textit{maj}, \textit{min})    & \textbf{84.74 $\pm$ 1.97} & 83.08 $\pm$ 1.44 & -1.66 & \textbf{86.99 $\pm$ 1.19} & 86.05 $\pm$ 0.85 & -0.94 \\
+  Rare Triads (\textit{sus2}, \textit{sus4}, \textit{dim}, \textit{aug}) & 41.67 $\pm$ 7.30 & \textbf{48.31 $\pm$ 6.47} & +6.64 & 53.11 $\pm$ 8.62 & \textbf{60.94 $\pm$ 6.26} & +7.83 \\
+\bottomrule
+\end{tabular}
+\end{table*}
