@@ -1,9 +1,12 @@
 % Auto-generated Table 1: Structured 6-Head Decomposition & Rare Triad Performance
 \begin{table*}[t]
 \centering
-\small
-\caption{Macro Recall and $F_1$-score across the 6 structural classification heads and isolated triad quality subsets over 5-fold cross-validation (mean $\pm$ standard deviation across splits $s_0$--$s_4$). Control denotes baseline ChordFormer trained purely on the 1,217 real songs; Experimental denotes pretraining on 5,000 synthetic songs followed by real finetuning. $\Delta = \text{Experimental} - \text{Control}$. Superior values in each pair are \textbf{bolded}.}
+\footnotesize
+\renewcommand{\arraystretch}{0.88}
+\vspace{-8pt}
+\caption{5-fold macro recall and $F_1$ (\%) across the 6 structural classification heads and isolated triad quality subsets (mean $\pm$ std across splits $s_0$--$s_4$). Control: 1,217-song real baseline; Experimental: 5,000-song synthetic pretraining + real finetuning ($\Delta = \text{Exp.} - \text{Control}$).}
 \label{tab:head_metrics}
+\vspace{1pt}
 \begin{tabular}{lcccccc}
 \toprule
 \textbf{Structural Output Head} & \textbf{Control Rec. (\%)} & \textbf{Exp. Rec. (\%)} & \textbf{$\Delta$ Rec.} & \textbf{Control $F_1$ (\%)} & \textbf{Exp. $F_1$ (\%)} & \textbf{$\Delta$ $F_1$} \\

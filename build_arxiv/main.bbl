@@ -1,0 +1,112 @@
+\begin{thebibliography}{10}
+\providecommand{\url}[1]{#1}
+\csname url@samestyle\endcsname
+\providecommand{\newblock}{\relax}
+\providecommand{\bibinfo}[2]{#2}
+\providecommand{\BIBentrySTDinterwordspacing}{\spaceskip=0pt\relax}
+\providecommand{\BIBentryALTinterwordstretchfactor}{4}
+\providecommand{\BIBentryALTinterwordspacing}{\spaceskip=\fontdimen2\font plus
+\BIBentryALTinterwordstretchfactor\fontdimen3\font minus \fontdimen4\font\relax}
+\providecommand{\BIBforeignlanguage}[2]{{%
+\expandafter\ifx\csname l@#1\endcsname\relax
+\typeout{** WARNING: IEEEtran.bst: No hyphenation pattern has been}%
+\typeout{** loaded for the language `#1'. Using the pattern for}%
+\typeout{** the default language instead.}%
+\else
+\language=\csname l@#1\endcsname
+\fi
+#2}}
+\providecommand{\BIBdecl}{\relax}
+\BIBdecl
+
+\bibitem{pauwels2019twenty}
+J.~Pauwels, K.~O'Hanlon, E.~G{\'o}mez, and M.~B. Sandler, ``20 years of automatic chord recognition from audio: A review,'' in \emph{Proceedings of the 20th International Society for Music Information Retrieval Conference (ISMIR)}, Delft, The Netherlands, 2019, pp. 54--63.
+
+\bibitem{korzeniowski2016feature}
+F.~Korzeniowski and G.~Widmer, ``Feature learning for chord recognition: The deep chroma extractor,'' in \emph{Proceedings of the 17th International Society for Music Information Retrieval Conference (ISMIR)}, New York City, USA, 2016, pp. 148--154.
+
+\bibitem{park2019btc}
+J.~Park, K.~Choi, S.~Jeon, D.-H. Kim, and J.~Park, ``A bi-directional {Transformer} for musical chord recognition,'' in \emph{Proceedings of the 20th International Society for Music Information Retrieval Conference (ISMIR)}, Delft, The Netherlands, 2019, pp. 620--627.
+
+\bibitem{gulati2020conformer}
+A.~Gulati, J.~Qin, C.-C. Chiu, N.~Parmar, Y.~Zhang, J.~Yu, W.~Han, S.~Wang, Z.~Zheng, T.~Liang, R.~Zhang, Y.~Wu, and R.~Pang, ``Conformer: Convolution-augmented transformer for speech recognition,'' in \emph{Proceedings of Interspeech 2020}, 2020, pp. 5036--5040.
+
+\bibitem{humphrey2015four}
+E.~J. Humphrey and J.~P. Bello, ``Four timely insights on automatic chord estimation,'' in \emph{Proceedings of the 16th International Society for Music Information Retrieval Conference (ISMIR)}, M{\'a}laga, Spain, 2015, pp. 13--19.
+
+\bibitem{burgoyne2011expert}
+J.~A. Burgoyne, J.~Wild, and I.~Fujinaga, ``An expert ground-truth set for audio chord recognition and music analysis,'' in \emph{Proceedings of the 12th International Society for Music Information Retrieval Conference (ISMIR)}, Miami, Florida, USA, 2011, pp. 633--638.
+
+\bibitem{mauch2009omras}
+M.~Mauch, C.~Cannam, M.~Davies, S.~Dixon, C.~Harte, S.~Kolozali, H.~Purwins, and D.~Tidhar, ``{OMRAS2} metadata project 2009,'' in \emph{Proceedings of the 10th International Society for Music Information Retrieval Conference (ISMIR) Late-Breaking Demos}, Kobe, Japan, 2009.
+
+\bibitem{koops2019annotator}
+H.~V. Koops, W.~B. de~Haas, J.~A. Burgoyne, J.~Bransen, A.~Kent-Muller, and A.~Volk, ``Annotator subjectivity in harmony annotations of popular music,'' \emph{Journal of New Music Research}, vol.~48, no.~3, pp. 232--252, 2019.
+
+\bibitem{mcfee2017structured}
+B.~McFee and J.~P. Bello, ``Structured training for large-vocabulary chord recognition,'' in \emph{Proceedings of the 18th International Society for Music Information Retrieval Conference (ISMIR)}, Suzhou, China, 2017, pp. 188--194.
+
+\bibitem{jiang2019large}
+J.~Jiang, K.~Chen, W.~Li, and G.~Xia, ``Large-vocabulary chord transcription via chord structure decomposition,'' in \emph{Proceedings of the 20th International Society for Music Information Retrieval Conference (ISMIR)}, Delft, The Netherlands, 2019, pp. 644--651.
+
+\bibitem{akram2025chordformer}
+\BIBentryALTinterwordspacing
+M.~W. Akram, S.~Dettori, V.~Colla, and G.~C. Buttazzo, ``{ChordFormer}: A conformer-based architecture for large-vocabulary audio chord recognition,'' \emph{arXiv preprint arXiv:2502.11840}, 2025. [Online]. Available: \url{https://arxiv.org/abs/2502.11840}
+\BIBentrySTDinterwordspacing
+
+\bibitem{li2025large}
+W.~Li, X.~Song, Y.~Deng, and J.~Sun, ``Large-vocabulary chord recognition based on contrastive learning and noisy student,'' \emph{IEEE Transactions on Consumer Electronics}, vol.~71, no.~2, pp. 3695--3707, 2025.
+
+\bibitem{deberardinis2023choco}
+J.~de~Berardinis, A.~Mero{\~n}o-Pe{\~n}uela, A.~Poltronieri, and V.~Presutti, ``{ChoCo}: a chord corpus and a data transformation workflow for musical harmony knowledge graphs,'' \emph{Scientific Data}, vol.~10, no.~1, p. 511, 2023.
+
+\bibitem{pfleiderer2017inside}
+M.~Pfleiderer, K.~Frieler, J.~Abe{\ss}er, W.-G. Zaddach, and B.~Balke, \emph{Inside the Jazzomat: New Perspectives for Jazz Research}.\hskip 1em plus 0.5em minus 0.4em\relax Mainz, Germany: Schott Campus, 2017.
+
+\bibitem{harte2005symbolic}
+C.~Harte, M.~B. Sandler, S.~Abdallah, and E.~G{\'o}mez, ``Symbolic representation of musical chords: A proposed syntax for text annotations,'' in \emph{Proceedings of the 6th International Society for Music Information Retrieval Conference (ISMIR)}, London, UK, 2005, pp. 423--432.
+
+\bibitem{kim2026event}
+\BIBentryALTinterwordspacing
+L.~Kim and J.~Park, ``An event-based sequence modeling approach to recognizing non-triad chords with oversegmentation minimization,'' \emph{arXiv preprint arXiv:2604.24386}, 2026. [Online]. Available: \url{https://arxiv.org/abs/2604.24386}
+\BIBentrySTDinterwordspacing
+
+\bibitem{manilow2019cutting}
+E.~Manilow, G.~Wichern, P.~Seetharaman, and J.~Le~Roux, ``Cutting music source separation some {Slakh}: A dataset to clean up the dirt,'' in \emph{Proceedings of the IEEE Workshop on Applications of Signal Processing to Audio and Acoustics (WASPAA)}, New Paltz, NY, USA, 2019, pp. 45--49.
+
+\bibitem{ostermann2023aam}
+F.~Ostermann, I.~Vatolkin, and M.~Ebeling, ``{AAM}: a dataset of {Artificial Audio Multitracks} for diverse music information retrieval tasks,'' \emph{EURASIP Journal on Audio, Speech, and Music Processing}, vol. 2023, no.~1, p.~13, 2023.
+
+\bibitem{majchrzak2025training}
+\BIBentryALTinterwordspacing
+M.~Majchrzak and J.~Ma{\'n}dziuk, ``Training chord recognition models on artificially generated audio,'' \emph{arXiv preprint arXiv:2508.05878}, 2025. [Online]. Available: \url{https://arxiv.org/abs/2508.05878}
+\BIBentrySTDinterwordspacing
+
+\bibitem{tymoczko2011geometry}
+D.~Tymoczko, \emph{A Geometry of Music: Harmony and Counterpoint in the Extended Common Practice}, ser. Oxford Studies in Music Theory.\hskip 1em plus 0.5em minus 0.4em\relax New York, NY, USA: Oxford University Press, 2011.
+
+\bibitem{nadar2019towards}
+C.-R. Nadar, J.~Abe{\ss}er, and S.~Grollmisch, ``Towards {CNN}-based acoustic modeling of seventh chords for automatic chord recognition,'' in \emph{Proceedings of the 16th Sound and Music Computing Conference (SMC)}, M{\'a}laga, Spain, 2019, pp. 171--178.
+
+\bibitem{tymoczko2006geometry}
+D.~Tymoczko, ``The geometry of musical chords,'' \emph{Science}, vol. 313, no. 5783, pp. 72--74, 2006.
+
+\bibitem{eitel2024perception}
+M.~Eitel, M.~Rohrmeier, and D.~Harasim, ``Perception of chord sequences modeled with prediction by partial matching, voice-leading distance, and spectral pitch-class similarity,'' \emph{Cognition}, vol. 245, p. 105740, 2024.
+
+\bibitem{cohn1998introduction}
+R.~Cohn, ``Introduction to neo-riemannian theory: A survey and a historical perspective,'' \emph{Journal of Music Theory}, vol.~42, no.~2, pp. 167--180, 1998.
+
+\bibitem{douthett1998parsimonious}
+J.~Douthett and P.~Steinbach, ``Parsimonious graphs: A study in parsimony, contextual transformations, and modes of limited transposition,'' \emph{Journal of Music Theory}, vol.~42, no.~2, pp. 241--263, 1998.
+
+\bibitem{brown1991calculation}
+J.~C. Brown, ``Calculation of a constant {Q} spectral transform,'' \emph{The Journal of the Acoustical Society of America}, vol.~89, no.~1, pp. 425--434, 1991.
+
+\bibitem{park2019specaugment}
+D.~S. Park, W.~Chan, Y.~Zhang, C.-C. Chiu, B.~Zoph, E.~D. Cubuk, and Q.~V. Le, ``{SpecAugment}: A simple data augmentation method for automatic speech recognition,'' in \emph{Proceedings of Interspeech 2019}, 2019, pp. 2613--2617.
+
+\bibitem{raffel2014mireval}
+C.~Raffel, B.~McFee, E.~J. Humphrey, J.~Salamon, O.~Nieto, D.~Liang, and D.~P.~W. Ellis, ``{mir\_eval}: A transparent implementation of common {MIR} metrics,'' in \emph{Proceedings of the 15th International Society for Music Information Retrieval Conference (ISMIR)}, Taipei, Taiwan, 2014, pp. 367--372.
+
+\end{thebibliography}

@@ -1,4 +1,85 @@
-# Probabilistic composition generator
+# Probabilistic Composition Generator
+
+> **ISMIR 2026 Preprint Companion Repository:** *Distribution-Shifted Synthetic Multitrack Pretraining for Large-Vocabulary Audio Chord Recognition*  
+> **Companion Benchmark & Sim-to-Real Training Repository:** [`ChordFormer-Artificial-Dataset-Benchmarking`](https://github.com/anonymous/ChordFormer-Artificial-Dataset-Benchmarking)
+
+## Overview: Distribution-Shifted Harmonic Sampling & Random-Mix Synthesis Pipeline
+
+This repository implements the procedural symbolic-to-acoustic data generation engine described in Section 3 of our ISMIR preprint. Rather than replicating the severe Zipfian major/minor skew of real-world musical corpora (>87% `maj`/`min` duration in the 1,217-song benchmark), the generator acts as an explicit **distributional intervention** across three coupled subsystems:
+
+1. **Distribution-Shifted Harmonic Sampling (`extract_distributions.py`, `chord_gen.py`, `target_corpus_gen.py`):**
+   - Factorizes each chord event $C_t$ in the 6-head structural space of Jiang et al. (2019) and ChordFormer (Akram et al., 2025): Root + Triad $S_t = (r_t, q_t)$ (97 classes including `N`), Bass $b_t$ (13 classes), and 7th (`N, 7, b7, bb7`), 9th (`N, 9, #9, b9`), 11th (`N, 11, #11`), and 13th (`N, 13, b13`) extensions (124 logits total).
+   - Samples progressions along empirical transition graphs extracted via ChoCo from McGill Billboard and OMRAS2 (1,114 pop/rock songs; 139,078 events) plus the Weimar Jazz Database and iReal Pro (2,477 jazz charts; 161,022 events) using Witten-Bell interpolated backoff ($D = 25.0$), Stage 1 temperature scaling ($\tau_{1,\text{pop}} = 2.2$, $\tau_{1,\text{jazz}} = 2.0$), and a 4-slot extension prefix trie (Trie A/B/C).
+   - Applies **deterministic quota scheduling** across a 50/50 split of 2,500 natural songs and 2,500 targeted songs ($S_{\text{triad}} = 3.0\times$ rare-triad multiplier, minimum spacing $\Delta_{\text{pos}} \ge 2$ along attested 1- or 2-step transitions), expanding duration shares relative to the 1,217-song real corpus by **$15.6\times$ on `sus2`** ($0.34\% \to 5.31\%$), **$9.2\times$ on `dim`** ($0.49\% \to 4.53\%$), **$8.5\times$ on `aug`** ($0.21\% \to 1.77\%$), **$2.4\times$ on `sus4`** ($2.21\% \to 5.28\%$), **$12.3\times$ on `b9`** ($0.13\% \to 1.54\%$), **$8.3\times$ on `b13`** ($0.08\% \to 0.68\%$), **$7.1\times$ on `#11`** ($0.13\% \to 0.92\%$), and **$2.2\times$ on `#9`** ($0.56\% \to 1.25\%$).
+2. **Physically Constrained Multi-Instrument Voicing & Humanization (`render.py`, `voicing/select.py`, `HumanizedMidiRenderer.java`):**
+   - Arranges progressions onto a 4/4 16th-note grid across four synchronized JFugue voices: `V0` harmonic accompaniment (70% block pads, 30% timed arpeggios), `V1` bass (MIDI $[28, 55]$, $\text{E}_1$--$\text{G}_3$), `V2` chord-conditioned monophonic lead/melody, and `V9` Channel 10 percussion.
+   - Enforces **acoustic faithfulness** across six genre-instrument policies (`pop-piano`, `pop-guitar`, `pop-synth`, `jazz-piano`, `jazz-guitar`, `jazz-synth`): $100\%$ of labeled $7\text{th}$--$13\text{th}$ extensions are physically sounded in piano/synth policies (`<0.5%` drop rate on 6-string guitar shapes with $\le 4$-fret spans), the Distinguishing Chord Tone (DCT) is exposed against upper-root masking, and voicings are sampled via a Boltzmann distribution ($\tau_{\text{voic}} \in [2.2, 6.0]$) over Hungarian voice-leading distance and Neo-Riemannian $\text{P}/\text{L}/\text{R}$ parsimony.
+   - Applies micro-timing humanization ($\sigma_t = 15.0\,\text{ms}$ Gaussian jitter, role-specific pocket offsets, $7.0\,\text{ms}$/string guitar strums, CC64 sustain pedaling, and velocity humanization).
+3. **Multi-SoundFont Synthesis & Random-Mix Augmentation (`audio_render.py`, `tools/project_condition_corpus.py`):**
+   - Renders isolated stems via FluidSynth at $f_s = 22{,}050\,\text{Hz}$ (16-bit FLAC) rotating across four General MIDI SoundFonts (`FluidR3_GM`, `MuseScore_General_Full`, `GeneralUser_GS`, `TimGM6mb`).
+   - Mitigates acoustic overfitting via independent Bernoulli stem dropout on `V2` and `V9` ($P = 0.70$ each: 49% four-stem `cbmp`, 21% `cbm`, 21% `cbp`, 9% `cb`), continuous stem gain perturbations ($\Delta G \in [-4, +4]\,\text{dB}$), FFmpeg nonlinear bass/console saturation, guitar cabinet overdrive/EQ, split-band room convolution ($1.2/0.8/0.4\,\text{s}$, 82%/18% dry/wet), continuous pitch detuning ($\Delta f_{\text{cents}} \sim U(-25, +25)\,\text{cents}$), spectral tilt, bus compression, and $-18.0\,\text{LUFS}$ loudness normalization.
+
+---
+
+## Reproducing the 5,000-Song Pretraining Dataset & `.lab` Annotations
+
+Execute the following commands from the repository root to generate the **5,000-song ($460.3\,\text{h}$, 500,000-event)** synthetic pretraining dataset (65% pop/rock = 3,250 songs; 35% jazz = 1,750 songs; 50% natural + 50% quota-targeted) and export frame-exact Harte `.lab` annotations:
+
+```bash
+# 1. Extract empirical Stage 1/2/3 transition tables from normalized ChoCo/JAMS corpora
+python3 extract_distributions.py \
+  --data-root ./data_normalized \
+  --out-dir ./distributions
+
+# 2. Sample the 2,500 natural songs (1,625 pop/rock + 875 jazz, 100 events/song)
+python3 chord_gen.py \
+  --genre pop_rock --songs 1625 --num 100 --debug --seed 42 \
+  --dist-dir ./distributions --out-dir ./gen/acr-target-5k/natural-pop-rock-labels
+
+python3 chord_gen.py \
+  --genre jazz --songs 875 --num 100 --debug --seed 42 \
+  --dist-dir ./distributions --out-dir ./gen/acr-target-5k/natural-jazz-labels
+
+# 3. Sample the 2,500 quota-scheduled targeted songs (250,000 events with 3.0x rare-triad upweighting)
+python3 target_corpus_gen.py \
+  --target-events 250000 \
+  --target-songs 1250 \
+  --debug \
+  --seed 42 \
+  --dist-dir ./distributions \
+  --out-dir ./gen/acr-target-5k/targeted
+
+# 4. Render synchronized 4-voice JFugue scores (70% pads / 30% arpeggios, 100% canonical stems for projection)
+python3 render.py \
+  --in-dir ./gen/acr-target-5k/natural-pop-rock-labels \
+  --in-dir ./gen/acr-target-5k/natural-jazz-labels \
+  --in-dir ./gen/acr-target-5k/targeted/pop-rock-labels \
+  --in-dir ./gen/acr-target-5k/targeted/jazz-labels \
+  --out ./gen/acr-target-5k/all_roles_5k.txt \
+  --mode mixed --pad-percent 70 --arpeggio-percent 30 \
+  --melody-condition naturalistic --melody-percent 100 \
+  --percussion-percent 100 \
+  --seed 42
+
+# 5. Project random-mix stem conditions (P=0.70 Bernoulli dropout on V2/V9) and render 22,050 Hz FLAC audio
+python3 tools/project_condition_corpus.py \
+  --canonical ./gen/acr-target-5k/all_roles_5k.txt \
+  --out-dir ./gen/acr-conditions-5k \
+  --conditions cb cbp cbm cbmp naturalistic \
+  --stage audio \
+  --soundfont ./soundfonts/FluidR3_GM.sf2 \
+  --seed 42
+
+# 6. Export frame-exact Harte .lab annotations (anchored at t = 0.000 s, start_padding_frames=0)
+#    and build the 252-bin CQT HDF5 storage for Stage 1 pretraining
+python3 ../ChordFormer-Artificial-Dataset-Benchmarking/convert_synth_labels.py \
+  --total_songs 5000 --pop_count 3250
+
+python3 ../ChordFormer-Artificial-Dataset-Benchmarking/create_synth_storage.py \
+  --overwrite --num_songs 5000 --num_workers 16
+```
+
+---
 
 ## Purpose
 
