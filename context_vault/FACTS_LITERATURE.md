@@ -135,10 +135,10 @@
 
 ### 2.4 Li et al. (2025) — Large-Vocabulary Chord Recognition via Contrastive Learning & Noisy Student
 * **BibTeX Key:** `li2025large`
-* **Full Citation:** W. Li, X. Song, Y. Deng, and J. Sun, "Large-Vocabulary Chord Recognition Based on Contrastive Learning and Noisy Student," *IEEE Transactions on Consumer Electronics*, vol. 71, no. 2, pp. 3695–3707, May 2025.
-* **Local Asset:** [`Large-Vocabulary...pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/Large-Vocabulary_Chord_Recognition_Based_on_Contrastive_Learning_and_Noisy_Student_2023.pdf) (13 pages).
+* **Full Citation:** C. Li, J. Jiang, Y. Li, and L. Tian, "Large-Vocabulary Chord Recognition Based on Contrastive Learning and Noisy Student," *IEEE Transactions on Consumer Electronics*, vol. 71, no. 2, pp. 3695–3707, May 2025.
+* **Local Asset:** [`Large-Vocabulary...pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/Large-Vocabulary_Chord_Recognition_Based_on_Contrastive_Learning_and_Noisy_Student_2023.pdf) (12 pages).
 * **Core Methodology & Architectural Specs:**
-  * **Semi-Supervised Framework:** Addresses large-vocabulary ACR (170 classes) using unannotated audio. Combines self-supervised Contrastive Learning (CL) on raw audio patches with iterative Noisy Student (NS) pseudo-labeling `[Sec. III, pp. 3697–3700]`.
+  * **Semi-Supervised Framework:** Addresses large-vocabulary ACR (169 classes across 14 chord qualities) using unannotated audio. Combines self-supervised Contrastive Learning (CL) on raw audio patches with iterative Noisy Student (NS) pseudo-labeling `[Sec. III, pp. 3697–3702]`.
   * **Feature Processing:** Ingests log-frequency spectrograms and deep chroma representations into a multi-task CRNN backbone.
   * **Empirical Results:** Achieves 86.4% WCRR on the 24-class Maj/Min task and 68.2% on the 170-class large vocabulary task when trained on 1,217 tracks augmented with tens of thousands of pseudo-labeled unlabeled tracks `[Sec. IV-C, Table II, p. 3702]`.
 * **Exact Comparative Hook for Our Paper:**
@@ -172,7 +172,7 @@
 
 ### 2.6 Korzeniowski & Widmer (2016) — Deep Chroma Extractor
 * **BibTeX Key:** `korzeniowski2016feature`
-* **Full Citation:** F. Korzeniowski and G. Widmer, "Feature Learning for Chord Recognition: The Deep Chroma Extractor," in *Proceedings of the 17th International Society for Music Information Retrieval Conference (ISMIR)*, New York City, USA, 2016, pp. 148–154.
+* **Full Citation:** F. Korzeniowski and G. Widmer, "Feature Learning for Chord Recognition: The Deep Chroma Extractor," in *Proceedings of the 17th International Society for Music Information Retrieval Conference (ISMIR)*, New York City, USA, 2016, pp. 37–43.
 * **Local Asset:** [`000178.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/000178.pdf) (7 pages).
 * **Core Methodology & Architectural Specs:**
   * **Architecture:** Fully convolutional neural network trained to map log-frequency spectrogram patches directly to 12-dimensional pitch class profiles (chroma vectors) `[Sec. 2, pp. 149–150, Fig. 1]`.
@@ -221,7 +221,7 @@
 
 ### 3.2 Majchrzak & Mańdziuk (2025) — Training Chord Recognition Models on Artificially Generated Audio
 * **BibTeX Key:** `majchrzak2025training`
-* **Full Citation:** M. Majchrzak and J. Mańdziuk, "Training Chord Recognition Models on Artificially Generated Audio," *arXiv preprint arXiv:2508.05878*, 2025.
+* **Full Citation:** M. Majchrzak (Martyna Majchrzak) and J. Mańdziuk, "Training Chord Recognition Models on Artificially Generated Audio," *arXiv preprint arXiv:2508.05878*, 2025.
 * **Local Asset:** [`2508.05878v1.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/2508.05878v1.pdf) (14 pages).
 * **Core Methodology & Experimental Setup:**
   * **Models Evaluated:** Bidirectional Transformer for Chords (BTC, Park et al.) and Harmony Transformer (HT) `[Sec. 3, pp. 3–4]`.
@@ -331,7 +331,7 @@
 
 ### 4.5 Koops et al. (2019) — Annotator Subjectivity in Harmony Annotations
 * **BibTeX Key:** `koops2019annotator`
-* **Full Citation:** H. V. Koops, W. B. de Haas, J. A. Burgoyne, J. Bransen, A. Kent-Muller, and F. Wiering, "Annotator Subjectivity in Harmony Annotations of Popular Music," *Journal of New Music Research*, vol. 48, no. 5, pp. 411–430, 2019.
+* **Full Citation:** H. V. Koops, W. B. de Haas, J. A. Burgoyne, J. Bransen, A. Kent-Muller, and A. Volk, "Annotator Subjectivity in Harmony Annotations of Popular Music," *Journal of New Music Research*, vol. 48, no. 3, pp. 232–252, 2019.
 * **Local Asset:** [`Annotator subjectivity...pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/Annotator%20subjectivity%20in%20harmony%20annotations%20of%20popular%20music.pdf) (20 pages).
 * **Core Empirical Findings & Subjectivity Analysis:**
   * **Human Inter-Annotator Agreement:** Conducted a large-scale empirical study measuring agreement across professional music annotators transcribing Billboard and Beatles tracks `[Sec. 3, pp. 414–418]`.
@@ -484,7 +484,7 @@
 
 ### 5.9 Eitel et al. (2024) — Empirical Voice-Leading Perception
 * **BibTeX Key:** `eitel2024perception`
-* **Full Citation:** M. Eitel, N. Ruth, P. Harrison, K. Frieler, and D. Müllensiefen, "Perception of Chord Sequences Modeled with Prediction by Partial Matching, Voice-Leading Distance, and Spectral Pitch-Class Similarity," *Music Perception*, vol. 41, no. 4, pp. 263–288, 2024.
+* **Full Citation:** M. Eitel, N. Ruth, P. Harrison, K. Frieler, and D. Müllensiefen, "Perception of Chord Sequences Modeled with Prediction by Partial Matching, Voice-Leading Distance, and Spectral Pitch-Class Similarity: A New Approach for Testing Individual Differences in Harmony Perception," *Music & Science*, vol. 7, pp. 1–16, 2024.
 * **Local Asset:** [`eitel-et-al-2024...pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/eitel-et-al-2024-perception-of-chord-sequences-modeled-with-prediction-by-partial-matching-voice-leading-distance-and%20(1).pdf) (26 pages).
 * **Core Empirical Findings:**
   * **Perceptual Metric:** Tested human listener perception on 5,076 chord sequences. Proved that perceived musical coherence is strongly driven by minimal voice-leading distance ($D_{\text{VL}}$) `[Sec. Results, pp. 272–276]`.

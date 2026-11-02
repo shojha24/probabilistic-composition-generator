@@ -13,7 +13,7 @@ During inference ({\small\texttt{extractors/xhmm\_ismir.py}}), posteriors $\math
     &+ \log P(c \!\mid\! \mathbf{x}_t) \Bigr\},
   \end{split}
 \end{equation}
-with $\tau_{\text{crf}} = 2.0$ (multi-head) and $\tau_{\text{crf}} = 30.0$ (MIREX). Fusing the 5-fold ensemble into FP16 TensorRT 10.x on Google Cloud GKE (NVIDIA L4, $24\,\text{GB}$) with dual-stream dynamic batching in Triton achieves sub-$40\,\text{ms}$ latency per $10.0\,\text{s}$ chunk ($431\,\text{frames}$): $2.83\,\text{ms}$ compute at $L=1$, and $10.93\,\text{ms}$ compute ($32.56\,\text{ms}$ round-trip) at $L=13$ peak throughput ($395.75\,\text{inf/s}$, $4.28\times$ speedup).
+with $\tau_{\text{crf}} = 2.0$ (multi-head) and $\tau_{\text{crf}} = 30.0$ (MIREX). Across full-song evaluation, the linear-chain CRF regularizes spurious rapid fluctuations on acoustically ambiguous frames while preserving sharp transitions at true harmonic boundaries. Ensemble predictions across cross-validation folds are averaged in log-posterior space prior to Viterbi decoding and Harte syntax conversion.
 
 \input{tables/tab1_head_metrics}
 
