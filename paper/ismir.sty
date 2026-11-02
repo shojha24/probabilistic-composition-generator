@@ -223,13 +223,7 @@
 %%%
 
 % Header
-\if@submission\else
-  \RequirePackage{fancyhdr}
-  \pagestyle{fancy}
-  \fancyhf{}
-  \fancyhead[l]{Proceedings of the 27th ISMIR Conference, Abu Dhabi, UAE, November 08--12, 2026}
-  \thispagestyle{plain}
-\fi
+\pagestyle{empty}
 
 % Copyright notice
 \newcommand{\permission}{%
@@ -241,20 +235,7 @@
       \hskip 1.5cm \copyright \hskip .1cm \authorname.
       Licensed under a Creative Commons Attribution 4.0 International License (CC BY 4.0).
       \textbf{Attribution:} \authorname,
-      ``\removelinebreaks{\@title}'',
-      \if@lbd
-        \if@submission
-          submitted to \textit{ISMIR LBD}, 2026.
-        \else
-          in \textit{Extended Abstracts for the Late-Breaking Demo Session of the \conferenceedition\ Int. Society for Music Information Retrieval Conf.,} \conferenceplace, \conferenceyear.
-        \fi
-      \else
-        \if@submission
-          submitted to \textit{ISMIR}, 2026.
-        \else
-          in \emph{Proc. of the \conferenceedition\ Int. Society for Music Information Retrieval Conf.,} \conferenceplace, \conferenceyear.
-        \fi
-      \fi
+      ``\removelinebreaks{\@title}'', 2026.
     \end{spacing}
     }
   \end{figure}
