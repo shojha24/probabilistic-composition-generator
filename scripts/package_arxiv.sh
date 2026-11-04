@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -eu
+set -o pipefail
 
 # Ensure TinyTeX is in PATH if installed in user home
 if [ -d "$HOME/.TinyTeX/bin" ]; then

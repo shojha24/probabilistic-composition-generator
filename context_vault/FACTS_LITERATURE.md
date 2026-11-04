@@ -8,45 +8,47 @@
 
 ---
 
-## 1. Master Literature Audit & Thematic Blueprint
+## 1. Master Literature Audit & Thematic Blueprint (Ordered by Citation # in `paper/main.pdf`)
 
-| # | BibTeX Key | Full-Text PDF File | Core Domain | Direct Role in Preprint Narrative |
+| Citation # | BibTeX Key | Full-Text PDF File | Core Domain | Direct Role in Preprint Narrative |
 |:---:|---|---|---|---|
-| **1** | `akram2025chordformer` | [`2502.11840v1.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/2502.11840v1.pdf) | Conformer ACR Backbone | Downstream evaluation target; 252-bin CQT + Conformer encoder + 6-head decomposition + CRF decoding |
-| **2** | `jiang2019large` | [`000078.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/000078.pdf) | Multi-Task Chord Decomposition | Origin of the 6-head structural factorization (Root+Triad, Bass, 7th, 9th, 11th, 13th) and inverse-frequency reweighting |
-| **3** | `mcfee2017structured` | [`ismir2017_chord.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/ismir2017_chord.pdf) | Large-Vocabulary Structured Loss | Tree-structured chord distance; multi-task pitch/root/bass regularization; 170-class vocabulary |
-| **4** | `li2025large` | [`Large-Vocabulary...pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/Large-Vocabulary_Chord_Recognition_Based_on_Contrastive_Learning_and_Noisy_Student_2023.pdf) | Contrastive Pseudo-Labeling | SOTA large-vocabulary baseline (CL-NS, 169 classes); establishes contrast between noisy semi-supervised learning vs. synthetic ground-truth |
-| **5** | `kim2026event` | [`2604.24386v1.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/2604.24386v1.pdf) | Event-Based Non-Triad Modeling | Frame-to-event seq2seq decoding; identifies frame oversegmentation and harmonic instability on complex non-triad chords |
-| **6** | `korzeniowski2016feature` | [`000178.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/000178.pdf) | Deep Chroma Feature Extractor | Learned harmonic representations; a feed-forward deep chroma extractor with a linear chord classifier |
-| **7** | `ostermann2023aam` | [`s13636-023-00278-7.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/s13636-023-00278-7.pdf) | Synthetic Multitracks (AAM) | Immediate predecessor synthetic dataset; establishes baseline synthesis pipeline (JFugue, commercial samplers rendered in Mixbus, 3,000 tracks) but lacks rare extensions and physical voicings |
-| **8** | `majchrzak2025training` | [`2508.05878v1.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/2508.05878v1.pdf) | Synthetic Pretraining Ablation | Validates synthetic pretraining on Transformer architectures (BTC, HT); demonstrates that synthetic data prevents minority class collapse |
-| **9** | `pauwels2019twenty` | [`000004.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/000004.pdf) | 20-Year ACR Review | Documents that complex chords lag major/minor triads, class balance problems, and the structural data scarcity bottleneck in MIR |
-| **10** | `humphrey2015four` | [`000294.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/000294.pdf) | 1,217-Song Benchmark Standard | Curates and deduplicates the canonical 1,217-track corpus; defines the 5-fold cross-validation split protocol; benchmarks human vs. model recall |
-| **11** | `burgoyne2011expert` | [`OS8-1.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/OS8-1.pdf) | McGill Billboard Corpus | Stratified sampling of the Billboard Hot 100 (1958–1991; 1,365 acquired slots, 1,100 unique singles); expert manual chord annotations providing our pop/rock harmonic prior |
-| **12** | `raffel2014mireval` | [`000320.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/000320.pdf) | mir_eval Evaluation Standard | Authoritative evaluation library; formalizes Weighted Chord Symbol Recall (WCSR) across MIREX comparison tiers (Root, MajMin, Triads, Sevenths, Tetrads) |
-| **13** | `koops2019annotator` | [`Annotator subjectivity...pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/Annotator%20subjectivity%20in%20harmony%20annotations%20of%20popular%20music.pdf) | Annotation Subjectivity | Quantifies human annotator disagreement (40–48% on sevenths/tetrads and their inversions in CASD, Table 3); demonstrates the human ceiling in real audio |
-| **14** | `deberardinis2023choco` | [`s41597-023-02410-w.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/s41597-023-02410-w.pdf) | Unified Harmony Corpus (ChoCo) | Largest open chord dataset (20,000+ tracks); source of extracted n-gram transition counts across Billboard, Isophonics, and WJD |
-| **15** | `mauch2009omras` | [`LBD-18.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/LBD-18.pdf) | OMRAS2 / Isophonics Corpus | Gold-standard Beatles and Queen manual annotations; provides rock/pop transition distributions |
-| **16** | `pfleiderer2017inside` | [`inside_the_jazzomat...pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/inside_the_jazzomat_final_rev_oa4.pdf) | Weimar Jazz Database (WJD) | 456 expert jazz solo transcriptions; provides rich extended and altered chord transition distributions for the jazz prior |
-| **17** | `harte2005symbolic` | [`symbolic-representation...pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/symbolic-representation-of-musical-chords-a-proposed-syntax-23nf777sgw.pdf) | Canonical Chord Syntax | Formal syntax for chord annotations (Root:quality(extensions)/bass) and rigorous semantics for the `N` (no-chord) silence token |
-| **18** | `cohn1998introduction` | [`Cohn-Introduction...1998.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/Cohn-IntroductionNeoRiemannianTheory-1998.pdf) | Neo-Riemannian Theory | Mathematical formulation of triadic contextual transformations (P, L, R) and parsimonious voice-leading displacement |
-| **19** | `douthett1998parsimonious` | [`Douthett-Parsimonious...pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/Douthett-ParsimoniousGraphsStudy-1998.pdf) | Parsimonious Graphs & Cube Dance | Graph theory of maximal smoothness and parsimony; formalizes minimal semitone voice-leading transitions |
-| **20** | `tymoczko2006geometry` | [`voiceleading.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/voiceleading.pdf) | Orbifold Chord Geometry | Geodesic distance on quotient orbifolds $\mathbb{T}^n / S_n$; models musical chords as geometric points and voice leading as minimal paths |
-| **21** | `tymoczko2011geometry` | [`A Geometry of Music...pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/A%20Geometry%20of%20Music_%20Harmony%20and%20Counterpoint%20in%20the%20--%20Dmitri%20Tymoczko.pdf) | Extended Common Practice | OPTIC symmetries; polyphonic arrangement constraints, voice-crossing bounds, and register-dependent voice leading |
-| **22** | `eitel2024perception` | [`eitel-et-al-2024...pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/eitel-et-al-2024-perception-of-chord-sequences-modeled-with-prediction-by-partial-matching-voice-leading-distance-and%20(1).pdf) | Empirical Voice-Leading Perception | Quantifies human perception of voice-leading smoothness; measures empirical semitone movement ($8.37 \pm 4.23$ st, Table 4; $\beta = -0.04$, OR = 0.97) |
-| **23** | `nadar2019towards` | [`SMC_2019_Chord...pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/SMC_2019_Chord_Recognition2.pdf) | Guitar Seventh Chord Acoustics | Demonstrates severe CNN performance drops (F-score 0.97 to 0.58/0.49) if guitar barré fingerings and drop voicings are unmodeled |
-| **24** | `brown1991calculation` | [`Calculation of a...pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/Calculation%20of%20a%20constant%20Q%20spectral%20transform.pdf) | Constant-Q Spectral Transform | Mathematical derivation of logarithmic CQT filterbanks ($Q = f_k / \Delta f_k$); resolves low-frequency bass fundamentals without temporal smearing |
-| **25** | `gulati2020conformer` | [`2005.08100v1.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/2005.08100v1.pdf) | Conformer Neural Backbone | Integrates Macaron feed-forward networks, multi-head self-attention, and depthwise convolution for simultaneous local and global feature capture |
-| **26** | `park2019specaugment` | [`1904.08779v3.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/1904.08779v3.pdf) | SpecAugment Regularization | Time masking and frequency masking on spectrograms; prevents overfitting to instrument-specific timbral formants |
+| **[1]** | `pauwels2019twenty` | [`1-20 Years of Automatic Chord Recognition.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/1-20%20Years%20of%20Automatic%20Chord%20Recognition.pdf) | 20-Year ACR Review | Documents that complex chords lag major/minor triads, class balance problems, and the structural data scarcity bottleneck in MIR |
+| **[2]** | `korzeniowski2016feature` | [`2-Feature Learning for Chord Recognition The.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/2-Feature%20Learning%20for%20Chord%20Recognition%20The.pdf) | Deep Chroma Feature Extractor | Learned harmonic representations; a feed-forward deep chroma extractor with a linear chord classifier |
+| **[3]** | `jiang2019large` | [`3-Large-Vocabulary Chord Transcription via Chord Structure.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/3-Large-Vocabulary%20Chord%20Transcription%20via%20Chord%20Structure.pdf) | Multi-Task Chord Decomposition | Origin of the 6-head structural factorization (Root+Triad, Bass, 7th, 9th, 11th, 13th) and inverse-frequency reweighting |
+| **[4]** | `park2019btc` | *[No local PDF; baseline Transformer]* | Transformer ACR Baseline | Baseline Bidirectional Transformer for Chords (BTC) evaluated in synthetic transfer benchmarks |
+| **[5]** | `gulati2020conformer` | [`5-Conformer Convolution-Augmented Transformer for Speech Recognition.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/5-Conformer%20Convolution-Augmented%20Transformer%20for%20Speech%20Recognition.pdf) | Conformer Neural Backbone | Integrates Macaron feed-forward networks, multi-head self-attention, and depthwise convolution for simultaneous local and global feature capture |
+| **[6]** | `humphrey2015four` | [`6-Four Timely Insights on Automatic Chord.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/6-Four%20Timely%20Insights%20on%20Automatic%20Chord.pdf) | 1,217-Song Benchmark Standard | Curates and deduplicates the canonical 1,217-track corpus; defines the 5-fold cross-validation split protocol; benchmarks human vs. model recall |
+| **[7]** | `burgoyne2011expert` | [`7-An Expert Ground-Truth Set for Audio.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/7-An%20Expert%20Ground-Truth%20Set%20for%20Audio.pdf) | McGill Billboard Corpus | Stratified sampling of the Billboard Hot 100 (1958–1991; 1,365 acquired slots, 1,100 unique singles); expert manual chord annotations providing our pop/rock harmonic prior |
+| **[8]** | `mauch2009omras` | [`8-OMRAS2 Metadata Project 2009.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/8-OMRAS2%20Metadata%20Project%202009.pdf) | OMRAS2 / Isophonics Corpus | Gold-standard Beatles and Queen manual annotations; provides rock/pop transition distributions |
+| **[9]** | `koops2019annotator` | [`9-Annotator Subjectivity in Harmony Annotations of.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/9-Annotator%20Subjectivity%20in%20Harmony%20Annotations%20of.pdf) | Annotation Subjectivity | Quantifies human annotator disagreement (40–48% on sevenths/tetrads and their inversions in CASD, Table 3); demonstrates the human ceiling in real audio |
+| **[10]** | `mcfee2017structured` | [`10-Structured Training for Large-Vocabulary Chord Recognition.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/10-Structured%20Training%20for%20Large-Vocabulary%20Chord%20Recognition.pdf) | Large-Vocabulary Structured Loss | Tree-structured chord distance; multi-task pitch/root/bass regularization; 170-class vocabulary |
+| **[11]** | `akram2025chordformer` | [`11-ChordFormer A Conformer-Based Architecture for Large-Vocabulary.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/11-ChordFormer%20A%20Conformer-Based%20Architecture%20for%20Large-Vocabulary.pdf) | Conformer ACR Backbone | Downstream evaluation target; 252-bin CQT + Conformer encoder + 6-head decomposition + CRF decoding |
+| **[12]** | `li2025large` | [`12-Large-Vocabulary Chord Recognition Based on Contrastive.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/12-Large-Vocabulary%20Chord%20Recognition%20Based%20on%20Contrastive.pdf) | Contrastive Pseudo-Labeling | SOTA large-vocabulary baseline (CL-NS, 169 classes); establishes contrast between noisy semi-supervised learning vs. synthetic ground-truth |
+| **[13]** | `deberardinis2023choco` | [`13-ChoCo a Chord Corpus and a.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/13-ChoCo%20a%20Chord%20Corpus%20and%20a.pdf) | Unified Harmony Corpus (ChoCo) | Largest open chord dataset (20,000+ tracks); source of extracted n-gram transition counts across Billboard, Isophonics, and WJD |
+| **[14]** | `pfleiderer2017inside` | [`14-Inside the Jazzomat New Perspectives for.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/14-Inside%20the%20Jazzomat%20New%20Perspectives%20for.pdf) | Weimar Jazz Database (WJD) | 456 expert jazz solo transcriptions; provides rich extended and altered chord transition distributions for the jazz prior |
+| **[15]** | `harte2005symbolic` | [`15-Symbolic Representation of Musical Chords A.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/15-Symbolic%20Representation%20of%20Musical%20Chords%20A.pdf) | Canonical Chord Syntax | Formal syntax for chord annotations (Root:quality(extensions)/bass) and rigorous semantics for the `N` (no-chord) silence token |
+| **[16]** | `kim2026event` | [`16-An Event-Based Sequence Modeling Approach to.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/16-An%20Event-Based%20Sequence%20Modeling%20Approach%20to.pdf) | Event-Based Non-Triad Modeling | Frame-to-event seq2seq decoding; identifies frame oversegmentation and harmonic instability on complex non-triad chords |
+| **[17]** | `manilow2019cutting` | *[No local PDF; synthetic separation]* | Synthetic Audio / Separation | Slakh2100 multitrack dataset benchmarked for synthetic audio pretraining quality |
+| **[18]** | `ostermann2023aam` | [`18-AAM a dataset of Artificial Audio.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/18-AAM%20a%20dataset%20of%20Artificial%20Audio.pdf) | Synthetic Multitracks (AAM) | Immediate predecessor synthetic dataset; establishes baseline synthesis pipeline (JFugue, commercial samplers rendered in Mixbus, 3,000 tracks) but lacks rare extensions and physical voicings |
+| **[19]** | `majchrzak2025training` | [`19-Training Chord Recognition Models on Artificially.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/19-Training%20Chord%20Recognition%20Models%20on%20Artificially.pdf) | Synthetic Pretraining Ablation | Validates synthetic pretraining on Transformer architectures (BTC, HT); demonstrates that synthetic data prevents minority class collapse |
+| **[20]** | `tymoczko2011geometry` | [`20-A Geometry of Music Harmony and.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/20-A%20Geometry%20of%20Music%20Harmony%20and.pdf) | Extended Common Practice | OPTIC symmetries; polyphonic arrangement constraints, voice-crossing bounds, and register-dependent voice leading |
+| **[21]** | `nadar2019towards` | [`21-Towards CNN-based Acoustic Modeling of Seventh.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/21-Towards%20CNN-based%20Acoustic%20Modeling%20of%20Seventh.pdf) | Guitar Seventh Chord Acoustics | Demonstrates severe CNN performance drops (F-score 0.97 to 0.58/0.49) if guitar barré fingerings and drop voicings are unmodeled |
+| **[22]** | `tymoczko2006geometry` | [`22-The Geometry of Musical Chords.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/22-The%20Geometry%20of%20Musical%20Chords.pdf) | Orbifold Chord Geometry | Geodesic distance on quotient orbifolds $\mathbb{T}^n / S_n$; models musical chords as geometric points and voice leading as minimal paths |
+| **[23]** | `eitel2024perception` | [`23-Perception of Chord Sequences Modeled with.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/23-Perception%20of%20Chord%20Sequences%20Modeled%20with.pdf) | Empirical Voice-Leading Perception | Quantifies human perception of voice-leading smoothness; measures empirical semitone movement ($8.37 \pm 4.23$ st, Table 4; $\beta = -0.04$, OR = 0.97) |
+| **[24]** | `cohn1998introduction` | [`24-Introduction to Neo-Riemannian Theory A Survey.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/24-Introduction%20to%20Neo-Riemannian%20Theory%20A%20Survey.pdf) | Neo-Riemannian Theory | Mathematical formulation of triadic contextual transformations (P, L, R) and parsimonious voice-leading displacement |
+| **[25]** | `douthett1998parsimonious` | [`25-Parsimonious Graphs A Study in Parsimony.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/25-Parsimonious%20Graphs%20A%20Study%20in%20Parsimony.pdf) | Parsimonious Graphs & Cube Dance | Graph theory of maximal smoothness and parsimony; formalizes minimal semitone voice-leading transitions |
+| **[26]** | `brown1991calculation` | [`26-Calculation of a Constant Q Spectral.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/26-Calculation%20of%20a%20Constant%20Q%20Spectral.pdf) | Constant-Q Spectral Transform | Mathematical derivation of logarithmic CQT filterbanks ($Q = f_k / \Delta f_k$); resolves low-frequency bass fundamentals without temporal smearing |
+| **[27]** | `park2019specaugment` | [`27-SpecAugment A Simple Data Augmentation Method.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/27-SpecAugment%20A%20Simple%20Data%20Augmentation%20Method.pdf) | SpecAugment Regularization | Time masking and frequency masking on spectrograms; prevents overfitting to instrument-specific timbral formants |
+| **[28]** | `raffel2014mireval` | [`28-mir_eval A Transparent Implementation of Common.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/28-mir_eval%20A%20Transparent%20Implementation%20of%20Common.pdf) | mir_eval Evaluation Standard | Authoritative evaluation library; formalizes Weighted Chord Symbol Recall (WCSR) across MIREX comparison tiers (Root, MajMin, Triads, Sevenths, Tetrads) |
 
 ---
 
 ## 2. ACR Architectures, Decomposition & Large-Vocabulary Learning
 
-### 2.1 Akram et al. (2025) — ChordFormer
+### 2.1 Akram et al. (2025) [11] — ChordFormer
 * **BibTeX Key:** `akram2025chordformer`
 * **Full Citation:** M. W. Akram, S. Dettori, V. Colla, and G. C. Buttazzo, "ChordFormer: A Conformer-Based Architecture for Large-Vocabulary Audio Chord Recognition," *arXiv preprint arXiv:2502.11840*, 2025.
-* **Local Asset:** [`2502.11840v1.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/2502.11840v1.pdf) (13 pages).
+* **Local Asset:** [`11-ChordFormer A Conformer-Based Architecture for Large-Vocabulary.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/11-ChordFormer%20A%20Conformer-Based%20Architecture%20for%20Large-Vocabulary.pdf) (13 pages).
 * **Core Methodology & Architectural Specs:**
   * **Input Feature:** 252-bin Constant-Q Transform (CQT) extracted via Librosa (`sr=22050`, `hop_length=512`, `bins_per_octave=36`, 7 octaves spanning $C_1 \approx 32.7$ Hz to $B_7 \approx 3951$ Hz) `[Sec. IV-A, p. 8]`. Log-amplitude compression via Librosa `amplitude_to_db` normalized to the maximum amplitude `[Sec. IV-A, p. 8]`; padded to 256 frequency bins in our pipeline.
   * **Neural Backbone:** 4 Conformer blocks `[Sec. III-C, pp. 5–6, Fig. 2]`. Each block employs a Macaron-style feed-forward network (FFN with half-step residual factor $1/2$), Multi-Head Self-Attention (MHSA, 4 attention heads, relative sinusoidal positional embeddings), depthwise separable convolution (kernel size 31, GLU activation, batch normalization), and a second half-step FFN followed by LayerNorm:
@@ -80,10 +82,10 @@
 
 ---
 
-### 2.2 Jiang et al. (2019) — Large-Vocabulary Chord Transcription via Chord Structure Decomposition
+### 2.2 Jiang et al. (2019) [3] — Large-Vocabulary Chord Transcription via Chord Structure Decomposition
 * **BibTeX Key:** `jiang2019large`
 * **Full Citation:** J. Jiang, K. Chen, W. Li, and G. Xia, "Large-Vocabulary Chord Transcription via Chord Structure Decomposition," in *Proceedings of the 20th International Society for Music Information Retrieval Conference (ISMIR)*, Delft, The Netherlands, 2019, pp. 644–651.
-* **Local Asset:** [`000078.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/000078.pdf) (8 pages).
+* **Local Asset:** [`3-Large-Vocabulary Chord Transcription via Chord Structure.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/3-Large-Vocabulary%20Chord%20Transcription%20via%20Chord%20Structure.pdf) (8 pages).
 * **Core Methodology & Architectural Specs:**
   * **Conceptual Innovation:** Introduces the multi-task structural decomposition paradigm for large-vocabulary ACR `[Sec. 3.1, p. 645]`. Decomposes complex chord labels into six categorical heads (Root+Triad, Bass, 7th, 9th, 11th, 13th). Note: Jiang et al. map the sixth in maj6/min6 to the 13th head, reserving `bb7` for dim7 `[Sec. 3.1, p. 645]`.
   * **Architecture:** 8-layer Convolutional Neural Network followed by a 2-layer Bidirectional LSTM (hidden size 96 per direction) `[Sec. 3.2.1, p. 646, Fig. 2]`. 
@@ -110,10 +112,10 @@
 
 ---
 
-### 2.3 McFee & Bello (2017) — Structured Training for Large-Vocabulary Chord Recognition
+### 2.3 McFee & Bello (2017) [10] — Structured Training for Large-Vocabulary Chord Recognition
 * **BibTeX Key:** `mcfee2017structured`
 * **Full Citation:** B. McFee and J. P. Bello, "Structured Training for Large-Vocabulary Chord Recognition," in *Proceedings of the 18th International Society for Music Information Retrieval Conference (ISMIR)*, Suzhou, China, 2017, pp. 188–194.
-* **Local Asset:** [`ismir2017_chord.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/ismir2017_chord.pdf) (7 pages).
+* **Local Asset:** [`10-Structured Training for Large-Vocabulary Chord Recognition.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/10-Structured%20Training%20for%20Large-Vocabulary%20Chord%20Recognition.pdf) (7 pages).
 * **Core Methodology & Architectural Specs:**
   * **Problem Formulation:** Formulates ACR over a large vocabulary of 170 chord classes (12 roots $\times$ 14 templates + $N$) `[Sec. 3.2, p. 190]`. 
   * **14 Chord Templates:** `min`, `maj`, `dim`, `aug`, `min6`, `maj6`, `min7`, `minmaj7`, `maj7`, `7`, `dim7`, `hdim7`, `sus2`, `sus4`.
@@ -133,10 +135,10 @@
 
 ---
 
-### 2.4 Li et al. (2025) — Large-Vocabulary Chord Recognition via Contrastive Learning & Noisy Student
+### 2.4 Li et al. (2025) [12] — Large-Vocabulary Chord Recognition via Contrastive Learning & Noisy Student
 * **BibTeX Key:** `li2025large`
 * **Full Citation:** C. Li, J. Jiang, Y. Li, and L. Tian, "Large-Vocabulary Chord Recognition Based on Contrastive Learning and Noisy Student," *IEEE Transactions on Consumer Electronics*, vol. 71, no. 2, pp. 3695–3706, May 2025.
-* **Local Asset:** [`Large-Vocabulary...pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/Large-Vocabulary_Chord_Recognition_Based_on_Contrastive_Learning_and_Noisy_Student_2023.pdf) (12 pages).
+* **Local Asset:** [`12-Large-Vocabulary Chord Recognition Based on Contrastive.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/12-Large-Vocabulary%20Chord%20Recognition%20Based%20on%20Contrastive.pdf) (12 pages).
 * **Core Methodology & Architectural Specs:**
   * **Semi-Supervised Framework:** Addresses large-vocabulary ACR (169 classes across 14 chord qualities) using unannotated audio. Combines self-supervised Contrastive Learning (CL) on raw audio patches with iterative Noisy Student (NS) pseudo-labeling `[Sec. III, pp. 3697–3702]`.
   * **Feature Processing:** Bidirectional attention-augmented CNN (`CNN_AUG`) with CRF decoding `[Sec. III-A, p. 3697]` (not a CRNN).
@@ -152,10 +154,10 @@
 
 ---
 
-### 2.5 Kim & Park (2026) — Event-Based Sequence Modeling for Non-Triad Chords
+### 2.5 Kim & Park (2026) [16] — Event-Based Sequence Modeling for Non-Triad Chords
 * **BibTeX Key:** `kim2026event`
 * **Full Citation:** L. Kim and J. Park, "An Event-Based Sequence Modeling Approach to Recognizing Non-Triad Chords with Oversegmentation Minimization," *arXiv preprint arXiv:2604.24386*, 2026.
-* **Local Asset:** [`2604.24386v1.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/2604.24386v1.pdf) (5 pages).
+* **Local Asset:** [`16-An Event-Based Sequence Modeling Approach to.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/16-An%20Event-Based%20Sequence%20Modeling%20Approach%20to.pdf) (5 pages).
 * **Core Methodology & Architectural Specs:**
   * **Core Premise:** Identifies that frame-level ACR models suffer severe oversegmentation errors on complex non-triad chords due to short-term timbral fluctuations and passing tones `[Sec. 1, p. 1]`.
   * **Seq2seq Event Decoding:** Autoregressive Transformer encoder-decoder emitting `MERGE`/`SPLIT` token sequences (`<SOS>`, time token at 0.1 s steps, root/quality tokens, `<EOS>`), with chord-similarity MSE encoder pre-training `[Sec. 2.2–2.3, pp. 2–3]`. There is no explicit change-point detection or event pooling.
@@ -170,10 +172,10 @@
 
 ---
 
-### 2.6 Korzeniowski & Widmer (2016) — Deep Chroma Extractor
+### 2.6 Korzeniowski & Widmer (2016) [2] — Deep Chroma Extractor
 * **BibTeX Key:** `korzeniowski2016feature`
 * **Full Citation:** F. Korzeniowski and G. Widmer, "Feature Learning for Chord Recognition: The Deep Chroma Extractor," in *Proceedings of the 17th International Society for Music Information Retrieval Conference (ISMIR)*, New York City, USA, 2016, pp. 37–43.
-* **Local Asset:** [`000178.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/000178.pdf) (7 pages).
+* **Local Asset:** [`2-Feature Learning for Chord Recognition The.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/2-Feature%20Learning%20for%20Chord%20Recognition%20The.pdf) (7 pages).
 * **Core Methodology & Architectural Specs:**
   * **Architecture:** Feed-forward DNN (3 dense hidden layers of 512 ReLU units) over a 15-frame super-frame of a 178-bin quarter-tone log-STFT (30–5500 Hz, 24 bins/octave, input dim 2670), 12 sigmoid outputs trained with binary cross-entropy `[Sec. 4, p. 39, Fig. 1; Eq. 2, p. 39]`.
   * **Chord Classifier:** No post-filtering; a simple linear classifier (logistic regression) maps chroma to chords `[Sec. 5, p. 39]`.
@@ -191,10 +193,10 @@
 
 ## 3. Synthetic Audio Pretraining & Multitrack Generation
 
-### 3.1 Ostermann et al. (2023) — Artificial Audio Multitracks (AAM)
+### 3.1 Ostermann et al. (2023) [18] — Artificial Audio Multitracks (AAM)
 * **BibTeX Key:** `ostermann2023aam`
 * **Full Citation:** F. Ostermann, I. Vatolkin, and M. Ebeling, "AAM: a dataset of Artificial Audio Multitracks for diverse music information retrieval tasks," *EURASIP Journal on Audio, Speech, and Music Processing*, vol. 2023, no. 1, p. 13, 2023.
-* **Local Asset:** [`s13636-023-00278-7.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/s13636-023-00278-7.pdf) (12 pages).
+* **Local Asset:** [`18-AAM a dataset of Artificial Audio.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/18-AAM%20a%20dataset%20of%20Artificial%20Audio.pdf) (12 pages).
 * **Core Methodology & Dataset Specs:**
   * **Dataset Scope:** 3,000 artificial music tracks generated via algorithmic composition `[Sec. 3, p. 3]`. Provides isolated audio multitracks (bass, chords/arpeggio, melody, drums) and full mixes in FLAC format at 44.1 kHz `[Sec. 3.2, p. 4]`.
   * **Composition Engine:** Algorithmic Composer implemented using JFugue and Java Sound API `[Sec. 4.1, p. 5]`. Generates pieces strictly within 4/4 time signature, steady tempo, and Western popular music conventions.
@@ -218,10 +220,10 @@
 
 ---
 
-### 3.2 Majchrzak & Mańdziuk (2025) — Training Chord Recognition Models on Artificially Generated Audio
+### 3.2 Majchrzak & Mańdziuk (2025) [19] — Training Chord Recognition Models on Artificially Generated Audio
 * **BibTeX Key:** `majchrzak2025training`
 * **Full Citation:** M. Majchrzak and J. Mańdziuk, "Training Chord Recognition Models on Artificially Generated Audio," *arXiv preprint arXiv:2508.05878*, 2025.
-* **Local Asset:** [`2508.05878v1.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/2508.05878v1.pdf) (14 pages).
+* **Local Asset:** [`19-Training Chord Recognition Models on Artificially.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/19-Training%20Chord%20Recognition%20Models%20on%20Artificially.pdf) (14 pages).
 * **Core Methodology & Experimental Setup:**
   * **Models Evaluated:** Bidirectional Transformer for Chords (BTC, Park et al.) and Harmony Transformer (HT) `[Sec. 3, pp. 3–4]`.
   * **Datasets Utilized:** AAM (3,000 synthetic tracks, 1,072,908 sequences), Schubert Winterreise Dataset (48 audio tracks of 24 songs, repeated 4× to balance to 192 in subsets), and McGill Billboard (739 tracks, 73,550 sequences) `[Sec. 4.1, Table 1, p. 5]`.
@@ -243,10 +245,10 @@
 
 ## 4. Benchmark Corpora, Surveys & Annotator Subjectivity
 
-### 4.1 Pauwels et al. (2019) — 20 Years of Automatic Chord Recognition from Audio
+### 4.1 Pauwels et al. (2019) [1] — 20 Years of Automatic Chord Recognition from Audio
 * **BibTeX Key:** `pauwels2019twenty`
 * **Full Citation:** J. Pauwels, K. O'Hanlon, E. Gómez, and M. B. Sandler, "20 Years of Automatic Chord Recognition from Audio," in *Proceedings of the 20th International Society for Music Information Retrieval Conference (ISMIR)*, Delft, The Netherlands, 2019, pp. 54–63.
-* **Local Asset:** [`000004.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/000004.pdf) (10 pages).
+* **Local Asset:** [`1-20 Years of Automatic Chord Recognition.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/1-20%20Years%20of%20Automatic%20Chord%20Recognition.pdf) (10 pages).
 * **Core Theoretical Review & Insights:**
   * **Complex Chords Lag Triads:** Notes that complex chords are still recognised less well than major and minor triads `[Sec. 1, p. 54]`. (The "82–84%" ceiling quoted elsewhere does NOT appear in this paper; see Humphrey & Bello Table 1 for measured numbers.)
   * **Problem 7: Vocabulary & Class Imbalance:** Rigorously analyzes why expanding vocabulary causes severe performance drops `[Sec. 8, p. 59]`:
@@ -261,10 +263,10 @@
 
 ---
 
-### 4.2 Humphrey & Bello (2015) — Four Timely Insights on Automatic Chord Estimation
+### 4.2 Humphrey & Bello (2015) [6] — Four Timely Insights on Automatic Chord Estimation
 * **BibTeX Key:** `humphrey2015four`
 * **Full Citation:** E. J. Humphrey and J. P. Bello, "Four Timely Insights on Automatic Chord Estimation," in *Proceedings of the 16th International Society for Music Information Retrieval Conference (ISMIR)*, Málaga, Spain, 2015, pp. 673–679.
-* **Local Asset:** [`000294.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/000294.pdf) (7 pages).
+* **Local Asset:** [`6-Four Timely Insights on Automatic Chord.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/6-Four%20Timely%20Insights%20on%20Automatic%20Chord.pdf) (7 pages).
 * **Core Methodology & Benchmark Definition:**
   * **Creation of the 1,217-Song Corpus:** Merged disparate public ground-truth collections (Isophonics, Billboard, and MARL/USPop2002), totaling 1,235 audio tracks `[Sec. 3, p. 675]`. Identified and removed 18 redundant songs using the EchoNest Analyze API, yielding the canonical **1,217 unique tracks** `[Sec. 3, p. 675]`.
   * **5-Fold Cross-Validation Protocol:** Partitioned the 1,217 tracks into five distinct splits; each split is used once as the holdout test set `[Sec. 3, p. 675]`. (The 60/20/20 train/val/test allocation is not stated in this paper.)
@@ -286,10 +288,10 @@
 
 ---
 
-### 4.3 Burgoyne et al. (2011) — McGill Billboard Dataset
+### 4.3 Burgoyne et al. (2011) [7] — McGill Billboard Dataset
 * **BibTeX Key:** `burgoyne2011expert`
 * **Full Citation:** J. A. Burgoyne, J. Wild, and I. Fujinaga, "An Expert Ground-Truth Set for Audio Chord Recognition and Music Analysis," in *Proceedings of the 12th International Society for Music Information Retrieval Conference (ISMIR)*, Miami, USA, 2011, pp. 633–638.
-* **Local Asset:** [`OS8-1.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/OS8-1.pdf) (6 pages).
+* **Local Asset:** [`7-An Expert Ground-Truth Set for Audio.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/7-An%20Expert%20Ground-Truth%20Set%20for%20Audio.pdf) (6 pages).
 * **Core Methodology & Corpus Specs:**
   * **Sampling Methodology:** Stratified random sampling of songs from the Billboard Hot 100 chart between 1958 and 1991 `[Sec. 2, pp. 633–634]`.
   * **Ground-Truth Annotation:** Expert transcriptions; the sample comprises 1,365 acquired chart slots covering 1,100 unique singles by 533 artists `[Sec. 2.2, p. 635]`, with 414,059 labeled beats over 638 distinct chords and 99 chord classes `[Sec. 4, p. 636]`.
@@ -304,10 +306,10 @@
 
 ---
 
-### 4.4 Raffel et al. (2014) — mir_eval
+### 4.4 Raffel et al. (2014) [28] — mir_eval
 * **BibTeX Key:** `raffel2014mireval`
 * **Full Citation:** C. Raffel, B. McFee, E. J. Humphrey, J. Salamon, O. Nieto, D. Liang, and D. P. W. Ellis, "mir_eval: A Transparent Implementation of Common MIR Metrics," in *Proceedings of the 15th International Society for Music Information Retrieval Conference (ISMIR)*, Taipei, Taiwan, 2014, pp. 367–372.
-* **Local Asset:** [`000320.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/000320.pdf) (6 pages).
+* **Local Asset:** [`28-mir_eval A Transparent Implementation of Common.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/28-mir_eval%20A%20Transparent%20Implementation%20of%20Common.pdf) (6 pages).
 * **Core Methodology & Metric Definitions:**
   * **Evaluation Standard:** Open-source library standardizing MIR evaluation `[Sec. 1, p. 367]`.
   * **`mir_eval.chord` Module:** Formalizes Weighted Chord Symbol Recall (WCSR / WCRR) by computing the duration-weighted overlap between reference intervals and estimated chord intervals `[Sec. 3.2, p. 368]`:
@@ -329,10 +331,10 @@
 
 ---
 
-### 4.5 Koops et al. (2019) — Annotator Subjectivity in Harmony Annotations
+### 4.5 Koops et al. (2019) [9] — Annotator Subjectivity in Harmony Annotations
 * **BibTeX Key:** `koops2019annotator`
 * **Full Citation:** H. V. Koops, W. B. de Haas, J. A. Burgoyne, J. Bransen, A. Kent-Muller, and A. Volk, "Annotator Subjectivity in Harmony Annotations of Popular Music," *Journal of New Music Research*, vol. 48, no. 3, pp. 232–252, 2019.
-* **Local Asset:** [`Annotator subjectivity...pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/Annotator%20subjectivity%20in%20harmony%20annotations%20of%20popular%20music.pdf) (20 pages).
+* **Local Asset:** [`9-Annotator Subjectivity in Harmony Annotations of.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/9-Annotator%20Subjectivity%20in%20Harmony%20Annotations%20of.pdf) (20 pages).
 * **Core Empirical Findings & Subjectivity Analysis:**
   * **Human Inter-Annotator Agreement:** The Chordify Annotator Subjectivity Dataset (CASD) has 4 expert annotators labeling 50 McGill Billboard songs `[Sec. 3, pp. 236–237]`.
   * **Error Breakdown by Chord Complexity:** Average pairwise agreement is 76% (root), 73% (MajMin), 60% (sevenths), 57% (tetrads), 54% (sevenths with inversions), 52% (tetrads with inversions), i.e. 40–48% disagreement on sevenths/tetrads and their inversions `[Sec. 5.1, Table 3, p. 243]`. Higher (>90%) root agreement figures come from earlier two-annotator studies cited in the paper.
@@ -349,10 +351,10 @@
 
 ## 5. Harmonic Corpora, Syntax & Voice Leading Foundations
 
-### 5.1 de Berardinis et al. (2023) — ChoCo: Chord Corpus Knowledge Graph
+### 5.1 de Berardinis et al. (2023) [13] — ChoCo: Chord Corpus Knowledge Graph
 * **BibTeX Key:** `deberardinis2023choco`
 * **Full Citation:** J. de Berardinis, A. Meroño-Peñuela, A. Poltronieri, and V. Presutti, "ChoCo: a Chord Corpus and a Data Transformation Workflow for Musical Harmony Knowledge Graphs," *Scientific Data*, vol. 10, no. 1, p. 641, 2023.
-* **Local Asset:** [`s41597-023-02410-w.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/s41597-023-02410-w.pdf) (25 pages).
+* **Local Asset:** [`13-ChoCo a Chord Corpus and a.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/13-ChoCo%20a%20Chord%20Corpus%20and%20a.pdf) (25 pages).
 * **Core Methodology & Corpus Specs:**
   * **Corpus Scale:** Aggregates 18 symbolic and audio chord datasets into a unified RDF/JAMS knowledge graph containing **20,000+ harmonic annotations** `[Sec. Background & Summary, pp. 2–3; Table 1, p. 4]`.
   * **Standardization Workflow:** Standardizes diverse chord nomenclatures into canonical Harte syntax `[Sec. Methods, Conversion of chord notations, pp. 7–8, Fig. 3]`.
@@ -368,10 +370,10 @@
 
 ---
 
-### 5.2 Mauch et al. (2009) — OMRAS2 Metadata Project (Isophonics)
+### 5.2 Mauch et al. (2009) [8] — OMRAS2 Metadata Project (Isophonics)
 * **BibTeX Key:** `mauch2009omras`
 * **Full Citation:** M. Mauch, C. Cannam, M. Davies, S. Dixon, C. Harte, S. Kolozali, D. Tidhar, and M. Sandler, "OMRAS2 Metadata Project 2009," in *Late-Breaking Demos, 10th International Society for Music Information Retrieval Conference (ISMIR)*, Kobe, Japan, 2009.
-* **Local Asset:** [`LBD-18.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/LBD-18.pdf) (1 page).
+* **Local Asset:** [`8-OMRAS2 Metadata Project 2009.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/8-OMRAS2%20Metadata%20Project%202009.pdf) (1 page).
 * **Core Contribution:**
   * Hand-annotated, timestamped ground-truth annotations: chords for 180 Beatles, 20 Queen, 18 Zweieck and 14 Carole King songs; beats for 179 Beatles and 18 Zweieck; keys for 179 Beatles, 14 Carole King, 20 Queen, 18 Zweieck `[p. 1]`.
   * Established the standard reference corpus for early MIREX evaluation.
@@ -382,10 +384,10 @@
 
 ---
 
-### 5.3 Pfleiderer et al. (2017) — Inside the Jazzomat (Weimar Jazz Database)
+### 5.3 Pfleiderer et al. (2017) [14] — Inside the Jazzomat (Weimar Jazz Database)
 * **BibTeX Key:** `pfleiderer2017inside`
 * **Full Citation:** M. Pfleiderer, K. Frieler, J. Abeßer, W.-G. Zaddach, and B. Burkhart, Eds., *Inside the Jazzomat: New Perspectives for Jazz Research*, Mainz, Germany: Schott Campus, 2017 (ISBN 978-3-95983-124-6 paperback).
-* **Local Asset:** [`inside_the_jazzomat...pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/inside_the_jazzomat_final_rev_oa4.pdf) (352 pages).
+* **Local Asset:** [`14-Inside the Jazzomat New Perspectives for.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/14-Inside%20the%20Jazzomat%20New%20Perspectives%20for.pdf) (352 pages).
 * **Core Corpus & Musicological Specs:**
   * Transcribes 456 historic jazz solo improvisations (Miles Davis, John Coltrane, Charlie Parker, etc.) with beat-aligned lead-sheet chord annotations `[The Weimar Jazz Database, pp. 19–40; v2.0 contents p. 28]`.
   * Chord syntax with upper extensions ($9, \sharp 9, \flat 9, 11, \sharp 11, 13, \flat 13$, alt) is defined in Frieler's chapter `[Computational melody analysis, pp. 49–51, 69–71]`; chord-root statistics over 422 solos in `[Abeßer & Frieler, pp. 124–129, Table 13]`. Qualitative discussion of ii–V–I, tritone substitution and altered dominants appears in individual solo case studies (e.g., pp. 142, 214–223, 249–251). The book has no corpus-wide statistical harmonic-analysis chapter (earlier "Chap. 6, pp. 145–180" was wrong).
@@ -398,10 +400,10 @@
 
 ---
 
-### 5.4 Harte et al. (2005) — Symbolic Representation of Musical Chords
+### 5.4 Harte et al. (2005) [15] — Symbolic Representation of Musical Chords
 * **BibTeX Key:** `harte2005symbolic`
 * **Full Citation:** C. Harte, M. B. Sandler, S. A. Abdallah, and E. Gómez, "Symbolic Representation of Musical Chords: A Proposed Syntax for Text Annotations," in *Proceedings of the 6th International Society for Music Information Retrieval Conference (ISMIR)*, London, UK, 2005, pp. 66–71.
-* **Local Asset:** [`symbolic-representation...pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/symbolic-representation-of-musical-chords-a-proposed-syntax-23nf777sgw.pdf) (6 pages).
+* **Local Asset:** [`15-Symbolic Representation of Musical Chords A.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/15-Symbolic%20Representation%20of%20Musical%20Chords%20A.pdf) (6 pages).
 * **Core Methodology & Grammatical Syntax:**
   * **Formal Syntax:** Defines the text syntax `root : shorthand(extra-degrees) / bass` `[Sec. 4.1, p. 68; Table 1 (BNF), p. 69; Sec. 4.2, p. 70]`.
   * **Shorthands:** 16 shorthands: triads (`maj`, `min`, `dim`, `aug`), sevenths (`maj7`, `min7`, `7`, `dim7`, `hdim7`, `minmaj7`), sixths (`maj6`, `min6`), extended (`9`, `maj9`, `min9`), and `sus4` `[Table 2, p. 69]`. `sus2` is NOT in this paper.
@@ -415,10 +417,10 @@
 
 ---
 
-### 5.5 Cohn (1998) — Introduction to Neo-Riemannian Theory
+### 5.5 Cohn (1998) [24] — Introduction to Neo-Riemannian Theory
 * **BibTeX Key:** `cohn1998introduction`
 * **Full Citation:** R. Cohn, "Introduction to Neo-Riemannian Theory: A Survey and a Historical Perspective," *Journal of Music Theory*, vol. 42, no. 2, pp. 167–180, 1998.
-* **Local Asset:** [`Cohn-Introduction...1998.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/Cohn-IntroductionNeoRiemannianTheory-1998.pdf) (14 pages).
+* **Local Asset:** [`24-Introduction to Neo-Riemannian Theory A Survey.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/24-Introduction%20to%20Neo-Riemannian%20Theory%20A%20Survey.pdf) (14 pages).
 * **Core Theoretical Formulation:**
   * **Triadic Transformations:** Formalizes the contextual involutions on major and minor triads `[Sec. II, pp. 170–172, Fig. 2]`:
     * **P (Parallel):** Inverts a triad across its perfect fifth, preserving the root and fifth while moving the third by 1 semitone (e.g., $C\text{ major} \leftrightarrow C\text{ minor}$).
@@ -434,10 +436,10 @@
 
 ---
 
-### 5.6 Douthett & Steinbach (1998) — Parsimonious Graphs & Cube Dance
+### 5.6 Douthett & Steinbach (1998) [25] — Parsimonious Graphs & Cube Dance
 * **BibTeX Key:** `douthett1998parsimonious`
 * **Full Citation:** J. Douthett and P. Steinbach, "Parsimonious Graphs: A Study in Parsimony, Contextual Transformations, and Modes of Limited Transposition," *Journal of Music Theory*, vol. 42, no. 2, pp. 241–263, 1998.
-* **Local Asset:** [`Douthett-Parsimonious...pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/Douthett-ParsimoniousGraphsStudy-1998.pdf) (23 pages).
+* **Local Asset:** [`25-Parsimonious Graphs A Study in Parsimony.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/25-Parsimonious%20Graphs%20A%20Study%20in%20Parsimony.pdf) (23 pages).
 * **Core Theoretical Formulation:**
   * **Graph Theory of Parsimony:** Models chord systems as graphs where vertices represent chords and edges represent minimal voice-leading displacements (1 semitone) `[Sec. 2, pp. 243–244]`.
   * **Cube Dance & Augmented Triads:** Derives the *Cube Dance* graph connecting 24 major/minor triads and 4 augmented triads via 1-semitone parsimonious steps `[Sec. 2, pp. 243–244; Sec. 5, Fig. 9, p. 254]`.
@@ -449,10 +451,10 @@
 
 ---
 
-### 5.7 Tymoczko (2006) — The Geometry of Musical Chords
+### 5.7 Tymoczko (2006) [22] — The Geometry of Musical Chords
 * **BibTeX Key:** `tymoczko2006geometry`
 * **Full Citation:** D. Tymoczko, "The Geometry of Musical Chords," *Science*, vol. 313, no. 5783, pp. 72–74, 2006.
-* **Local Asset:** [`voiceleading.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/voiceleading.pdf) (3 pages + SOM).
+* **Local Asset:** [`22-The Geometry of Musical Chords.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/22-The%20Geometry%20of%20Musical%20Chords.pdf) (3 pages + SOM).
 * **Core Mathematical Formulation:**
   * **Orbifold Geometry:** Proves that musical chords of cardinality $n$ inhabit singular quotient topological spaces known as orbifolds:
     $$\mathcal{O}^n = \mathbb{T}^n / S_n$$
@@ -466,10 +468,10 @@
 
 ---
 
-### 5.8 Tymoczko (2011) — A Geometry of Music: Harmony and Counterpoint in the Extended Common Practice
+### 5.8 Tymoczko (2011) [20] — A Geometry of Music: Harmony and Counterpoint in the Extended Common Practice
 * **BibTeX Key:** `tymoczko2011geometry`
 * **Full Citation:** D. Tymoczko, *A Geometry of Music: Harmony and Counterpoint in the Extended Common Practice*, New York: Oxford University Press, 2011.
-* **Local Asset:** [`A Geometry of Music...pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/A%20Geometry%20of%20Music_%20Harmony%20and%20Counterpoint%20in%20the%20--%20Dmitri%20Tymoczko.pdf) (469 pages).
+* **Local Asset:** [`20-A Geometry of Music Harmony and.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/20-A%20Geometry%20of%20Music%20Harmony%20and.pdf) (469 pages).
 * **Core Theoretical Framework:**
   * **The OPTIC Symmetries:** Five basic operations preserving musical chord identity `[Chap. 2, §2.4, pp. 35–44, Fig. 2.4.7]`:
     1. **O (Octave Equivalence):** Identifying pitches separated by octaves ($p \equiv p + 12k, k \in \mathbb{Z}$), creating the 12 pitch classes.
@@ -510,10 +512,10 @@
 
 ---
 
-### 5.9 Eitel et al. (2024) — Empirical Voice-Leading Perception
+### 5.9 Eitel et al. (2024) [23] — Empirical Voice-Leading Perception
 * **BibTeX Key:** `eitel2024perception`
 * **Full Citation:** M. Eitel, N. Ruth, P. Harrison, K. Frieler, and D. Müllensiefen, "Perception of Chord Sequences Modeled with Prediction by Partial Matching, Voice-Leading Distance, and Spectral Pitch-Class Similarity: A New Approach for Testing Individual Differences in Harmony Perception," *Music & Science*, vol. 7, pp. 1–16, 2024.
-* **Local Asset:** [`eitel-et-al-2024...pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/eitel-et-al-2024-perception-of-chord-sequences-modeled-with-prediction-by-partial-matching-voice-leading-distance-and%20(1).pdf) (16 pages).
+* **Local Asset:** [`23-Perception of Chord Sequences Modeled with.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/23-Perception%20of%20Chord%20Sequences%20Modeled%20with.pdf) (16 pages).
 * **Core Empirical Findings:**
   * **Perceptual Stimulus Corpus:** Stimulus database of 5,076 four-chord progressions (Billboard-derived); voicings produced by a voice-leading algorithm with four voices constrained within MIDI pitch range 48 to 72 ($C_3$ to $C_5$) `[Sec. Stimuli, p. 5]`.
   * **Empirical Voice-Leading Distance:** Table 4 (p. 10) reports the descriptive statistics for empirical voice-leading distance (minVL) across the stimulus corpus with a mean of **$8.37 \pm 4.23$ semitones** across voices.
@@ -527,10 +529,10 @@
 
 ---
 
-### 5.10 Nadar et al. (2019) — Towards CNN-based Acoustic Modeling of Seventh Chords
+### 5.10 Nadar et al. (2019) [21] — Towards CNN-based Acoustic Modeling of Seventh Chords
 * **BibTeX Key:** `nadar2019towards`
 * **Full Citation:** C.-R. Nadar, J. Abeßer, and S. Grollmisch, "Towards CNN-based Acoustic Modeling of Seventh Chords for Automatic Chord Recognition," in *Proceedings of the 16th Sound and Music Computing Conference (SMC)*, Málaga, Spain, 2019, pp. 48–54.
-* **Local Asset:** [`SMC_2019_Chord...pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/SMC_2019_Chord_Recognition2.pdf) (7 pages).
+* **Local Asset:** [`21-Towards CNN-based Acoustic Modeling of Seventh.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/21-Towards%20CNN-based%20Acoustic%20Modeling%20of%20Seventh.pdf) (7 pages).
 * **Core Empirical Findings:**
   * Evaluated CNN chord recognition on 84 classes (12 roots × 7 chord types: maj, min, 7, maj7, min7, dim, aug) using the synthetic IDMT-SMT-CHORDS dataset across piano, synth pad, acoustic guitar, and electric guitar `[Sec. 3.2, p. 50, Table 1; Sec. 4.1–4.2, p. 51]`.
   * **Cross-Voicing Degradation:** Training on one voicing/instrument family (e.g. piano/synth) and testing on guitar drops $F_1$ from 0.97 (mixed) down to 0.58 / 0.49 under strategy S1 and 0.76 / 0.56 under strategy S2 `[Sec. 5.1, Table 3, p. 52]`.
@@ -547,10 +549,10 @@
 
 ## 6. Acoustic Front-Ends, Neural Foundations & SpecAugment
 
-### 6.1 Brown (1991) — Calculation of a Constant Q Spectral Transform
+### 6.1 Brown (1991) [26] — Calculation of a Constant Q Spectral Transform
 * **BibTeX Key:** `brown1991calculation`
 * **Full Citation:** J. C. Brown, "Calculation of a constant Q spectral transform," *The Journal of the Acoustical Society of America*, vol. 89, no. 1, pp. 425–434, 1991.
-* **Local Asset:** [`Calculation of a...pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/Calculation%20of%20a%20constant%20Q%20spectral%20transform.pdf) (10 pages).
+* **Local Asset:** [`26-Calculation of a Constant Q Spectral.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/26-Calculation%20of%20a%20Constant%20Q%20Spectral.pdf) (10 pages).
 * **Core Mathematical Formulation:**
   * **CQT Filterbank Derivation:** Defines a spectral transform where filter center frequencies $f_k$ are geometrically spaced:
     $$f_k = (2^{1/24})^k f_{\min}$$
@@ -566,10 +568,10 @@
 
 ---
 
-### 6.2 Gulati et al. (2020) — Conformer Backbone
+### 6.2 Gulati et al. (2020) [5] — Conformer Backbone
 * **BibTeX Key:** `gulati2020conformer`
 * **Full Citation:** A. Gulati, J. Qin, C.-C. Chiu, N. Parmar, Y. Zhang, J. Yu, W. Han, S. Wang, Z. Zhang, Y. Wu, and R. Pang, "Conformer: Convolution-augmented Transformer for Speech Recognition," in *Proc. Interspeech 2020*, Shanghai, China, 2020, pp. 5036–5040.
-* **Local Asset:** [`2005.08100v1.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/2005.08100v1.pdf) (5 pages).
+* **Local Asset:** [`5-Conformer Convolution-Augmented Transformer for Speech Recognition.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/5-Conformer%20Convolution-Augmented%20Transformer%20for%20Speech%20Recognition.pdf) (5 pages).
 * **Core Architectural Innovations:**
   * **Macaron-Style Architecture:** Employs half-step feed-forward modules sandwiching the self-attention and convolution blocks `[Sec. 2 & 2.4, Eq. 1, pp. 5036–5037, Fig. 1]`.
   * **Depthwise Convolution Module:** Uses pointwise convolutions with Gated Linear Units (GLU), 1D depthwise convolution, batch normalization, and Swish activation `[Sec. 2.2, Fig. 2, p. 5037]`.
@@ -583,10 +585,10 @@
 
 ---
 
-### 6.3 Park et al. (2019) — SpecAugment
+### 6.3 Park et al. (2019) [27] — SpecAugment
 * **BibTeX Key:** `park2019specaugment`
 * **Full Citation:** D. S. Park, W. Chan, Y. Zhang, C.-C. Chiu, B. Zoph, E. D. Cubuk, and Q. V. Le, "SpecAugment: A Simple Data Augmentation Method for Automatic Speech Recognition," in *Proc. Interspeech 2019*, Graz, Austria, 2019, pp. 2613–2617.
-* **Local Asset:** [`1904.08779v3.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/1904.08779v3.pdf) (5 pages).
+* **Local Asset:** [`27-SpecAugment A Simple Data Augmentation Method.pdf`](file:///home/shojha/probabilistic-composition-generator/context_vault/references/27-SpecAugment%20A%20Simple%20Data%20Augmentation%20Method.pdf) (5 pages).
 * **Core Data Augmentation Method:**
   * **Spectrogram Masking:** Applies simple data augmentation directly on time-frequency spectrograms `[Sec. 2, pp. 2613–2614]`:
     1. **Time Masking:** Masks $t$ consecutive time steps $[t_0, t_0 + t)$, where $t \sim \mathcal{U}(0, T_{\text{mask}})$.
