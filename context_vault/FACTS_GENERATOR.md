@@ -1,6 +1,6 @@
 # Ground-Truth Specification: Probabilistic Composition Generator
 
-**Section 3 Reference Document for ISMIR 2026 Preprint**  
+**Section 3 Reference Document for the Preprint**  
 **Repository Audit & Ground-Truth Extraction**  
 **Target File:** `context_vault/FACTS_GENERATOR.md`  
 **Date of Audit:** October 30, 2026  
@@ -396,7 +396,7 @@ All parameters documented below are verbatim from source (`voicing/voicers/`):
 | **DCT Mode: Isolated** | $P(\text{isolated})$ | $0.20$ | $0.30$ | $0.35$ | $0.40$ | $0.38$ | $0.30$ |
 | **DCT Mode: Octave** | $P(\text{octave})$ | $0.30$ | $0.05$ | $0.30$ | $0.05$ | $0.02$ | $0.30$ |
 
-### 4.3 ISMIR Rigor: Component Omission Guarantees
+### 4.3 Rigor: Component Omission Guarantees
 
 Reviewers must know whether labeled chord tones are sounded in audio:
 1. **Upper Extensions (9th, 11th, 13th):**

@@ -21,10 +21,13 @@
 \BIBdecl
 
 \bibitem{pauwels2019twenty}
-J.~Pauwels, K.~O'Hanlon, E.~G{\'o}mez, and M.~B. Sandler, ``20 years of automatic chord recognition from audio: A review,'' in \emph{Proceedings of the 20th International Society for Music Information Retrieval Conference (ISMIR)}, Delft, The Netherlands, 2019, pp. 54--63.
+J.~Pauwels, K.~O'Hanlon, E.~G{\'o}mez, and M.~B. Sandler, ``20 years of automatic chord recognition from audio,'' in \emph{Proceedings of the 20th International Society for Music Information Retrieval Conference (ISMIR)}, Delft, The Netherlands, 2019, pp. 54--63.
 
 \bibitem{korzeniowski2016feature}
 F.~Korzeniowski and G.~Widmer, ``Feature learning for chord recognition: The deep chroma extractor,'' in \emph{Proceedings of the 17th International Society for Music Information Retrieval Conference (ISMIR)}, New York City, USA, 2016, pp. 37--43.
+
+\bibitem{jiang2019large}
+J.~Jiang, K.~Chen, W.~Li, and G.~Xia, ``Large-vocabulary chord transcription via chord structure decomposition,'' in \emph{Proceedings of the 20th International Society for Music Information Retrieval Conference (ISMIR)}, Delft, The Netherlands, 2019, pp. 644--651.
 
 \bibitem{park2019btc}
 J.~Park, K.~Choi, S.~Jeon, D.~Kim, and J.~Park, ``A bi-directional {Transformer} for musical chord recognition,'' in \emph{Proceedings of the 20th International Society for Music Information Retrieval Conference (ISMIR)}, Delft, The Netherlands, 2019, pp. 620--627.
@@ -47,16 +50,13 @@ H.~V. Koops, W.~B. de~Haas, J.~A. Burgoyne, J.~Bransen, A.~Kent-Muller, and A.~V
 \bibitem{mcfee2017structured}
 B.~McFee and J.~P. Bello, ``Structured training for large-vocabulary chord recognition,'' in \emph{Proceedings of the 18th International Society for Music Information Retrieval Conference (ISMIR)}, Suzhou, China, 2017, pp. 188--194.
 
-\bibitem{jiang2019large}
-J.~Jiang, K.~Chen, W.~Li, and G.~Xia, ``Large-vocabulary chord transcription via chord structure decomposition,'' in \emph{Proceedings of the 20th International Society for Music Information Retrieval Conference (ISMIR)}, Delft, The Netherlands, 2019, pp. 644--651.
-
 \bibitem{akram2025chordformer}
 \BIBentryALTinterwordspacing
 M.~W. Akram, S.~Dettori, V.~Colla, and G.~C. Buttazzo, ``{ChordFormer}: A conformer-based architecture for large-vocabulary audio chord recognition,'' \emph{arXiv preprint arXiv:2502.11840}, 2025. [Online]. Available: \url{https://arxiv.org/abs/2502.11840}
 \BIBentrySTDinterwordspacing
 
 \bibitem{li2025large}
-C.~Li, J.~Jiang, Y.~Li, and L.~Tian, ``Large-vocabulary chord recognition based on contrastive learning and noisy student,'' \emph{IEEE Transactions on Consumer Electronics}, vol.~71, no.~2, pp. 3695--3707, 2025.
+C.~Li, J.~Jiang, Y.~Li, and L.~Tian, ``Large-vocabulary chord recognition based on contrastive learning and noisy student,'' \emph{IEEE Transactions on Consumer Electronics}, vol.~71, no.~2, pp. 3695--3706, 2025.
 
 \bibitem{deberardinis2023choco}
 J.~de~Berardinis, A.~Mero{\~n}o-Pe{\~n}uela, A.~Poltronieri, and V.~Presutti, ``{ChoCo}: a chord corpus and a data transformation workflow for musical harmony knowledge graphs,'' \emph{Scientific Data}, vol.~10, no.~1, p. 641, 2023.

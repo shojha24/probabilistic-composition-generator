@@ -1,245 +1,312 @@
-% BibTeX Bibliography for Probabilistic Multitrack Composition Generator
-% and Downstream Large-Vocabulary Conformer Audio Chord Recognition (ACR)
+% ==============================================================================
+% paper/references.bib
+% BibTeX entries for the preprint:
+% "Probabilistic Composition Generator & Conformer Large-Vocabulary ACR Benchmarking"
+% ==============================================================================
 
-@inproceedings{pauwels2019twenty,
-  title     = {20 Years of Automatic Chord Recognition from Audio: A Review},
-  author    = {Pauwels, Johan and O'Hanlon, Ken and G{\'o}mez, Emilia and Sandler, Mark B.},
-  booktitle = {Proceedings of the 20th International Society for Music Information Retrieval Conference (ISMIR)},
-  pages     = {54--63},
-  year      = {2019},
-  address   = {Delft, The Netherlands}
-}
+% ------------------------------------------------------------------------------
+% 1. ACR ARCHITECTURES, TAXONOMIES & DECOMPOSITION
+% ------------------------------------------------------------------------------
 
 @article{akram2025chordformer,
-  title     = {ChordFormer: A Conformer-Based Architecture for Large-Vocabulary Audio Chord Recognition},
-  author    = {Akram, Muhammad Waseem and Dettori, Stefano and Colla, Valentina and Buttazzo, Giorgio Carlo},
-  journal   = {arXiv preprint arXiv:2502.11840},
-  year      = {2025}
-}
-
-@inproceedings{mcfee2017structured,
-  title     = {Structured Training for Large-Vocabulary Chord Recognition},
-  author    = {McFee, Brian and Bello, Juan P.},
-  booktitle = {Proceedings of the 18th International Society for Music Information Retrieval Conference (ISMIR)},
-  pages     = {188--194},
-  year      = {2017},
-  address   = {Suzhou, China}
+  author        = {Akram, Muhammad Waseem and Dettori, Stefano and Colla, Valentina and Buttazzo, Giorgio Carlo},
+  title         = {{ChordFormer}: A Conformer-Based Architecture for Large-Vocabulary Audio Chord Recognition},
+  journal       = {arXiv preprint arXiv:2502.11840},
+  year          = {2025},
+  eprint        = {2502.11840},
+  archiveprefix = {arXiv},
+  primaryclass  = {cs.SD},
+  url           = {https://arxiv.org/abs/2502.11840}
 }
 
 @inproceedings{jiang2019large,
-  title     = {Large-Vocabulary Chord Transcription via Chord Structure Decomposition},
   author    = {Jiang, Junyan and Chen, Ke and Li, Wei and Xia, Gus},
+  title     = {Large-Vocabulary Chord Transcription via Chord Structure Decomposition},
   booktitle = {Proceedings of the 20th International Society for Music Information Retrieval Conference (ISMIR)},
   pages     = {644--651},
   year      = {2019},
-  address   = {Delft, The Netherlands}
+  address   = {Delft, The Netherlands},
+}
+
+@inproceedings{mcfee2017structured,
+  author    = {McFee, Brian and Bello, Juan P.},
+  title     = {Structured Training for Large-Vocabulary Chord Recognition},
+  booktitle = {Proceedings of the 18th International Society for Music Information Retrieval Conference (ISMIR)},
+  pages     = {188--194},
+  year      = {2017},
+  address   = {Suzhou, China},
 }
 
 @article{li2025large,
+  author    = {Li, Chen and Jiang, Jingyi and Li, Yu and Tian, Lihua},
   title     = {Large-Vocabulary Chord Recognition Based on Contrastive Learning and Noisy Student},
-  author    = {Li, Wei and Song, Xiang and Deng, Yujia and Sun, Ji},
   journal   = {IEEE Transactions on Consumer Electronics},
   volume    = {71},
   number    = {2},
-  pages     = {3695--3707},
+  pages     = {3695--3706},
   year      = {2025},
-  publisher = {IEEE}
+  publisher = {IEEE},
+  doi       = {10.1109/TCE.2024.3425718}
 }
 
 @article{kim2026event,
-  title     = {An Event-Based Sequence Modeling Approach to Recognizing Non-Triad Chords with Oversegmentation Minimization},
-  author    = {Kim, Leekyung and Park, Jonghun},
-  journal   = {arXiv preprint arXiv:2604.24386},
-  year      = {2026}
+  author        = {Kim, Leekyung and Park, Jonghun},
+  title         = {An Event-Based Sequence Modeling Approach to Recognizing Non-Triad Chords with Oversegmentation Minimization},
+  journal       = {arXiv preprint arXiv:2604.24386},
+  year          = {2026},
+  eprint        = {2604.24386},
+  archiveprefix = {arXiv},
+  primaryclass  = {cs.SD},
+  url           = {https://arxiv.org/abs/2604.24386}
 }
 
 @inproceedings{korzeniowski2016feature,
-  title     = {Feature Learning for Chord Recognition: The Deep Chroma Extractor},
   author    = {Korzeniowski, Filip and Widmer, Gerhard},
+  title     = {Feature Learning for Chord Recognition: The Deep Chroma Extractor},
   booktitle = {Proceedings of the 17th International Society for Music Information Retrieval Conference (ISMIR)},
-  pages     = {148--154},
+  pages     = {37--43},
   year      = {2016},
-  address   = {New York, USA}
+  address   = {New York City, USA},
 }
 
-@article{koops2019annotator,
-  title     = {Annotator subjectivity in harmony annotations of popular music},
-  author    = {Koops, Hendrik Vincent and de Haas, W. Bas and Burgoyne, John Ashley and Bransen, Jeroen and Kent-Muller, Anna and Volk, Anja},
-  journal   = {Journal of New Music Research},
-  volume    = {48},
-  number    = {3},
-  pages     = {232--252},
-  year      = {2019},
-  publisher = {Routledge}
-}
+% ------------------------------------------------------------------------------
+% 2. SYNTHETIC AUDIO DATASETS & PRETRAINING
+% ------------------------------------------------------------------------------
 
-@article{ostermann2023artificial,
-  title     = {Artificial audio multitracks for chord recognition},
-  author    = {Ostermann, Felix and Arifi-M{\"u}ller, Vlora and M{\"u}ller, Meinard and Pr{\"a}tlich, Peter},
+@article{ostermann2023aam,
+  author    = {Ostermann, Fabian and Vatolkin, Igor and Ebeling, Martin},
+  title     = {{AAM}: a dataset of {Artificial Audio Multitracks} for diverse music information retrieval tasks},
   journal   = {EURASIP Journal on Audio, Speech, and Music Processing},
   volume    = {2023},
   number    = {1},
   pages     = {13},
   year      = {2023},
-  publisher = {SpringerOpen}
+  publisher = {Springer},
+  doi       = {10.1186/s13636-023-00278-7}
 }
 
 @article{majchrzak2025training,
-  title     = {Training Chord Recognition Models on Artificially Generated Audio},
-  author    = {Majchrzak, Martyna and Ma{\'n}dziuk, Jacek},
-  journal   = {arXiv preprint arXiv:2508.05878},
-  year      = {2025}
+  author        = {Majchrzak, Martyna and Ma{\'n}dziuk, Jacek},
+  title         = {Training Chord Recognition Models on Artificially Generated Audio},
+  journal       = {arXiv preprint arXiv:2508.05878},
+  year          = {2025},
+  eprint        = {2508.05878},
+  archiveprefix = {arXiv},
+  primaryclass  = {cs.SD},
+  url           = {https://arxiv.org/abs/2508.05878}
 }
 
+% ------------------------------------------------------------------------------
+% 3. BENCHMARKING, SURVEYS, SUBJECTIVITY & EVALUATION
+% ------------------------------------------------------------------------------
+
+@inproceedings{pauwels2019twenty,
+  author    = {Pauwels, Johan and O'Hanlon, Ken and G{\'o}mez, Emilia and Sandler, Mark B.},
+  title     = {20 Years of Automatic Chord Recognition from Audio},
+  booktitle = {Proceedings of the 20th International Society for Music Information Retrieval Conference (ISMIR)},
+  pages     = {54--63},
+  year      = {2019},
+  address   = {Delft, The Netherlands},
+}
+
+@inproceedings{humphrey2015four,
+  author    = {Humphrey, Eric J. and Bello, Juan P.},
+  title     = {Four Timely Insights on Automatic Chord Estimation},
+  booktitle = {Proceedings of the 16th International Society for Music Information Retrieval Conference (ISMIR)},
+  pages     = {673--679},
+  year      = {2015},
+  address   = {M{\'a}laga, Spain},
+}
+
+@inproceedings{burgoyne2011expert,
+  author    = {Burgoyne, John Ashley and Wild, Jonathan and Fujinaga, Ichiro},
+  title     = {An Expert Ground-Truth Set for Audio Chord Recognition and Music Analysis},
+  booktitle = {Proceedings of the 12th International Society for Music Information Retrieval Conference (ISMIR)},
+  pages     = {633--638},
+  year      = {2011},
+  address   = {Miami, Florida, USA}
+}
+
+@inproceedings{raffel2014mireval,
+  author    = {Raffel, Colin and McFee, Brian and Humphrey, Eric J. and Salamon, Justin and Nieto, Oriol and Liang, Dawen and Ellis, Daniel P. W.},
+  title     = {{mir\_eval}: A Transparent Implementation of Common {MIR} Metrics},
+  booktitle = {Proceedings of the 15th International Society for Music Information Retrieval Conference (ISMIR)},
+  pages     = {367--372},
+  year      = {2014},
+  address   = {Taipei, Taiwan},
+}
+
+@article{koops2019annotator,
+  author    = {Koops, Hendrik Vincent and de Haas, W. Bas and Burgoyne, John Ashley and Bransen, Jeroen and Kent-Muller, Anna and Volk, Anja},
+  title     = {Annotator Subjectivity in Harmony Annotations of Popular Music},
+  journal   = {Journal of New Music Research},
+  volume    = {48},
+  number    = {3},
+  pages     = {232--252},
+  year      = {2019},
+  publisher = {Routledge},
+  doi       = {10.1080/09298215.2019.1613436}
+}
+
+% ------------------------------------------------------------------------------
+% 4. HARMONIC CORPORA, SYNTAX & KNOWLEDGE GRAPHS
+% ------------------------------------------------------------------------------
+
 @article{deberardinis2023choco,
-  title     = {ChoCo: a Chord Corpus and a Data Transformation Workflow for Musical Harmony Knowledge Graphs},
   author    = {de Berardinis, Jacopo and Mero{\~n}o-Pe{\~n}uela, Albert and Poltronieri, Andrea and Presutti, Valentina},
+  title     = {{ChoCo}: a Chord Corpus and a Data Transformation Workflow for Musical Harmony Knowledge Graphs},
   journal   = {Scientific Data},
   volume    = {10},
   number    = {1},
   pages     = {641},
   year      = {2023},
-  publisher = {Nature Publishing Group}
+  publisher = {Nature Publishing Group},
+  doi       = {10.1038/s41597-023-02410-w}
 }
 
 @inproceedings{mauch2009omras,
-  title     = {OMRAS2 Metadata Project 2009},
-  author    = {Mauch, Matthias and Cannam, Chris and Davies, Matthew and Dixon, Simon and Harte, Christopher and Kolozali, Sefa and Tidhar, Dan and Sandler, Mark},
-  booktitle = {Late-Breaking Demos, 10th International Society for Music Information Retrieval Conference (ISMIR)},
+  author    = {Mauch, Matthias and Cannam, Chris and Davies, Matthew and Dixon, Simon and Harte, Christopher and Kolozali, Sefki and Tidhar, Dan and Sandler, Mark},
+  title     = {{OMRAS2} Metadata Project 2009},
+  booktitle = {Proceedings of the 10th International Society for Music Information Retrieval Conference (ISMIR) Late-Breaking Demos},
   year      = {2009},
   address   = {Kobe, Japan}
 }
 
 @book{pfleiderer2017inside,
-  title     = {Inside the Jazzomat - New Perspectives for Jazz Research},
   editor    = {Pfleiderer, Martin and Frieler, Klaus and Abe{\ss}er, Jakob and Zaddach, Wolf-Georg and Burkhart, Benjamin},
+  title     = {Inside the Jazzomat: New Perspectives for Jazz Research},
   publisher = {Schott Campus},
+  address   = {Mainz, Germany},
   year      = {2017},
-  address   = {Mainz, Germany}
+  isbn      = {978-3-95983-124-6}
 }
 
 @inproceedings{harte2005symbolic,
+  author    = {Harte, Christopher and Sandler, Mark B. and Abdallah, Samer A. and G{\'o}mez, Emilia},
   title     = {Symbolic Representation of Musical Chords: A Proposed Syntax for Text Annotations},
-  author    = {Harte, Christopher and Sandler, Mark and Abdallah, Samer and G{\'o}mez, Emilia},
   booktitle = {Proceedings of the 6th International Society for Music Information Retrieval Conference (ISMIR)},
   pages     = {66--71},
   year      = {2005},
   address   = {London, UK}
 }
 
+% ------------------------------------------------------------------------------
+% 5. MUSIC THEORY, VOICE LEADING & HARMONIC DISTANCE
+% ------------------------------------------------------------------------------
+
 @article{cohn1998introduction,
-  title     = {Introduction to Neo-Riemannian Theory: A Survey and a Historical Perspective},
   author    = {Cohn, Richard},
+  title     = {Introduction to Neo-Riemannian Theory: A Survey and a Historical Perspective},
   journal   = {Journal of Music Theory},
   volume    = {42},
   number    = {2},
   pages     = {167--180},
   year      = {1998},
-  publisher = {Duke University Press}
+  publisher = {Duke University Press},
 }
 
 @article{douthett1998parsimonious,
-  title     = {Parsimonious Graphs: A Study in Parsimony, Contextual Transformations, and Modes of Limited Transposition},
   author    = {Douthett, Jack and Steinbach, Peter},
+  title     = {Parsimonious Graphs: A Study in Parsimony, Contextual Transformations, and Modes of Limited Transposition},
   journal   = {Journal of Music Theory},
   volume    = {42},
   number    = {2},
   pages     = {241--263},
   year      = {1998},
-  publisher = {Duke University Press}
+  publisher = {Duke University Press},
 }
 
 @article{tymoczko2006geometry,
-  title     = {The Geometry of Musical Chords},
   author    = {Tymoczko, Dmitri},
+  title     = {The Geometry of Musical Chords},
   journal   = {Science},
   volume    = {313},
   number    = {5783},
   pages     = {72--74},
   year      = {2006},
-  publisher = {American Association for the Advancement of Science}
+  publisher = {American Association for the Advancement of Science},
+  doi       = {10.1126/science.1126287}
 }
 
 @book{tymoczko2011geometry,
-  title     = {A Geometry of Music: Harmony and Counterpoint in the Extended Common Practice},
   author    = {Tymoczko, Dmitri},
+  title     = {A Geometry of Music: Harmony and Counterpoint in the Extended Common Practice},
+  series    = {Oxford Studies in Music Theory},
   publisher = {Oxford University Press},
+  address   = {New York, NY, USA},
   year      = {2011},
-  address   = {New York, USA}
+  isbn      = {978-0-19-533667-2}
 }
 
 @article{eitel2024perception,
-  title     = {Perception of Chord Sequences Modeled with Prediction by Partial Matching, Voice-Leading Distance, and Spectral Pitch-Class Similarity: A New Approach for Testing Individual Differences in Harmony Perception},
   author    = {Eitel, Matthew and Ruth, Nicolas and Harrison, Peter and Frieler, Klaus and M{\"u}llensiefen, Daniel},
-  journal   = {Music Perception},
-  volume    = {41},
-  number    = {4},
-  pages     = {263--288},
+  title     = {Perception of Chord Sequences Modeled with Prediction by Partial Matching, Voice-Leading Distance, and Spectral Pitch-Class Similarity: A New Approach for Testing Individual Differences in Harmony Perception},
+  journal   = {Music \& Science},
+  volume    = {7},
+  pages     = {1--16},
   year      = {2024},
-  publisher = {University of California Press}
+  publisher = {SAGE Publications},
+  doi       = {10.1177/20592043241257654}
 }
 
 @inproceedings{nadar2019towards,
-  title     = {Towards CNN-based Acoustic Modeling of Seventh Chords for Automatic Chord Recognition},
   author    = {Nadar, Christon-Ragavan and Abe{\ss}er, Jakob and Grollmisch, Sascha},
+  title     = {Towards {CNN}-based Acoustic Modeling of Seventh Chords for Automatic Chord Recognition},
   booktitle = {Proceedings of the 16th Sound and Music Computing Conference (SMC)},
   pages     = {48--54},
   year      = {2019},
   address   = {M{\'a}laga, Spain}
 }
 
+% ------------------------------------------------------------------------------
+% 6. ACOUSTIC FEATURE EXTRACTION & NEURAL COMPONENTS
+% ------------------------------------------------------------------------------
+
 @article{brown1991calculation,
-  title     = {Calculation of a constant Q spectral transform},
   author    = {Brown, Judith C.},
+  title     = {Calculation of a Constant {Q} Spectral Transform},
   journal   = {The Journal of the Acoustical Society of America},
   volume    = {89},
   number    = {1},
   pages     = {425--434},
   year      = {1991},
-  publisher = {Acoustical Society of America}
+  publisher = {Acoustical Society of America},
+  doi       = {10.1121/1.400476}
 }
 
 @inproceedings{gulati2020conformer,
-  title     = {Conformer: Convolution-augmented Transformer for Speech Recognition},
   author    = {Gulati, Anmol and Qin, James and Chiu, Chung-Cheng and Parmar, Niki and Zhang, Yu and Yu, Jiahui and Han, Wei and Wang, Shibo and Zhang, Zhengdong and Wu, Yonghui and Pang, Ruoming},
+  title     = {Conformer: Convolution-Augmented Transformer for Speech Recognition},
   booktitle = {Proceedings of Interspeech 2020},
   pages     = {5036--5040},
   year      = {2020},
-  address   = {Shanghai, China}
+  doi       = {10.21437/Interspeech.2020-3015}
 }
 
 @inproceedings{park2019specaugment,
-  title     = {SpecAugment: A Simple Data Augmentation Method for Automatic Speech Recognition},
   author    = {Park, Daniel S. and Chan, William and Zhang, Yu and Chiu, Chung-Cheng and Zoph, Barret and Cubuk, Ekin D. and Le, Quoc V.},
+  title     = {{SpecAugment}: A Simple Data Augmentation Method for Automatic Speech Recognition},
   booktitle = {Proceedings of Interspeech 2019},
   pages     = {2613--2617},
   year      = {2019},
-  address   = {Graz, Austria}
+  doi       = {10.21437/Interspeech.2019-2680}
 }
 
-@inproceedings{humphrey2015four,
-  title     = {Four Timely Insights on Automatic Chord Estimation},
-  author    = {Humphrey, Eric J. and Bello, Juan P.},
-  booktitle = {Proceedings of the 16th International Society for Music Information Retrieval Conference (ISMIR)},
-  pages     = {673--679},
-  year      = {2015},
-  address   = {M{\'a}laga, Spain}
+@inproceedings{manilow2019cutting,
+  author    = {Manilow, Ethan and Wichern, Gordon and Seetharaman, Prem and Le Roux, Jonathan},
+  title     = {Cutting Music Source Separation Some {Slakh}: A Dataset to Study the Impact of Training Data Quality and Quantity},
+  booktitle = {Proceedings of the IEEE Workshop on Applications of Signal Processing to Audio and Acoustics (WASPAA)},
+  pages     = {45--49},
+  year      = {2019},
+  address   = {New Paltz, NY, USA},
+  doi       = {10.1109/WASPAA.2019.8937170}
 }
 
-@inproceedings{burgoyne2011expert,
-  title     = {An Expert Ground-Truth Set for Audio Chord Recognition and Music Analysis},
-  author    = {Burgoyne, John Ashley and Wild, Jonathan and Fujinaga, Ichiro},
-  booktitle = {Proceedings of the 12th International Society for Music Information Retrieval Conference (ISMIR)},
-  pages     = {633--638},
-  year      = {2011},
-  address   = {Miami, USA}
-}
-
-@inproceedings{raffel2014mireval,
-  title     = {mir\_eval: A Transparent Implementation of Common MIR Metrics},
-  author    = {Raffel, Colin and McFee, Brian and Humphrey, Eric J. and Salamon, Justin and Nieto, Oriol and Liang, Dawen and Ellis, Daniel P. W.},
-  booktitle = {Proceedings of the 15th International Society for Music Information Retrieval Conference (ISMIR)},
-  pages     = {367--372},
-  year      = {2014},
-  address   = {Taipei, Taiwan}
+@inproceedings{park2019btc,
+  author    = {Park, Jonggwon and Choi, Kyoyun and Jeon, Sungwook and Kim, Dokyun and Park, Jonghun},
+  title     = {A Bi-Directional {Transformer} for Musical Chord Recognition},
+  booktitle = {Proceedings of the 20th International Society for Music Information Retrieval Conference (ISMIR)},
+  pages     = {620--627},
+  year      = {2019},
+  address   = {Delft, The Netherlands}
 }

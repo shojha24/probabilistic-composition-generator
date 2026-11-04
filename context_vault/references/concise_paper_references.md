@@ -80,9 +80,9 @@ GROUP A: Deep Learning Architectures for Large-Vocabulary Audio Chord Recognitio
 ================================================================================
 ```
 
-### [1] Pauwels et al. (2019) — *20 Years of Automatic Chord Recognition from Audio: A Review*
-* **Citation:** J. Pauwels, K. O'Hanlon, E. Gómez, and M. B. Sandler, "20 Years of Automatic Chord Recognition from Audio: A Review," in *Proceedings of the 20th International Society for Music Information Retrieval Conference (ISMIR)*, Delft, The Netherlands, 2019, pp. 54–63.
-* **BibTeX Key:** `@inproceedings{pauwels2019twenty, title={20 Years of Automatic Chord Recognition from Audio: A Review}, author={Pauwels, Johan and O'Hanlon, Ken and G{\'o}mez, Emilia and Sandler, Mark B.}, booktitle={Proc. ISMIR}, pages={54--63}, year={2019}}`
+### [1] Pauwels et al. (2019) — *20 Years of Automatic Chord Recognition from Audio*
+* **Citation:** J. Pauwels, K. O'Hanlon, E. Gómez, and M. B. Sandler, "20 Years of Automatic Chord Recognition from Audio," in *Proceedings of the 20th International Society for Music Information Retrieval Conference (ISMIR)*, Delft, The Netherlands, 2019, pp. 54–63.
+* **BibTeX Key:** `@inproceedings{pauwels2019twenty, title={20 Years of Automatic Chord Recognition from Audio}, author={Pauwels, Johan and O'Hanlon, Ken and G{\'o}mez, Emilia and Sandler, Mark B.}, booktitle={Proc. ISMIR}, pages={54--63}, year={2019}}`
 * **Workspace PDF Link:** [`000004.pdf`](file:///home/shojha/probabilistic-composition-generator/references/000004.pdf)
 * **Core Theoretical Framework & Methodology:**
   Comprehensive historical and technical survey analyzing two decades of ACR research. Reviews the transition from template-based chroma matching and Hidden Markov Models (HMMs) to deep convolutional and recurrent architectures. Details the structural bottlenecks of the field: manual annotation bottlenecks, acoustic noise in real mixtures, and the restriction of evaluation benchmarks to small vocabularies (e.g., MIREX 24-class major/minor) due to severe data scarcity in complex chord classes.
@@ -133,8 +133,8 @@ GROUP A: Deep Learning Architectures for Large-Vocabulary Audio Chord Recognitio
 ---
 
 ### [5] Li et al. (2025) — *Large-Vocabulary Chord Recognition Based on Contrastive Learning and Noisy Student*
-* **Citation:** W. Li, X. Song, Y. Deng, and J. Sun, "Large-Vocabulary Chord Recognition Based on Contrastive Learning and Noisy Student," *IEEE Transactions on Consumer Electronics*, vol. 71, no. 2, pp. 3695–3707, May 2025.
-* **BibTeX Key:** `@article{li2025large, title={Large-Vocabulary Chord Recognition Based on Contrastive Learning and Noisy Student}, author={Li, Wei and Song, Xiang and Deng, Yujia and Sun, Ji}, journal={IEEE Trans. Consumer Electron.}, volume={71}, number={2}, pages={3695--3707}, year={2025}}`
+* **Citation:** C. Li, J. Jiang, Y. Li, and L. Tian, "Large-Vocabulary Chord Recognition Based on Contrastive Learning and Noisy Student," *IEEE Transactions on Consumer Electronics*, vol. 71, no. 2, pp. 3695–3706, May 2025.
+* **BibTeX Key:** `@article{li2025large, title={Large-Vocabulary Chord Recognition Based on Contrastive Learning and Noisy Student}, author={Li, Chen and Jiang, Jingyi and Li, Yu and Tian, Lihua}, journal={IEEE Trans. Consumer Electron.}, volume={71}, number={2}, pages={3695--3706}, year={2025}, doi={10.1109/TCE.2024.3425718}}`
 * **Workspace PDF Link:** [`Large-Vocabulary...pdf`](file:///home/shojha/probabilistic-composition-generator/references/Large-Vocabulary_Chord_Recognition_Based_on_Contrastive_Learning_and_Noisy_Student_2023.pdf)
 * **Core Theoretical Framework & Methodology:**
   Proposes a semi-supervised learning framework combining contrastive self-supervised feature pretraining (CL) with an iterative Noisy Student (NS) pseudo-labeling pipeline. Incorporates multi-task heads and pitch-shift data augmentation to expand effective training size over unannotated audio.
@@ -159,8 +159,8 @@ GROUP A: Deep Learning Architectures for Large-Vocabulary Audio Chord Recognitio
 ---
 
 ### [7] Korzeniowski & Widmer (2016) — *Feature Learning for Chord Recognition: The Deep Chroma Extractor*
-* **Citation:** F. Korzeniowski and G. Widmer, "Feature Learning for Chord Recognition: The Deep Chroma Extractor," in *Proceedings of the 17th International Society for Music Information Retrieval Conference (ISMIR)*, New York, USA, 2016, pp. 148–154.
-* **BibTeX Key:** `@inproceedings{korzeniowski2016feature, title={Feature Learning for Chord Recognition: The Deep Chroma Extractor}, author={Korzeniowski, Filip and Widmer, Gerhard}, booktitle={Proc. ISMIR}, pages={148--154}, year={2016}}`
+* **Citation:** F. Korzeniowski and G. Widmer, "Feature Learning for Chord Recognition: The Deep Chroma Extractor," in *Proceedings of the 17th International Society for Music Information Retrieval Conference (ISMIR)*, New York, USA, 2016, pp. 37–43.
+* **BibTeX Key:** `@inproceedings{korzeniowski2016feature, title={Feature Learning for Chord Recognition: The Deep Chroma Extractor}, author={Korzeniowski, Filip and Widmer, Gerhard}, booktitle={Proc. ISMIR}, pages={37--43}, year={2016}}`
 * **Workspace PDF Link:** [`000178.pdf`](file:///home/shojha/probabilistic-composition-generator/references/000178.pdf)
 * **Core Theoretical Framework & Methodology:**
   Develops a deep convolutional neural network trained specifically to extract 12-dimensional chroma vectors from multi-frame log-frequency spectrogram context. The network is trained end-to-end to suppress non-harmonic overtones, noise, and instrumental timbre while retaining clean pitch-class energy.
@@ -190,9 +190,9 @@ GROUP B: Synthetic Audio Generation & Multitrack Composition for ACR Pretraining
 ================================================================================
 ```
 
-### [9] Ostermann et al. (2023) — *Artificial Audio Multitracks for Chord Recognition* (AAM)
-* **Citation:** F. Ostermann, V. Arifi-Müller, M. Müller, and P. Prätzlich, "Artificial audio multitracks for chord recognition," *EURASIP Journal on Audio, Speech, and Music Processing*, vol. 2023, no. 1, p. 13, 2023.
-* **BibTeX Key:** `@article{ostermann2023artificial, title={Artificial audio multitracks for chord recognition}, author={Ostermann, Felix and Arifi-M{\"u}ller, Vlora and M{\"u}ller, Meinard and Pr{\"a}tlich, Peter}, journal={EURASIP J. Audio Speech Music Process.}, volume={2023}, number={1}, pages={13}, year={2023}}`
+### [9] Ostermann et al. (2023) — *AAM: A Dataset of Artificial Audio Multitracks for Diverse Music Information Retrieval Tasks*
+* **Citation:** F. Ostermann, I. Vatolkin, and M. Ebeling, "AAM: a dataset of Artificial Audio Multitracks for diverse music information retrieval tasks," *EURASIP Journal on Audio, Speech, and Music Processing*, vol. 2023, no. 1, p. 13, 2023.
+* **BibTeX Key:** `@article{ostermann2023aam, title={{AAM}: a dataset of {Artificial Audio Multitracks} for diverse music information retrieval tasks}, author={Ostermann, Fabian and Vatolkin, Igor and Ebeling, Martin}, journal={EURASIP J. Audio Speech Music Process.}, volume={2023}, number={1}, pages={13}, year={2023}, doi={10.1186/s13636-023-00278-7}}`
 * **Workspace PDF Link:** [`s13636-023-00278-7.pdf`](file:///home/shojha/probabilistic-composition-generator/references/s13636-023-00278-7.pdf)
 * **Core Theoretical Framework & Methodology:**
   Introduces the Artificial Audio Multitracks (AAM) framework for synthesizing annotated musical audio for chord recognition. Uses algorithmic composition tools (JFugue, Java Sound API, SoundFonts) to render isolated multitracks (bass, harmony, accompaniment). Investigates whether training deep networks on algorithmic MIDI audio transfers to real music recordings.
@@ -239,7 +239,7 @@ GROUP C: Symbolic Corpora, Harmony Knowledge Graphs & Annotation Syntax
 
 ### [12] Mauch et al. (2009) — *OMRAS2 Metadata Project 2009* (Isophonics)
 * **Citation:** M. Mauch, C. Cannam, M. Davies, S. Dixon, C. Harte, S. Kolozali, D. Tidhar, and M. Sandler, "OMRAS2 Metadata Project 2009," in *Late-Breaking Demos, 10th International Society for Music Information Retrieval Conference (ISMIR)*, Kobe, Japan, 2009.
-* **BibTeX Key:** `@inproceedings{mauch2009omras, title={OMRAS2 Metadata Project 2009}, author={Mauch, Matthias and Cannam, Chris and Davies, Matthew and Dixon, Simon and Harte, Christopher and Kolozali, Sefa and Tidhar, Dan and Sandler, Mark}, booktitle={Late-Breaking Demos, ISMIR}, year={2009}}`
+* **BibTeX Key:** `@inproceedings{mauch2009omras, title={{OMRAS2} Metadata Project 2009}, author={Mauch, Matthias and Cannam, Chris and Davies, Matthew and Dixon, Simon and Harte, Christopher and Kolozali, Sefki and Tidhar, Dan and Sandler, Mark}, booktitle={Late-Breaking Demos, ISMIR}, year={2009}}`
 * **Workspace PDF Link:** [`LBD-18.pdf`](file:///home/shojha/probabilistic-composition-generator/references/LBD-18.pdf)
 * **Core Theoretical Framework & Methodology:**
   Documents the publication of the canonical OMRAS2 ground-truth annotations (commonly known as the **Isophonics** dataset) created at Queen Mary University of London (C4DM). Features expert hand-annotated, timestamped chords, keys, and beat/bar boundaries for 179 Beatles songs and 18 Zweieck songs, later expanded to Queen.
@@ -250,9 +250,9 @@ GROUP C: Symbolic Corpora, Harmony Knowledge Graphs & Annotation Syntax
 
 ---
 
-### [13] Pfleiderer et al. (2017) — *Inside the Jazzomat - New Perspectives for Jazz Research* (Weimar Jazz Database)
-* **Citation:** M. Pfleiderer, K. Frieler, J. Abeßer, W.-G. Zaddach, and B. Burkhart, Eds., *Inside the Jazzomat - New Perspectives for Jazz Research*, Mainz, Germany: Schott Campus, 2017.
-* **BibTeX Key:** `@book{pfleiderer2017inside, title={Inside the Jazzomat - New Perspectives for Jazz Research}, editor={Pfleiderer, Martin and Frieler, Klaus and Abe{\ss}er, Jakob and Zaddach, Wolf-Georg and Burkhart, Benjamin}, publisher={Schott Campus}, year={2017}}`
+### [13] Pfleiderer et al. (2017) — *Inside the Jazzomat: New Perspectives for Jazz Research* (Weimar Jazz Database)
+* **Citation:** M. Pfleiderer, K. Frieler, J. Abeßer, W.-G. Zaddach, and B. Burkhart, Eds., *Inside the Jazzomat: New Perspectives for Jazz Research*, Mainz, Germany: Schott Campus, 2017.
+* **BibTeX Key:** `@book{pfleiderer2017inside, title={Inside the Jazzomat: New Perspectives for Jazz Research}, editor={Pfleiderer, Martin and Frieler, Klaus and Abe{\ss}er, Jakob and Zaddach, Wolf-Georg and Burkhart, Benjamin}, publisher={Schott Campus}, year={2017}, isbn={978-3-95983-124-6}}`
 * **Workspace PDF Link:** [`inside_the_jazzomat...pdf`](file:///home/shojha/probabilistic-composition-generator/references/inside_the_jazzomat_final_rev_oa4.pdf)
 * **Core Theoretical Framework & Methodology:**
   Comprehensive musicological monograph documenting the **Weimar Jazz Database (WJD)**. Contains 456 meticulously transcribed jazz improvisations and lead-sheet chord progressions spanning bebop, cool jazz, hard bop, post-bop, and modal jazz (Miles Davis, John Coltrane, Charlie Parker, Chet Baker, etc.). Chapter 2 specifically details the chord annotation conventions, metric alignment, and lead-sheet harmonization practices.
@@ -334,9 +334,9 @@ GROUP D: Parsimonious Harmony, Geometric Voice-Leading & Physical Instrument Con
 
 ---
 
-### [19] Eitel et al. (2024) — *Perception of Chord Sequences Modeled with Prediction by Partial Matching, Voice-Leading Distance, and Spectral Pitch-Class Similarity*
-* **Citation:** M. Eitel, N. Ruth, P. Harrison, K. Frieler, and D. Müllensiefen, "Perception of Chord Sequences Modeled with Prediction by Partial Matching, Voice-Leading Distance, and Spectral Pitch-Class Similarity: A New Approach for Testing Individual Differences in Harmony Perception," *Music Perception*, vol. 41, no. 4, pp. 263–288, 2024.
-* **BibTeX Key:** `@article{eitel2024perception, title={Perception of Chord Sequences Modeled with Prediction by Partial Matching, Voice-Leading Distance, and Spectral Pitch-Class Similarity}, author={Eitel, Matthew and Ruth, Nicolas and Harrison, Peter and Frieler, Klaus and M{\"u}llensiefen, Daniel}, journal={Music Perception}, volume={41}, number={4}, pages={263--288}, year={2024}}`
+### [19] Eitel et al. (2024) — *Perception of Chord Sequences Modeled with Prediction by Partial Matching, Voice-Leading Distance, and Spectral Pitch-Class Similarity: A New Approach for Testing Individual Differences in Harmony Perception*
+* **Citation:** M. Eitel, N. Ruth, P. Harrison, K. Frieler, and D. Müllensiefen, "Perception of Chord Sequences Modeled with Prediction by Partial Matching, Voice-Leading Distance, and Spectral Pitch-Class Similarity: A New Approach for Testing Individual Differences in Harmony Perception," *Music & Science*, vol. 7, pp. 1–16, 2024.
+* **BibTeX Key:** `@article{eitel2024perception, title={Perception of Chord Sequences Modeled with Prediction by Partial Matching, Voice-Leading Distance, and Spectral Pitch-Class Similarity: A New Approach for Testing Individual Differences in Harmony Perception}, author={Eitel, Matthew and Ruth, Nicolas and Harrison, Peter and Frieler, Klaus and M{\"u}llensiefen, Daniel}, journal={Music \& Science}, volume={7}, pages={1--16}, year={2024}, doi={10.1177/20592043241257654}}`
 * **Workspace PDF Link:** [`eitel-et-al-2024...pdf`](file:///home/shojha/probabilistic-composition-generator/references/eitel-et-al-2024-perception-of-chord-sequences-modeled-with-prediction-by-partial-matching-voice-leading-distance-and%20(1).pdf)
 * **Core Theoretical Framework & Methodology:**
   Psychological and computational study investigating how humans perceive harmonic coherence in chord sequences. Evaluates 5,076 chord sequences by combining transitional probabilities (PPM model on McGill Billboard), spectral pitch-class similarity, and minimal voice-leading distance ($D_{VL}$).
