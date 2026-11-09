@@ -868,9 +868,49 @@ The project has these known limits:
   and be sampled together during generation without competing for the same
   7th slot.
 
-Future work includes richer room, EQ, dynamics, and audio QA profiles, as well
-as tuning quota proportions for lagging degrees (natural 13ths, `1`) and
-integrating differentiable synthesis (DDSP).
+Future work includes richer room, EQ, dynamics, and audio QA profiles, enforcing per-fold training-split isolation when extracting ChoCo transition tables (`extract_distributions.py`) and calibrating class quotas, ablating loss-reweighting schedules, tuning quota proportions for lagging degrees (`1`, `7`, `13`), and integrating differentiable synthesis (DDSP).
+
+## Reproducing the Paper Corpus & Benchmark Tables (Tables 1 & 2)
+
+To reproduce the 5,000-track ($460.3\,\text{h}$) synthetic pretraining corpus and the 5-fold cross-validated evaluations reported in **Table 1** (6-head macro recall & $F_1$), **Table 2** (MIREX/WCSR), and **Figure 2**:
+
+1. **Synthesize the 5,000-song progression & multitrack audio corpus (this repository):**
+   ```bash
+   # 1. Extract empirical progression count tables from normalized ChoCo JAMS
+   python extract_distributions.py --data-root ./data_normalized --out-dir ./distributions
+
+   # 2. Sample 2,500 natural + 2,500 quota-scheduled progressions (500,000 events, seed 42)
+   python chord_gen.py --random-genre --songs 2500 --num 100 --seed 42 --dist-dir ./distributions
+   python target_corpus_gen.py --target-events 250000 --target-songs 1250 --debug --seed 42 --dist-dir ./distributions
+
+   # 3. Render synchronized 4-stem JFugue scores, humanized MIDI, and random-mix conditioned FLAC audio
+   python render.py \
+     --in-dir ./gen/jazz-labels --in-dir ./gen/pop-rock-labels \
+     --in-dir ./gen/target-jazz-labels --in-dir ./gen/target-pop-rock-labels \
+     --out ./gen/corpus_5000.txt --mode mixed --pad-percent 70 --arpeggio-percent 30 \
+     --melody-condition naturalistic --melody-percent 100 --percussion-percent 100 --seed 42
+   python tools/project_condition_corpus.py \
+     --canonical ./gen/corpus_5000.txt --out-dir ./gen/conditions \
+     --conditions cb cbp cbm cbmp naturalistic --seed 42
+   ```
+2. **Run CQT extraction, Stage 1 synthetic pretraining, Stage 2 5-fold real finetuning, and Table 1 / Table 2 evaluation** in the companion benchmark repository ([`ChordFormer-Artificial-Dataset-Benchmarking`](https://github.com/shojha24/ChordFormer-Artificial-Dataset-Benchmarking)):
+   ```bash
+   # Stage 1: Synthetic Pretraining (7 epochs on 5,000 synthetic tracks, seed 42)
+   python pretrain_synthetic.py --config configs/pretrain_synthetic.yaml --seed 42
+
+   # Control Baseline (24 epochs/fold from scratch on splits s0..s4, seed 20190326)
+   for fold in 0 1 2 3 4; do
+     python train_real_fold.py --fold $fold --seed 20190326
+   done
+
+   # Stage 2: Sim-to-Real Curriculum Finetuning (s_lr=[0.2, 0.5, 1.0], rho_min=0.10)
+   for fold in 0 1 2 3 4; do
+     python finetune_real_fold.py --fold $fold --pretrained checkpoints/pretrain_synthetic.pt --seed 20190326
+   done
+
+   # Evaluate 5-fold Head-Wise Recall/F1 (Table 1, tau_crf=2.0) and WCSR/MIREX (Table 2, tau_crf=30.0)
+   python evaluate_folds.py --tau-head 2.0 --tau-mirex 30.0
+   ```
 
 ## Building the Paper & arXiv Bundle
 
@@ -943,3 +983,9 @@ If you use the Probabilistic Composition Generator, the synthetic multitrack cor
   3. **Weimar Jazz Database (`data_normalized/weimar-jazz`)** — Curated by the Jazzomat Research Project, M. Pfleiderer et al. (2017); original release: **ODbL 1.0**, redistributed via ChoCo under **CC BY 4.0**.
   4. **iReal Pro (`data_normalized/ireal-pro`)** — Community lead-sheet chord progressions ([https://www.irealpro.com](https://www.irealpro.com)); original status: **public domain** chord sequences, redistributed via ChoCo under **CC BY 4.0**.
   - *Modification notice (per CC BY 4.0 §3(a)(1)(B)):* The ChoCo JAMS files in `data_normalized/` were filtered and normalized into canonical Harte chord syntax, and `extract_distributions.py` aggregated them into the genre-conditioned unigram/bigram/trigram backbone, bass, and extension trie tables in `distributions/`.
+- **External SoundFont (`.sf2`) Banks (Not Redistributed in This Repository):**
+  This repository does **not** host or redistribute any `.sf2` SoundFont binaries or pre-rendered audio files; users supply SoundFonts locally at render time. The four General MIDI banks referenced in Section 3.3 carry the following upstream licenses:
+  1. **`FluidR3_GM.sf2`** (Frank Wen) — **MIT License**.
+  2. **`MuseScore_General_Full.sf2`** (S. Christian Collins / MuseScore) — **MIT License**.
+  3. **`GeneralUser_GS.sf2`** (S. Christian Collins) — **GeneralUser GS License v2.0** (permissive; explicitly permits commercial and non-commercial redistribution of rendered audio recordings).
+  4. **`TimGM6mb.sf2`** (Tim Brechbill; distributed via Debian/Ubuntu `timgm6mb-soundfont`) — **GNU GPL v2.0** (without an explicit font/sample exception). *Note on redistribution:* If you plan to publicly redistribute rendered audio waveforms or derived spectrograms under a non-GPL license, verify whether GPL-2.0 copyleft terms apply to `TimGM6mb.sf2` outputs in your jurisdiction, or restrict `--soundfont` rendering to the MIT/permissive banks (`FluidR3_GM.sf2`, `MuseScore_General_Full.sf2`, `GeneralUser_GS.sf2`).
