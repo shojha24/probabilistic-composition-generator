@@ -936,7 +936,6 @@ If you use the Probabilistic Composition Generator, the synthetic multitrack cor
 ## Dataset Licensing & Attribution
 
 - **Repository Code (`LICENSE`):** All original source code in this repository is released under the [MIT License](LICENSE).
-- **Paper Manuscript (`paper/`):** Licensed under [Creative Commons Attribution 4.0 International (CC BY 4.0)](https://creativecommons.org/licenses/by/4.0/).
 - **Normalized JAMS Annotations (`data_normalized/`) & Extracted Transition Tables (`distributions/`):**
   The symbolic chord progressions in `data_normalized/` and the derived n-gram count tables in `distributions/` are adapted from four subsets of the **[ChoCo](https://github.com/smashub/choco)** corpus aggregator (de Berardinis et al., *Scientific Data* 2023, [DOI: 10.1038/s41597-023-02410-w](https://doi.org/10.1038/s41597-023-02410-w)), all four of which are released under **[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)** (ChoCo Table 8):
   1. **McGill Billboard (`data_normalized/billboard`)** — Curated by J. A. Burgoyne et al. (ISMIR 2011); original release: **CC0 1.0 Public Domain**, redistributed via ChoCo under **CC BY 4.0**.

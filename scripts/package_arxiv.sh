@@ -65,7 +65,6 @@ grep -v '^%' "${PAPER_DIR}/main.bbl" > "${BUILD_DIR}/main.bbl"
 echo "=== [4/6] Copying style files and vector figures ==="
 cp "${PAPER_DIR}/ismir.sty" "${BUILD_DIR}/"
 [ -f "${PAPER_DIR}/cite.sty" ] && cp "${PAPER_DIR}/cite.sty" "${BUILD_DIR}/"
-[ -f "${PAPER_DIR}/cc_by.pdf" ] && cp "${PAPER_DIR}/cc_by.pdf" "${BUILD_DIR}/"
 cp "${PAPER_DIR}/figures/fig1_chord_distribution.pdf" "${BUILD_DIR}/figures/"
 cp "${PAPER_DIR}/figures/fig2_per_class_recall_delta.pdf" "${BUILD_DIR}/figures/"
 

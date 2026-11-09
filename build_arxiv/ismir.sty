@@ -225,21 +225,8 @@
 % Header
 \pagestyle{empty}
 
-% Copyright notice
-\newcommand{\permission}{%
-  \begin{figure}[b]{%
-    \footnotesize
-    {\includegraphics[alt={CC-BY License},height=0.45cm]{cc_by.pdf}}
-    \vskip -.45cm
-    \begin{spacing}{1.1}
-      \hskip 1.5cm \copyright \hskip .1cm \authorname.
-      Licensed under a Creative Commons Attribution 4.0 International License (CC BY 4.0).
-      \textbf{Attribution:} \authorname,
-      ``\removelinebreaks{\@title}'', 2026.
-    \end{spacing}
-    }
-  \end{figure}
-}
+% Copyright notice (disabled for arXiv preprint)
+\newcommand{\permission}{}
 
 % Author information
 \if@submission
