@@ -890,9 +890,9 @@ To flatten `paper/main.tex` into `build_arxiv/` and regenerate `arxiv_submission
 bash scripts/package_arxiv.sh
 ```
 
-## Citation
+## Citation & Required Benchmark References
 
-If you use the Probabilistic Composition Generator, the synthetic multitrack corpus, or our pretrained models in your research, please cite:
+If you use the Probabilistic Composition Generator, the synthetic multitrack corpus, or our pretrained models in your research, please cite our paper as well as the foundational ChordFormer and structured chord decomposition works used in our benchmarking pipeline:
 
 ```bibtex
 @article{ojha2026distribution,
@@ -901,4 +901,46 @@ If you use the Probabilistic Composition Generator, the synthetic multitrack cor
   journal = {arXiv preprint},
   year    = {2026}
 }
+
+@article{akram2025chordformer,
+  author  = {Akram, Muhammad Waseem and Dettori, Stefano and Colla, Valentina and Buttazzo, Giorgio Carlo},
+  journal = {IEEE Transactions on Audio, Speech and Language Processing},
+  title   = {{ChordFormer}: A Conformer-Based Architecture for Large-Vocabulary Audio Chord Recognition},
+  year    = {2026},
+  volume  = {34},
+  pages   = {581--595},
+  doi     = {10.1109/TASLPRO.2025.3646468}
+}
+
+@inproceedings{jiang2019large,
+  author    = {Jiang, Junyan and Chen, Ke and Li, Wei and Xia, Gus},
+  title     = {Large-Vocabulary Chord Transcription via Chord Structure Decomposition},
+  booktitle = {Proceedings of the 20th International Society for Music Information Retrieval Conference (ISMIR)},
+  year      = {2019},
+  pages     = {644--651}
+}
+
+@article{deberardinis2023choco,
+  author    = {de Berardinis, Jacopo and Mero{\~n}o-Pe{\~n}uela, Albert and Poltronieri, Andrea and Presutti, Valentina},
+  title     = {{ChoCo}: a Chord Corpus and a Data Transformation Workflow for Musical Harmony Knowledge Graphs},
+  journal   = {Scientific Data},
+  volume    = {10},
+  number    = {1},
+  pages     = {641},
+  year      = {2023},
+  publisher = {Nature Publishing Group},
+  doi       = {10.1038/s41597-023-02410-w}
+}
 ```
+
+## Dataset Licensing & Attribution
+
+- **Repository Code (`LICENSE`):** All original source code in this repository is released under the [MIT License](LICENSE).
+- **Paper Manuscript (`paper/`):** Licensed under [Creative Commons Attribution 4.0 International (CC BY 4.0)](https://creativecommons.org/licenses/by/4.0/).
+- **Normalized JAMS Annotations (`data_normalized/`) & Extracted Transition Tables (`distributions/`):**
+  The symbolic chord progressions in `data_normalized/` and the derived n-gram count tables in `distributions/` are adapted from four subsets of the **[ChoCo](https://github.com/smashub/choco)** corpus aggregator (de Berardinis et al., *Scientific Data* 2023, [DOI: 10.1038/s41597-023-02410-w](https://doi.org/10.1038/s41597-023-02410-w)), all four of which are released under **[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)** (ChoCo Table 8):
+  1. **McGill Billboard (`data_normalized/billboard`)** — Curated by J. A. Burgoyne et al. (ISMIR 2011); original release: **CC0 1.0 Public Domain**, redistributed via ChoCo under **CC BY 4.0**.
+  2. **OMRAS2 / Isophonics (`data_normalized/isophonics`)** — Curated by M. Mauch et al. (ISMIR 2009); author-confirmed redistribution via ChoCo under **CC BY 4.0**.
+  3. **Weimar Jazz Database (`data_normalized/weimar-jazz`)** — Curated by the Jazzomat Research Project, M. Pfleiderer et al. (2017); original release: **ODbL 1.0**, redistributed via ChoCo under **CC BY 4.0**.
+  4. **iReal Pro (`data_normalized/ireal-pro`)** — Community lead-sheet chord progressions ([https://www.irealpro.com](https://www.irealpro.com)); original status: **public domain** chord sequences, redistributed via ChoCo under **CC BY 4.0**.
+  - *Modification notice (per CC BY 4.0 §3(a)(1)(B)):* The ChoCo JAMS files in `data_normalized/` were filtered and normalized into canonical Harte chord syntax, and `extract_distributions.py` aggregated them into the genre-conditioned unigram/bigram/trigram backbone, bass, and extension trie tables in `distributions/`.
