@@ -1,0 +1,17 @@
+Title:
+Distribution-Shifted Synthetic Multitrack Pretraining for Large-Vocabulary Audio Chord Recognition
+
+Authors:
+Sharabh Ojha
+
+Abstract:
+Audio chord recognition (ACR) models trained on human-annotated corpora face a persistent triadic performance plateau: canonical benchmarks concentrate over 80% of duration in major and minor triads, leaving rare triads (sus2, sus4, dim, aug) and upper extensions (7th-13th) acoustically sample-starved. Consequently, neural classifiers collapse into majority-class predictors, and inverse-frequency loss reweighting fails to compensate for the physical absence of diverse training exemplars. We propose a Sim-to-Real pretraining framework driven by a probabilistic composition generator that synthesizes 5,000 multitrack audio tracks (460.3 h) using rare-chord quota scheduling, physically constrained multi-instrument voicings, and stochastic random-mix acoustic augmentation. We pretrain ChordFormer---a 4-block Conformer encoder with six decomposed output heads---on synthetic multitracks and finetune on real audio via inverted discriminative learning rates ($s_{\mathrm{lr}} = [0.2, 0.5, 1.0]$) and floor curriculum replay ($\rho_{\min} = 0.10$). Across all 11,436,357 frames of the 1,217-song benchmark, our curriculum achieves best-in-class recall on underrepresented harmonies: boosting rare triad recall from 41.67% to 48.31% (+6.64 pp; $F_1$ from 53.11% to 60.94%), 9th extensions from 35.33% to 43.58% (+8.25 pp), natural 9ths by +25.16 pp (31.64% to 56.80%), altered #9 by $79\times$ (0.07% to 5.53%), and flat 13ths by $7.8\times$ (0.84% to 6.58%). While duration-weighted MIREX WCSR shifts from 81.49% to 79.59% due to metric bias toward dominant triads, cross-fold variance contracts across all ten evaluation rules.
+
+Comments:
+6 pages, 2 figures, 2 tables.
+
+Primary Category:
+cs.SD (Sound)
+
+Cross-List Categories:
+eess.AS (Audio and Speech Processing), cs.LG (Machine Learning)
