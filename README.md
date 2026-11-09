@@ -1,4 +1,40 @@
-# Probabilistic composition generator
+# Probabilistic Composition Generator
+
+Official dataset synthesis engine for the paper:
+
+> **Distribution-Shifted Synthetic Multitrack Pretraining for Large-Vocabulary Audio Chord Recognition**  
+> Sharabh Ojha (2026)  
+> 📄 [**Read the Paper (`paper/main.pdf`)**](paper/main.pdf) | 📦 [**arXiv Submission Bundle (`arxiv_submission.tar.gz`)**](arxiv_submission.tar.gz) | 🧠 [**Companion Model & Benchmark Repo (`ChordFormer-Artificial-Dataset-Benchmarking`)**](https://github.com/shojha24/ChordFormer-Artificial-Dataset-Benchmarking)
+
+---
+
+## Paper Overview & Codebase Mapping
+
+Audio chord recognition (ACR) models trained on human-annotated corpora face a persistent triadic performance plateau: canonical benchmarks concentrate over 80% of duration in major and minor triads, leaving rare triads (`sus2`, `sus4`, `dim`, `aug`) and upper tertian extensions (`7th`–`13th`) acoustically sample-starved.
+
+This repository implements the **Probabilistic Composition Generator** (Section 3 of the paper), which synthesizes the 5,000-track ($460.3\,\text{h}$) distribution-shifted multitrack audio corpus used for Sim-to-Real Conformer pretraining:
+
+| Paper Section | Methodological Component | Primary Codebase Modules |
+|---|---|---|
+| **§3.1 Distribution-Shifted Harmonic Sampling** | Empirical transition extraction from ChoCo (McGill Billboard, Isophonics, Weimar Jazz, iReal Pro), 3-stage Witten-Bell backoff + extension trie sampling, and rare-chord quota scheduling ($5{,}000$ tracks, $500{,}000$ events across 8 triad qualities and $7\text{th}$–$13\text{th}$ heads). | [`extract_distributions.py`](extract_distributions.py), [`chord_gen.py`](chord_gen.py), [`target_corpus_gen.py`](target_corpus_gen.py), [`tools/curate_target_corpus.py`](tools/curate_target_corpus.py) |
+| **§3.2 Symbolic Realization & Voicing Heuristics** | Instrument- and genre-specific polyphonic voicing across 6 policies (`pop-piano`, `pop-guitar`, `pop-synth`, `jazz-piano`, `jazz-guitar`, `jazz-synth`), physical $\le 4$-fret guitar constraints, Distinguishing Chord Tone (DCT) exposure, minimal voice-leading distance (Hungarian assignment) + Neo-Riemannian P/L/R bonuses, synchronized 4-track JFugue arrangement (`V0` chords, `V1` bass, `V2` melody, `V9` percussion), and micro-timing/velocity humanization. | [`voicing/`](voicing/README.md), [`chord_module.py`](chord_module.py), [`bass_module.py`](bass_module.py), [`melody_module.py`](melody_module.py), [`percussion_module.py`](percussion_module.py), [`render.py`](render.py), [`HumanizedMidiRenderer.java`](HumanizedMidiRenderer.java) |
+| **§3.3 Synthesis & Random-Mix Augmentation** | Multi-SoundFont FluidSynth stem rendering (`22,050 Hz` 16-bit FLAC), Bernoulli stem dropout (`cb`, `cbp`, `cbm`, `cbmp`, `naturalistic`), per-stem gain perturbation, FFmpeg acoustic conditioning, and frame-exact Harte `.lab` / manifest provenance verification. | [`audio_render.py`](audio_render.py), [`tools/project_condition_corpus.py`](tools/project_condition_corpus.py), [`instruments.py`](instruments.py), [`eda/validate_rendered_corpus.py`](eda/validate_rendered_corpus.py) |
+| **Paper Source & arXiv Package** | Modular LaTeX manuscript (`paper/`), vector figures (`paper/figures/`), benchmark tables (`paper/tables/`), flattened arXiv build (`build_arxiv/`), and automated packaging script. | [`paper/main.tex`](paper/main.tex), [`paper/main.pdf`](paper/main.pdf), [`build_arxiv/`](build_arxiv/), [`scripts/package_arxiv.sh`](scripts/package_arxiv.sh) |
+
+## Setup & Prerequisites
+
+1. **Python environment** (Python 3.10+):
+   ```bash
+   pip install -r requirements.txt
+   ```
+2. **Java MIDI renderer** (required for `--stage midi` and `--stage audio` or standalone MIDI conversion):
+   - Install a JDK (`javac` and `java`).
+   - Place `jfugue-5.0.9.jar` in the repository root.
+3. **Audio synthesis & mixing** (required for `--stage audio` and `audio_render.py`):
+   - Install `fluidsynth` and `ffmpeg` on your system `PATH`.
+   - Supply one or more General MIDI `.sf2` SoundFont banks under `./soundfonts/` (e.g., `FluidR3_GM.sf2`, `MuseScore_General_Full.sf2`, `GeneralUser_GS.sf2`, `TimGM6mb.sf2`).
+
+---
 
 ## Purpose
 
@@ -780,10 +816,13 @@ The current responsibilities are:
 | `percussion_module.py` | Render optional voice-9 percussion tracks |
 | `melody_module.py` | Generate opt-in chord-aware voice-2 melody tracks |
 | `render.py` | Combine tracks into score text, MIDI, and audio manifests |
+| `tools/project_condition_corpus.py` | Project matched role-dropout condition views (`cb`, `cbp`, `cbm`, `cbmp`, `naturalistic`) |
 | `audio_render.py` | Synthesize MIDI stems and mix lossless FLAC audio |
 | `eda/validate_rendered_corpus.py` | Validate manifest-paired rendered corpora |
 | `voicing/` | Select and realize MIDI voicings |
 | `HumanizedMidiRenderer.java` | Convert JFugue text to humanized MIDI |
+| `paper/` | Modular LaTeX source, vector figures, tables, and compiled manuscript (`paper/main.pdf`) |
+| `build_arxiv/` & `scripts/package_arxiv.sh` | Flattened arXiv staging directory and automated submission bundler (`arxiv_submission.tar.gz`) |
 | `old_src/` | Historical implementation and reference material |
 
 The Python pipeline produces score text and can invoke the separate MIDI and
@@ -829,4 +868,37 @@ The project has these known limits:
   and be sampled together during generation without competing for the same
   7th slot.
 
-Future work includes richer room, EQ, dynamics, and audio QA profiles.
+Future work includes richer room, EQ, dynamics, and audio QA profiles, as well
+as tuning quota proportions for lagging degrees (natural 13ths, `1`) and
+integrating differentiable synthesis (DDSP).
+
+## Building the Paper & arXiv Bundle
+
+To compile the manuscript (`paper/main.pdf`) from the modular LaTeX sources:
+
+```bash
+cd paper
+pdflatex -interaction=nonstopmode main.tex
+bibtex main
+pdflatex -interaction=nonstopmode main.tex
+pdflatex -interaction=nonstopmode main.tex
+```
+
+To flatten `paper/main.tex` into `build_arxiv/` and regenerate `arxiv_submission.tar.gz`:
+
+```bash
+bash scripts/package_arxiv.sh
+```
+
+## Citation
+
+If you use the Probabilistic Composition Generator, the synthetic multitrack corpus, or our pretrained models in your research, please cite:
+
+```bibtex
+@article{ojha2026distribution,
+  author  = {Ojha, Sharabh},
+  title   = {Distribution-Shifted Synthetic Multitrack Pretraining for Large-Vocabulary Audio Chord Recognition},
+  journal = {arXiv preprint},
+  year    = {2026}
+}
+```
