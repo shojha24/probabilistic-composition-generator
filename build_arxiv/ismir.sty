@@ -354,14 +354,13 @@
       \fi
     \fi
   \endgroup
-  \csname #1mark\endcsname{#7}\addcontentsline
-  {toc}{#1}{\protect\numberline
   \if@ismirsection
-    {\csname the#1\endcsname.}
+    \edef\@secnum{\csname the#1\endcsname.}%
   \else
-    {\csname the#1\endcsname}
+    \edef\@secnum{\csname the#1\endcsname}%
   \fi
-  #7}
+  \csname #1mark\endcsname{#7}%
+  \addcontentsline{toc}{#1}{\protect\numberline{\@secnum}#7}
   \@tempskipa #5\relax
   \@xsect{\@tempskipa}
 }
